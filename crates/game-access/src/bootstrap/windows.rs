@@ -17,8 +17,9 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use win_platform::process::{IMAGE_PATH_UNITS, IdentityError, identity};
 use windows_sys::Win32::{
-    Foundation::{DuplicateHandle, ERROR_NO_MORE_FILES, FILETIME, GetLastError, HANDLE, INVALID_HANDLE_VALUE},
+    Foundation::{DuplicateHandle, ERROR_NO_MORE_FILES, GetLastError, HANDLE, INVALID_HANDLE_VALUE},
     System::{
         Diagnostics::{
             Debug::{ReadProcessMemory, WriteProcessMemory},
@@ -27,10 +28,9 @@ use windows_sys::Win32::{
         LibraryLoader::{GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_PIN, GetModuleFileNameW, GetModuleHandleExW, GetModuleHandleW, GetProcAddress},
         Memory::{MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAllocEx, VirtualFreeEx},
         Threading::{
-            CreateRemoteThread, GetCurrentProcess, GetCurrentProcessId, GetExitCodeThread, GetProcessMitigationPolicy, GetProcessTimes, IsWow64Process2, OpenProcess,
-            PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
-            ProcessControlFlowGuardPolicy, ProcessDEPPolicy, ProcessDynamicCodePolicy, ProcessSignaturePolicy, ProcessUserShadowStackPolicy, QueryFullProcessImageNameW,
-            WaitForSingleObject,
+            CreateRemoteThread, GetCurrentProcess, GetCurrentProcessId, GetExitCodeThread, GetProcessMitigationPolicy, IsWow64Process2, OpenProcess, PROCESS_CREATE_THREAD,
+            PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
+            ProcessControlFlowGuardPolicy, ProcessDEPPolicy, ProcessDynamicCodePolicy, ProcessSignaturePolicy, ProcessUserShadowStackPolicy, WaitForSingleObject,
         },
     },
 };
@@ -50,15 +50,12 @@ fn owned(handle: HANDLE) -> Result<OwnedHandle> {
     // SAFETY: successful Win32 creation transfers exactly one handle to this guard.
     Ok(unsafe { OwnedHandle::from_raw_handle(handle) })
 }
-fn filetime(value: FILETIME) -> u64 {
-    u64::from(value.dwLowDateTime) | (u64::from(value.dwHighDateTime) << 32)
-}
 fn wide(path: &Path) -> Result<Vec<u16>> {
-    let mut value = path.as_os_str().encode_wide().collect::<Vec<_>>();
-    if value.is_empty() || value.len() >= 32767 || value.contains(&0) {
+    let value = win_platform::wide(path);
+    let units = &value[..value.len() - 1];
+    if units.is_empty() || units.len() >= 32767 || units.contains(&0) {
         return invalid("remote path length/NUL");
     }
-    value.push(0);
     Ok(value)
 }
 fn canonical(path: &Path) -> Result<PathBuf> {
@@ -98,9 +95,7 @@ impl ModuleIdentity {
     pub fn from_lease(lease: Arc<file_ops::lease::ReadLease>) -> Result<Self> {
         lease.verify_path()?;
         let layout = binary_reader::pe::Layout::read(lease.len(), |at, output| lease.read_exact_at(at, output))?;
-        if !layout.dll || layout.image_size == 0 || layout.image_size > 512 * 1024 * 1024 {
-            return invalid("Windows x64 module image size/header");
-        }
+        super::check_image_size(&layout)?;
         Ok(Self {
             path: lease.path().to_owned(),
             sha256: lease.sha256().to_ascii_uppercase(),
@@ -128,29 +123,19 @@ impl ModuleIdentity {
 }
 
 fn process_identity(handle: &OwnedHandle, pid: u32) -> Result<ProcessIdentity> {
-    // SAFETY: query/synchronize handle and initialized bounded identity outputs.
-    unsafe {
-        if WaitForSingleObject(handle.as_raw_handle(), 0) != 0x102 {
-            return invalid("target exited");
-        }
-        let zero: FILETIME = std::mem::zeroed();
-        let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
-        let mut path = vec![0u16; 32768];
-        let mut len = path.len() as u32;
-        if GetProcessTimes(handle.as_raw_handle(), &mut created, &mut exited, &mut kernel, &mut user) == 0
-            || QueryFullProcessImageNameW(handle.as_raw_handle(), 0, path.as_mut_ptr(), &mut len) == 0
-        {
-            return Err(last());
-        }
-        if len == 0 || len as usize >= path.len() {
-            return invalid("target executable path");
-        }
-        Ok(ProcessIdentity {
-            pid,
-            created: filetime(created),
-            executable: OsString::from_wide(&path[..len as usize]).into(),
-        })
+    let identity = identity(handle).map_err(|error| match error {
+        IdentityError::Exited => BootstrapError::Invalid("target exited"),
+        IdentityError::Os(error) => error.into(),
+    })?;
+    let units = identity.executable.encode_wide().count();
+    if units == 0 || units >= IMAGE_PATH_UNITS {
+        return invalid("target executable path");
     }
+    Ok(ProcessIdentity {
+        pid,
+        created: identity.created,
+        executable: identity.executable.into(),
+    })
 }
 fn query_process(target: &ProcessIdentity, admit: Admission<'_>) -> Result<OwnedHandle> {
     admit()?;
@@ -877,36 +862,24 @@ impl DispatcherProof {
             return invalid("dispatcher prefix differs from admitted file");
         }
         let (table, size) = module.layout.exceptions.ok_or(BootstrapError::Invalid("exception directory absent"))?;
-        if size == 0 || size % 12 != 0 || size > 16 * 1024 * 1024 {
-            return invalid("runtime function table bounds");
-        }
         let table_bytes = module.bytes(table, size as usize, false)?;
         let mut found = None;
-        for (index, record) in table_bytes.as_chunks::<12>().0.iter().enumerate() {
-            let begin = super::dword(record, 0)?;
-            let end = super::dword(record, 4)?;
+        for (index, record) in binary_reader::pe::runtime_functions(&table_bytes)?.enumerate() {
+            let (begin, end) = (record.begin, record.end);
             if begin <= rva && rva < end {
                 if found.is_some() || begin != rva || end <= begin || end - begin > 4096 || end - begin < 16 {
                     return invalid("dispatcher function boundary");
                 }
-                let unwind = super::dword(record, 8)?;
-                let header = module.bytes(unwind, 4, false)?;
-                let flags = header[0] >> 3;
-                if header[0] & 7 != 1 || flags & !7 != 0 || flags & 4 != 0 && flags & 3 != 0 || header[2] > 64 {
-                    return invalid("dispatcher unwind version/flags/count");
-                }
-                let length = 4
-                    + ((usize::from(header[2]) + 1) & !1) * 2
-                    + if flags & 4 != 0 {
-                        12
-                    } else if flags & 3 != 0 {
-                        4
-                    } else {
-                        0
-                    };
+                let header = module.bytes(record.unwind, 4, false)?;
+                let length = binary_reader::pe::unwind_info_length(header.as_slice().try_into().expect("four bytes"))?;
                 let body = module.bytes(begin, (end - begin) as usize, true)?;
-                let unwind_bytes = module.bytes(unwind, length, false)?;
-                found = Some(vec![(begin, body), (table + (index as u32) * 12, record.to_vec()), (unwind, unwind_bytes)]);
+                let unwind_bytes = module.bytes(record.unwind, length, false)?;
+                let record_at = index * 12;
+                found = Some(vec![
+                    (begin, body),
+                    (table + record_at as u32, table_bytes[record_at..record_at + 12].to_vec()),
+                    (record.unwind, unwind_bytes),
+                ]);
             }
         }
         Ok(Self {

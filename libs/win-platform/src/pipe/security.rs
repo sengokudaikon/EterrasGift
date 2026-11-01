@@ -1,4 +1,4 @@
-//! Pipe access is limited to the game process's user and LocalSystem.
+//! Pipe access is limited to the current process's user and LocalSystem.
 use std::{
     ffi::c_void,
     io,
@@ -61,7 +61,7 @@ impl PipeSecurity {
     pub(super) fn current_user() -> io::Result<Self> {
         let sid_text = Self::current_user_sid()?;
         // Protected DACL: no inherited Everyone/anonymous/admin grants.
-        let descriptor = format!("D:P(A;;GA;;;SY)(A;;GA;;;{sid_text})").encode_utf16().chain(Some(0)).collect::<Vec<_>>();
+        let descriptor = crate::wide(format!("D:P(A;;GA;;;SY)(A;;GA;;;{sid_text})"));
         // SAFETY: NUL-terminated SDDL, with owned API output transferred on success.
         unsafe {
             let mut security = std::ptr::null_mut();

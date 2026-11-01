@@ -5,11 +5,10 @@ use std::io;
 /// Opens `target` through the Windows shell. The error is Windows' own reason.
 #[cfg(windows)]
 pub fn open(target: impl AsRef<std::ffi::OsStr>) -> io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-    let verb: Vec<u16> = "open\0".encode_utf16().collect();
-    let file: Vec<u16> = target.as_ref().encode_wide().chain(Some(0)).collect();
+    let verb = crate::wide("open");
+    let file = crate::wide(target);
     // SAFETY: the strings are NUL-terminated and outlive the call; the other arguments may be null.
     let result = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
     // Values above 32 mean success; anything else leaves its reason in the thread's last error.

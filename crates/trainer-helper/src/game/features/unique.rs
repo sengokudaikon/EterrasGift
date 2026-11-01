@@ -1,6 +1,6 @@
 //! Unique tooltip lines and private-copy draft previews, using the game's producers.
 use crate::game::metadata_text;
-use crate::game::{GameError, Images, Root, RuntimeAccess, target, unsupported};
+use crate::game::{GameError, Images, Root, RuntimeAccess, array_data, target, unsupported};
 use eg_trainer_wire::mapping::{ForgeDescriptionRequest, MAX_MODIFIERS, ModifierSnapshot, UniquePreviewRequest};
 use il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, ValueTypeContract, raw};
 use std::{collections::BTreeSet, ffi::CStr, ptr::NonNull};
@@ -60,7 +60,7 @@ impl RuntimeAccess {
                 _ => return Err(unsupported("unique replacement getter threw or returned no list")),
             };
             self.exact(&list, list_class)?;
-            self.list(attached, &list, element, MAX_MODIFIERS as u32)
+            Ok(self.list(attached, &list, element, MAX_MODIFIERS as u32)?)
         }
     }
     /// The game's unique tooltip for an item, line by line: each tooltip entry with what `GetUniqueModifierInfo` builds for
@@ -282,7 +282,7 @@ impl RuntimeAccess {
                     return Err(unsupported("detached unique preview aliases live storage"));
                 }
                 for change in preview.changes() {
-                    crate::game::write_bytes(target(&rolls)?.as_ptr().cast::<u8>().add(32 + usize::from(change.index)), &[change.value]);
+                    crate::game::write_bytes(array_data(target(&rolls)?.as_ptr()).add(usize::from(change.index)), &[change.value]);
                 }
                 self.unique_modifiers(attached, api, &graph.images, &copy, &definition, identity.rolls.len())?
             } else {

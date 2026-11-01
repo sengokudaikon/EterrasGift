@@ -7,7 +7,7 @@ use crate::game::{
     Class, Ptr, Root, RuntimeAccess,
     accessors::item::ForgeGraph,
     apply::{WriteError, stored, uncertain},
-    metadata_text, target,
+    array_data, metadata_text, target,
 };
 use eg_trainer_wire::{
     forge::ForgeSnapshot,
@@ -22,13 +22,13 @@ impl RuntimeAccess {
         // SAFETY: The owner is retained metadata; the selected status kind fixes the required primitive class and storage width.
         unsafe {
             let (name, primitive, code) = match kind {
-                StatusField::LevelRequirement => (c"<LvlReq>k__BackingField", c"Int32", 0x08),
-                StatusField::ForgingPotential => (c"forgingPotential", c"Byte", 0x05),
-                StatusField::LegendaryPotential => (c"legendaryPotential", c"Byte", 0x05),
-                StatusField::WeaversWill => (c"weaversWill", c"Byte", 0x05),
-                StatusField::WeaversTouch => (c"weaversTouch", c"Byte", 0x05),
-                StatusField::Corrupted => (c"corrupted", c"Boolean", 0x02),
-                StatusField::Ruined => (c"ruined", c"Boolean", 0x02),
+                StatusField::LevelRequirement => (c"<LvlReq>k__BackingField", c"Int32", raw::type_code::I4),
+                StatusField::ForgingPotential => (c"forgingPotential", c"Byte", raw::type_code::U1),
+                StatusField::LegendaryPotential => (c"legendaryPotential", c"Byte", raw::type_code::U1),
+                StatusField::WeaversWill => (c"weaversWill", c"Byte", raw::type_code::U1),
+                StatusField::WeaversTouch => (c"weaversTouch", c"Byte", raw::type_code::U1),
+                StatusField::Corrupted => (c"corrupted", c"Boolean", raw::type_code::BOOLEAN),
+                StatusField::Ruined => (c"ruined", c"Boolean", raw::type_code::BOOLEAN),
             };
             self.mutable_field(owner, name, primitive, code)
         }
@@ -66,9 +66,9 @@ impl RuntimeAccess {
                     || returns.is_null()
                     || (self.type_byref)(parameter)
                     || (self.type_byref)(returns)
-                    || (self.type_code)(parameter) != 0x07
+                    || (self.type_code)(parameter) != raw::type_code::U2
                     || (self.type_class)(parameter) != self.system_class(c"UInt16")?
-                    || (self.type_code)(returns) != 0x12
+                    || (self.type_code)(returns) != raw::type_code::CLASS
                     || (self.type_class)(returns) != entry
                 {
                     return Err(WriteError::Refused("Unique lookup signature differs from getUnique(UInt16) -> Entry".into()));
@@ -341,7 +341,7 @@ impl RuntimeAccess {
                     mutation.project(&mut projected);
                     if matches!(expected.rarity, 7..=9) {
                         if projected.rarity != expected.rarity {
-                            stores.push((self.mutable_field(item_data, c"rarity", c"Byte", 0x05)?, Scalar::U8(projected.rarity)));
+                            stores.push((self.mutable_field(item_data, c"rarity", c"Byte", raw::type_code::U1)?, Scalar::U8(projected.rarity)));
                         }
                         if projected.status.legendary_potential != expected.status.legendary_potential {
                             stores.push((
@@ -360,7 +360,7 @@ impl RuntimeAccess {
                         .child(attached, &graph.item, c"affixes")?
                         .ok_or_else(|| WriteError::Refused("Missing affix list".into()))?;
                     affix_roots = self.list(attached, &list, class, 32)?;
-                    let field = self.mutable_field(class, c"affixRoll", c"Byte", 0x05)?;
+                    let field = self.mutable_field(class, c"affixRoll", c"Byte", raw::type_code::U1)?;
                     for change in rolls.changes() {
                         let index = usize::from(change.slot);
                         let before = expected.affixes.get(index).ok_or_else(|| WriteError::Refused("Invalid affix slot".into()))?;
@@ -373,13 +373,12 @@ impl RuntimeAccess {
                 ForgeMutation::ModifierRolls { array, rolls, .. } => {
                     let api = invoke.ok_or_else(|| WriteError::Refused("Missing invocation API".into()))?;
                     let (storage, length) = self.modifier_rolls(attached, &graph, api, expected, array, rolls)?;
-                    let base = target(&storage)?.as_ptr().cast::<u8>();
+                    let base = array_data(target(&storage)?.as_ptr());
                     for change in rolls.changes() {
                         if usize::from(change.slot) >= length {
                             return Err(WriteError::Stale("Roll array changed".into()));
                         }
-                        // Element storage begins after the checked 32-byte array header.
-                        roll_stores.push((base.add(32 + usize::from(change.slot)), change.value));
+                        roll_stores.push((base.add(usize::from(change.slot)), change.value));
                     }
                     roll_array = Some(storage);
                 }
@@ -419,9 +418,9 @@ impl RuntimeAccess {
                         item_type,
                         sub_type,
                     )?;
-                    stores.push((self.mutable_field(item_data, c"subType", c"UInt16", 0x07)?, Scalar::U16(sub_type)));
+                    stores.push((self.mutable_field(item_data, c"subType", c"UInt16", raw::type_code::U2)?, Scalar::U16(sub_type)));
                     if changed_type {
-                        stores.push((self.mutable_field(item_data, c"itemType", c"Byte", 0x05)?, Scalar::U8(item_type)));
+                        stores.push((self.mutable_field(item_data, c"itemType", c"Byte", raw::type_code::U1)?, Scalar::U8(item_type)));
                     }
                 }
                 ForgeMutation::Identity {
@@ -463,9 +462,9 @@ impl RuntimeAccess {
                     {
                         return Err(WriteError::Refused("Identity is incompatible with the current item/definition".into()));
                     }
-                    stores.push((self.mutable_field(item_data, c"uniqueID", c"UInt16", 0x07)?, Scalar::U16(id)));
-                    stores.push((self.mutable_field(item_data, c"subType", c"UInt16", 0x07)?, Scalar::U16(u16::from(sub_type))));
-                    stores.push((self.mutable_field(item_data, c"rarity", c"Byte", 0x05)?, Scalar::U8(rarity)));
+                    stores.push((self.mutable_field(item_data, c"uniqueID", c"UInt16", raw::type_code::U2)?, Scalar::U16(id)));
+                    stores.push((self.mutable_field(item_data, c"subType", c"UInt16", raw::type_code::U2)?, Scalar::U16(u16::from(sub_type))));
+                    stores.push((self.mutable_field(item_data, c"rarity", c"Byte", raw::type_code::U1)?, Scalar::U8(rarity)));
                 }
             }
             let context = invoke.map(|api| InvocationContext::new(attached, api));
@@ -614,7 +613,7 @@ impl RuntimeAccess {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::test_fakes::{self, roots, token};
+    use crate::game::test_fakes::{self, corlib, roots, token};
     use il2cpp_runtime::ThreadContext;
     use std::{
         cell::Cell,
@@ -637,9 +636,6 @@ mod tests {
         static CURRENT_MANAGER: Cell<usize> = const { Cell::new(MANAGER) };
         static CURRENT_ITEM: Cell<usize> = const { Cell::new(ITEM) };
         static LIVE: Cell<usize> = const { Cell::new(1) };
-    }
-    unsafe extern "C-unwind" fn corlib() -> *const std::ffi::c_void {
-        token::<std::ffi::c_void>(3).cast_const()
     }
     unsafe extern "C-unwind" fn class_from_name(_: *const std::ffi::c_void, ns: *const c_char, name: *const c_char) -> Class {
         // SAFETY: adapter supplies static C metadata names.

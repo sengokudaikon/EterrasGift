@@ -11,11 +11,12 @@ use eg_trainer_wire::{
 };
 use il2cpp_runtime::{
     AttachedThread, ThreadContext,
+    module::{export, image_size},
     raw::{self, MethodInfo},
 };
 use native_hooks::{self, HookState, RetainedHook, callback::CallbackGate};
 use std::{
-    ffi::{CStr, c_void},
+    ffi::c_void,
     os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
     ptr::NonNull,
     sync::{
@@ -26,9 +27,7 @@ use std::{
 };
 use windows_sys::Win32::System::{
     Diagnostics::Debug::RtlLookupFunctionEntry,
-    LibraryLoader::{
-        FreeLibraryAndExitThread, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, GetModuleHandleExW, GetModuleHandleW, GetProcAddress,
-    },
+    LibraryLoader::{FreeLibraryAndExitThread, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, GetModuleHandleExW},
     Threading::{CreateThread, GetCurrentProcessId, GetCurrentThreadId, OpenThread, SYNCHRONIZATION_SYNCHRONIZE, WaitForSingleObject},
 };
 
@@ -63,13 +62,8 @@ fn state() -> &'static Shared {
     })
 }
 unsafe fn module() -> Result<NonNull<u8>, String> {
-    let name: Vec<u16> = "GameAssembly.dll\0".encode_utf16().collect();
     // SAFETY: read-only already-loaded module lookup; caller guarantees initialized runtime lifetime.
-    NonNull::new(unsafe { GetModuleHandleW(name.as_ptr()) }.cast()).ok_or_else(|| "GameAssembly is not loaded".into())
-}
-unsafe fn export(module: NonNull<u8>, name: &'static CStr) -> Option<NonNull<c_void>> {
-    // SAFETY: caller retains the exact module and selects only declared exports.
-    unsafe { GetProcAddress(module.as_ptr().cast(), name.as_ptr().cast()) }.and_then(|value| NonNull::new(value as *const () as *mut c_void))
+    unsafe { il2cpp_runtime::module::loaded("GameAssembly.dll") }.ok_or_else(|| "GameAssembly is not loaded".into())
 }
 // One resolver binds every table to the same retained GameAssembly. Keep the
 // tables private: operation closures receive this bundle, never re-resolve them.
@@ -109,21 +103,6 @@ impl Runtime {
         unsafe { ThreadContext::new(self.ownership) }
     }
 }
-unsafe fn image_size(module: NonNull<u8>) -> Result<usize, String> {
-    // SAFETY: module is a live loaded Windows PE image; the loader validated its mapped headers.
-    unsafe {
-        let base = module.as_ptr();
-        if std::slice::from_raw_parts(base, 2) != b"MZ" {
-            return Err("invalid module header".into());
-        }
-        let pe = base.add(base.add(0x3c).cast::<u32>().read_unaligned() as usize);
-        if std::slice::from_raw_parts(pe, 4) != b"PE\0\0" || pe.add(4).cast::<u16>().read_unaligned() != 0x8664 {
-            return Err("expected x64 module".into());
-        }
-        Ok(pe.add(24 + 56).cast::<u32>().read_unaligned() as usize)
-    }
-}
-
 // All failures here precede the operation body, including every possible store.
 fn prepare_operation<M: Copy, A>(load: impl FnOnce() -> Result<M, String>, resolve: impl FnOnce(M) -> Result<A, String>) -> Result<(M, A), Response> {
     let module = load().map_err(|error| server::failure(ResponseCode::NotReady, error))?;

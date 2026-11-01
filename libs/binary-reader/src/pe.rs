@@ -2,15 +2,17 @@
 use std::io;
 
 #[derive(Clone, Copy, Debug)]
-struct Section {
-    va: u32,
-    virtual_size: u32,
-    raw_at: u32,
-    raw_size: u32,
-    flags: u32,
+pub struct Section {
+    pub name: [u8; 8],
+    pub va: u32,
+    pub virtual_size: u32,
+    pub raw_at: u32,
+    pub raw_size: u32,
+    pub flags: u32,
 }
 #[derive(Debug)]
 pub struct Layout {
+    pub image_base: u64,
     pub image_size: u32,
     pub exports: (u32, u32),
     pub dll: bool,
@@ -71,6 +73,7 @@ impl<R: FnMut(u64, &mut [u8]) -> io::Result<()>> HeaderReader<R> {
         for index in 0..count {
             let bytes = self.span::<40>(at + u64::from(index) * 40)?;
             let section = Section {
+                name: bytes[..8].try_into().unwrap(),
                 virtual_size: dword(&bytes, 8),
                 va: dword(&bytes, 12),
                 raw_size: dword(&bytes, 16),
@@ -131,12 +134,70 @@ impl Layout {
         let exceptions = reader.data_directory(optional_at, optional_size, directory_count, 3, "PE exception directory size")?;
         let sections = reader.sections(sections_at, count, image_size)?;
         Ok(Self {
+            image_base: u64::from_le_bytes(optional[24..32].try_into().unwrap()),
             image_size,
             exports,
             dll: word(&header, 22) & 0x2000 != 0,
             exceptions,
             sections,
         })
+    }
+    pub fn sections(&self) -> &[Section] {
+        &self.sections
+    }
+    /// `length` file-backed bytes at `rva` in `image`, the whole file these headers came from.
+    pub fn span<'a>(&self, image: &'a [u8], rva: u32, length: usize, executable: bool) -> io::Result<&'a [u8]> {
+        let offset = usize::try_from(self.file_offset(u64::from(rva), length, executable)?).map_err(|_| invalid("PE file offset"))?;
+        let end = offset.checked_add(length).ok_or_else(|| invalid("PE integer overflow"))?;
+        image.get(offset..end).ok_or_else(|| invalid("PE file bounds"))
+    }
+    /// The RVA of the one export named `name` in `image`, the whole file these headers came from. Bounded, and refusing
+    /// an ambiguous or forwarded export.
+    pub fn export(&self, image: &[u8], name: &[u8]) -> io::Result<u32> {
+        let (at, size) = self.exports;
+        if at == 0 || size < 40 || at.checked_add(size).is_none_or(|end| end > self.image_size) {
+            return Err(invalid("PE export directory bounds"));
+        }
+        let span = |rva: u32, length: usize, executable: bool| self.span(image, rva, length, executable);
+        let directory = span(at, 40, false)?;
+        let (count, names) = (dword(directory, 20), dword(directory, 24));
+        if count == 0 || count > 4096 || names == 0 || names > 4096 {
+            return Err(invalid("PE export count"));
+        }
+        let functions = span(dword(directory, 28), count as usize * 4, false)?;
+        let name_rvas = span(dword(directory, 32), names as usize * 4, false)?;
+        let ordinals = span(dword(directory, 36), names as usize * 2, false)?;
+        let mut found = None;
+        for index in 0..names as usize {
+            let rva = dword(name_rvas, index * 4);
+            let mut matches = true;
+            let mut length = 0;
+            loop {
+                if length == 256 {
+                    return Err(invalid("PE export name bound"));
+                }
+                let byte = span(rva.checked_add(length as u32).ok_or_else(|| invalid("PE name overflow"))?, 1, false)?[0];
+                if byte == 0 {
+                    matches &= length == name.len();
+                    break;
+                }
+                matches &= name.get(length) == Some(&byte);
+                length += 1;
+            }
+            if matches {
+                let ordinal = usize::from(word(ordinals, index * 2));
+                if ordinal >= count as usize || found.is_some() {
+                    return Err(invalid("PE export ordinal/ambiguity"));
+                }
+                let function = dword(functions, ordinal * 4);
+                if (at..at + size).contains(&function) {
+                    return Err(invalid("forwarded export"));
+                }
+                span(function, 1, true)?;
+                found = Some(function);
+            }
+        }
+        found.ok_or_else(|| invalid("required export missing"))
     }
     pub fn file_offset(&self, rva: u64, length: usize, executable: bool) -> io::Result<u64> {
         let end = rva.checked_add(length as u64).ok_or_else(|| invalid("PE RVA overflow"))?;
@@ -151,4 +212,41 @@ impl Layout {
         }
         result.ok_or_else(|| invalid("PE RVA not file-backed"))
     }
+}
+
+/// One record of an x64 exception directory.
+#[derive(Clone, Copy, Debug)]
+pub struct RuntimeFunction {
+    pub begin: u32,
+    pub end: u32,
+    pub unwind: u32,
+}
+
+/// The records of a whole x64 exception directory. Its size is checked first.
+pub fn runtime_functions(table: &[u8]) -> io::Result<impl Iterator<Item = RuntimeFunction> + '_> {
+    if table.is_empty() || !table.len().is_multiple_of(12) || table.len() > 16 * 1024 * 1024 {
+        return Err(invalid("runtime function table bounds"));
+    }
+    Ok(table.as_chunks::<12>().0.iter().map(|record| RuntimeFunction {
+        begin: dword(record, 0),
+        end: dword(record, 4),
+        unwind: dword(record, 8),
+    }))
+}
+
+/// The length of an `UNWIND_INFO` from its first four bytes: its fixed part, codes, and handler or chained record. Refuses
+/// another version, unknown flags, a chain with a handler, and more than 64 codes.
+pub fn unwind_info_length(header: &[u8; 4]) -> io::Result<usize> {
+    let flags = header[0] >> 3;
+    if header[0] & 7 != 1 || flags & !7 != 0 || flags & 4 != 0 && flags & 3 != 0 || header[2] > 64 {
+        return Err(invalid("unwind version/flags/count"));
+    }
+    let trailer = if flags & 4 != 0 {
+        12
+    } else if flags & 3 != 0 {
+        4
+    } else {
+        0
+    };
+    Ok(4 + ((usize::from(header[2]) + 1) & !1) * 2 + trailer)
 }

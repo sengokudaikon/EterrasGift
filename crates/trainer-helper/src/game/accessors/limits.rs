@@ -97,7 +97,7 @@ impl RuntimeAccess {
 mod tests {
     use super::*;
     use crate::game::{Ptr, TestExportStub, Type};
-    use il2cpp_runtime::{ThreadContext, raw};
+    use il2cpp_runtime::{ThreadContext, raw, test_fakes::corlib};
     use std::{
         cell::Cell,
         ffi::{CString, c_char},
@@ -149,9 +149,6 @@ mod tests {
     }
     unsafe extern "C-unwind" fn assembly_image(_: Ptr) -> Ptr {
         token(IMAGE)
-    }
-    unsafe extern "C-unwind" fn corlib() -> *const std::ffi::c_void {
-        token::<std::ffi::c_void>(IMAGE).cast_const()
     }
     unsafe extern "C-unwind" fn class_from_name(_: *const std::ffi::c_void, namespace: *const c_char, name: *const c_char) -> Class {
         // SAFETY: the production adapter supplies valid null-terminated class names.

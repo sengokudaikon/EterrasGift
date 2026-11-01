@@ -136,8 +136,8 @@ unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> R
     unsafe {
         let images = access.images()?;
         let property_class = access.class(&images, c"", c"SP")?;
-        access.enum_storage(property_class, c"Byte", 0x05)?;
-        access.enum_storage(access.class(&images, c"", c"AT")?, c"Int32", 0x08)?;
+        access.enum_storage(property_class, c"Byte", raw::type_code::U1)?;
+        access.enum_storage(access.class(&images, c"", c"AT")?, c"Int32", raw::type_code::I4)?;
         let field = access.field(property_class, c"Movespeed")?;
         let ty = (access.field_type)(field);
         if ty.is_null()
@@ -157,13 +157,7 @@ unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> R
         let original = access.hook_method(&SPEC, module, size)?;
         let start = update.address.as_ptr() as usize;
         let module_end = (module.as_ptr() as usize).checked_add(size).ok_or_else(|| unsupported("movement module range"))?;
-        let mut end = start.saturating_add(SEARCH).min(module_end);
-        for next in access.methods(speed) {
-            let next = read_value::<*mut u8>(next?.cast()) as usize;
-            if next > start {
-                end = end.min(next);
-            }
-        }
+        let end = access.code_end(speed, start, SEARCH, module_end)?;
         let code = std::slice::from_raw_parts(update.address.as_ptr(), end - start);
         let layout = Layout {
             online: access.hook_online_storage(&images)?,

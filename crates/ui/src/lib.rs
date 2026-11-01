@@ -1,6 +1,7 @@
 //! The Slint UI: the `.slint` sources under `ui/`, compiled by `build.rs`, and the Rust that puts the app's state behind
 //! them: navigation, the pages (`pages`), Eterra's decorations, and the Windows settings the design reacts to.
 
+// Deny, not forbid: the code Slint generates allows unsafe for its vtables, and forbid refuses that.
 #![deny(unsafe_code)]
 
 slint::include_modules!();
@@ -9,7 +10,6 @@ pub mod decorations;
 mod models;
 pub mod pages;
 pub mod shell;
-#[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 pub mod system;
 
 /// The translations the build script bundled from `lang/`, as the Rust phrases read them.

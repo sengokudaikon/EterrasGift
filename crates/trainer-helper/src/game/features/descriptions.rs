@@ -45,7 +45,7 @@ impl RuntimeAccess {
                     || (api.method_get_flags)(method, std::ptr::null_mut()) & (raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT) != 0
                     || result.is_null()
                     || (self.type_byref)(result)
-                    || returns.is_none() && !matches!((self.type_code)(result), 0x0e | 0x12 | 0x15)
+                    || returns.is_none() && !matches!((self.type_code)(result), raw::type_code::STRING | raw::type_code::CLASS | raw::type_code::GENERICINST)
                     || returns.is_some_and(|expected| (self.type_class)(result) != expected)
                 {
                     return Err(unsupported("tooltip method signature"));
@@ -125,7 +125,7 @@ impl RuntimeAccess {
         // SAFETY: The rooted string has validated class and bounded length; its character buffer remains live for the owned copy.
         unsafe {
             let string = self.system_class(c"String")?;
-            self.owned_text(text, string, MAX_TEXT_BYTES)
+            Ok(self.owned_text(text, string, MAX_TEXT_BYTES)?)
         }
     }
 

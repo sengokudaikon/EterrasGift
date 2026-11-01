@@ -76,7 +76,7 @@ impl RuntimeAccess {
             }
             let owner = self.class(&graph.images, c"", c"ItemData")?;
             let flag_fields = [c"hasSealedRegularAffix", c"hasSealedPrimordialAffix", c"hasSealedAffixFromCorruption"]
-                .map(|name| self.mutable_field(owner, name, c"Boolean", 0x02))
+                .map(|name| self.mutable_field(owner, name, c"Boolean", raw::type_code::BOOLEAN))
                 .into_iter()
                 .collect::<Result<Vec<_>, _>>()?;
             let replacement = if let Some((id, tier, roll, seal)) = construction {
@@ -204,14 +204,14 @@ impl RuntimeAccess {
                     || (api.method_get_class)(method) != class
                     || returns.is_null()
                     || (self.type_byref)(returns)
-                    || (self.type_code)(returns) != 1
+                    || (self.type_code)(returns) != raw::type_code::VOID
                     || (api.method_get_flags)(method, &mut implementation_flags) & (raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT) != 0
                 {
                     return Err(WriteError::Refused("Affix-list method signature differs".into()));
                 }
                 if takes_element {
                     let parameter = (self.method_param)(method, 0);
-                    if parameter.is_null() || (self.type_byref)(parameter) || (self.type_code)(parameter) != 0x12 || (self.type_class)(parameter) != element {
+                    if parameter.is_null() || (self.type_byref)(parameter) || (self.type_code)(parameter) != raw::type_code::CLASS || (self.type_class)(parameter) != element {
                         return Err(WriteError::Refused("Affix-list Add parameter differs".into()));
                     }
                 }

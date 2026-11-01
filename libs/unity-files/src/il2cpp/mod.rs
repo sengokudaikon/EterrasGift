@@ -2,8 +2,6 @@
 //! types those fields have. Together they say what a class looks like without running it, for example to rebuild how a
 //! serializer laid out an object stored without a type tree.
 
-#![forbid(unsafe_code)]
-
 mod binary;
 mod metadata;
 

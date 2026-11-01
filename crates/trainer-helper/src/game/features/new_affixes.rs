@@ -3,7 +3,7 @@
 //! The marker in an entry's name says it is ours, whichever load of the helper added it. Added affixes roll nowhere: no
 //! base lists them and they weigh nothing.
 use crate::game::apply::uncertain;
-use crate::game::{Class, GameError, Images, Method, Root, RuntimeAccess, WriteError, metadata_text, target};
+use crate::game::{Class, GameError, Images, Method, Root, RuntimeAccess, WriteError, instance_offset, metadata_text, target};
 use eg_trainer_wire::new_affixes::{MARKER, NewAffix, StatLine, TIERS};
 use il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use std::{
@@ -16,12 +16,11 @@ use std::{
 const FAKE_UNIQUE_MOD: i32 = 7;
 /// `AffixList.ClassSpecificity.NonSpecific`.
 const NON_SPECIFIC: i32 = 1;
-const BOOLEAN: (&CStr, i32) = (c"Boolean", 0x02);
-const BYTE: (&CStr, i32) = (c"Byte", 0x05);
-const INT32: (&CStr, i32) = (c"Int32", 0x08);
-const SINGLE: (&CStr, i32) = (c"Single", 0x0c);
+const BOOLEAN: (&CStr, i32) = (c"Boolean", raw::type_code::BOOLEAN);
+const BYTE: (&CStr, i32) = (c"Byte", raw::type_code::U1);
+const INT32: (&CStr, i32) = (c"Int32", raw::type_code::I4);
+const SINGLE: (&CStr, i32) = (c"Single", raw::type_code::R4);
 /// An array's elements start here, as `array_count`'s checks of the runtime establish.
-const ARRAY_HEADER: usize = 32;
 const MAX_LISTED: u32 = 10_000;
 
 struct Classes {
@@ -110,7 +109,7 @@ impl RuntimeAccess {
             }
             for (index, entry) in entries.iter().enumerate() {
                 self.check_object(held.element, target(entry)?).map_err(GameError::from)?;
-                writes.set_element(target(&array)?, ARRAY_HEADER, index, target(entry)?);
+                writes.set_element(target(&array)?, il2cpp_runtime::metadata::ARRAY_HEADER, index, target(entry)?);
             }
             self.set_reference(&writes, attached, master, held.field, &array)?;
             Ok(())
@@ -335,7 +334,7 @@ impl RuntimeAccess {
             self.enum_storage(self.field_class(field, "affix")?, storage.0, storage.1)?;
             if (self.field_parent)(field) != owner
                 || (self.field_flags)(field) & (raw::FIELD_ATTRIBUTE_STATIC | raw::FIELD_ATTRIBUTE_INIT_ONLY | raw::FIELD_ATTRIBUTE_LITERAL) != 0
-                || !(16..=16384).contains(&(self.field_offset)(field))
+                || !instance_offset((self.field_offset)(field))
             {
                 return Err(refused(format!("{} is not a writable enum field", name.to_string_lossy())));
             }

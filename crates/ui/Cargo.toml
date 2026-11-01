@@ -7,6 +7,7 @@ publish.workspace = true
 [dependencies]
 task-runtime.workspace = true
 file-ops.workspace = true
+win-platform.workspace = true
 eg-core.workspace = true
 phrases.workspace = true
 eg-companion.workspace = true
@@ -20,7 +21,6 @@ slint = { workspace = true, features = ["raw-window-handle-06"] }
 sys-locale.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Accessibility", "Win32_Graphics_Dwm"] }
 # The window's HWND, for its dark title bar (system.rs).
 raw-window-handle.workspace = true
 

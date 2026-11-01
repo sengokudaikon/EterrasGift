@@ -1,11 +1,11 @@
-//! The fake thread the game's unit tests share: an attachment the engine already owns, and Box-backed GC handles that
+//! The fake thread unit tests of code on this crate share: an attachment the engine already owns, and Box-backed GC handles that
 //! record which objects they hold. Object tokens are identities only; nothing behind them is read.
 
-use super::Ptr;
-use il2cpp_runtime::{ThreadContext, raw};
+use crate::{ThreadContext, metadata::Ptr, raw};
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
+    ffi::c_void,
 };
 
 thread_local! {
@@ -16,36 +16,48 @@ thread_local! {
 }
 
 /// An identity token, never dereferenced.
-pub(crate) fn token<T>(address: usize) -> *mut T {
+pub fn token<T>(address: usize) -> *mut T {
     std::ptr::without_provenance_mut(address)
 }
 
+/// A corlib image, an identity only: the class fakes ignore which image they are asked.
+///
+/// # Safety
+/// None: unsafe only to have the export's type.
+pub unsafe extern "C-unwind" fn corlib() -> *const c_void {
+    token::<c_void>(0x7000).cast_const()
+}
+
 /// Live handles.
-pub(crate) fn roots() -> usize {
+pub fn roots() -> usize {
     ROOTS.with_borrow(|roots| roots.values().sum())
 }
 
 /// Distinct objects held by live handles.
-pub(crate) fn rooted_objects() -> usize {
+pub fn rooted_objects() -> usize {
     ROOTS.with_borrow(|roots| roots.len())
 }
 
 /// Handles freed since [`thread`].
-pub(crate) fn frees() -> usize {
+pub fn frees() -> usize {
     FREES.get()
 }
 
 /// Panics unless a live handle holds `object`.
-pub(crate) fn rooted(object: usize) {
+pub fn rooted(object: usize) {
     ROOTS.with_borrow(|roots| assert!(roots.contains_key(&object), "unrooted {object:x}"));
 }
 
 /// Rooting `object` fails from now on.
-pub(crate) fn fail_root(object: usize) {
+pub fn fail_root(object: usize) {
     FAIL_ROOT.set(object);
 }
 
-pub(crate) unsafe extern "C-unwind" fn domain() -> *mut raw::Domain {
+/// The domain the fake thread is attached to.
+///
+/// # Safety
+/// None: unsafe only to have the export's type.
+pub unsafe extern "C-unwind" fn domain() -> *mut raw::Domain {
     token(0x20)
 }
 unsafe extern "C-unwind" fn current() -> *mut raw::Thread {
@@ -84,7 +96,7 @@ unsafe extern "C-unwind" fn root_free(handle: Ptr) {
 }
 
 /// The thread table, for a second context on the same fakes.
-pub(crate) fn api() -> raw::Api {
+pub fn api() -> raw::Api {
     raw::Api {
         domain_get: domain,
         thread_current: current,
@@ -97,7 +109,7 @@ pub(crate) fn api() -> raw::Api {
 }
 
 /// A context on [`api`], once every handle of the last test is freed. Clears the free count and the failures.
-pub(crate) fn thread() -> ThreadContext {
+pub fn thread() -> ThreadContext {
     assert_eq!(roots(), 0, "a handle outlived its test");
     FREES.set(0);
     FAIL_ROOT.set(0);

@@ -32,7 +32,7 @@ enum Tier {
 
 fn tier(name: &str) -> Tier {
     match name {
-        "binary-reader" | "file-ops" | "flow" | "flow-slint" | "il2cpp-metadata" | "phrases" | "task-runtime" | "unity-files" | "win-process" => Tier::Library,
+        "binary-reader" | "file-ops" | "flow" | "flow-slint" | "phrases" | "task-runtime" | "unity-files" | "win-platform" => Tier::Library,
         "il2cpp-runtime" | "native-hooks" => Tier::InGame,
         "eg-core" => Tier::Shared,
         "eg-companion" => Tier::Companion,
@@ -331,6 +331,7 @@ fn the_desktop_links_no_il2cpp_code() {
         assert!(in_helper || unit["target"]["name"] != "eg_trainer_helper", "the desktop links the helper's code");
         // The helper has a reactor and rules of its own.
         assert!(!in_helper || unit["target"]["name"] != "task_runtime", "the helper links the desktop's runtime");
+        assert!(!in_helper || unit["target"]["name"] != "jiff", "win-platform's `time` feature reaches the helper");
         let features = unit["features"].as_array().unwrap();
         assert!(
             !in_helper || unit["target"]["name"] != "tokio" || !features.iter().any(|feature| feature == "process"),

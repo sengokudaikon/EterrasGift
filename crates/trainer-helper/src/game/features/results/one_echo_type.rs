@@ -45,9 +45,9 @@ unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> R
     unsafe {
         let images = access.images()?;
         for name in [c"IslandType", c"EchoChainType", c"ChainStatus"] {
-            access.enum_storage(access.class(&images, c"", name)?, c"Int32", 0x08)?;
+            access.enum_storage(access.class(&images, c"", name)?, c"Int32", raw::type_code::I4)?;
         }
-        access.enum_storage(access.class(&images, c"", c"WovenEchoType")?, c"Byte", 0x05)?;
+        access.enum_storage(access.class(&images, c"", c"WovenEchoType")?, c"Byte", raw::type_code::U1)?;
         Ok(vec![access.hook_method(&SPEC, module, size)?.postfix(effect(access.hook_online_storage(&images)?))])
     }
 }

@@ -75,3 +75,28 @@ fn streaming_reader_propagates_io_errors_without_retrying() {
     assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
     assert_eq!(error.to_string(), "retained file read failed");
 }
+
+#[test]
+fn unwind_info_lengths_count_codes_and_trailers_and_refuse_the_rest() {
+    use binary_reader::pe::unwind_info_length;
+    // Version 1 with no flags and three codes: four rounded to an even count, two bytes each.
+    assert_eq!(unwind_info_length(&[1, 0, 3, 0]).unwrap(), 4 + 8);
+    assert_eq!(unwind_info_length(&[1 | 1 << 3, 0, 2, 0]).unwrap(), 4 + 4 + 4, "a handler");
+    assert_eq!(unwind_info_length(&[1 | 4 << 3, 0, 0, 0]).unwrap(), 4 + 12, "a chained record");
+    for header in [[2, 0, 0, 0], [1 | 8 << 3, 0, 0, 0], [1 | 5 << 3, 0, 0, 0], [1, 0, 65, 0]] {
+        assert!(unwind_info_length(&header).is_err(), "{header:?}");
+    }
+}
+
+#[test]
+fn runtime_function_tables_must_be_whole_records() {
+    use binary_reader::pe::runtime_functions;
+    let mut table = [0; 12];
+    table[..4].copy_from_slice(&0x1000u32.to_le_bytes());
+    table[4..8].copy_from_slice(&0x1010u32.to_le_bytes());
+    table[8..12].copy_from_slice(&0x2000u32.to_le_bytes());
+    let record = runtime_functions(&table).unwrap().next().unwrap();
+    assert_eq!((record.begin, record.end, record.unwind), (0x1000, 0x1010, 0x2000));
+    assert!(runtime_functions(&[]).is_err());
+    assert!(runtime_functions(&table[..11]).is_err());
+}

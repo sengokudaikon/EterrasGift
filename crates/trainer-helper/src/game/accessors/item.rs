@@ -1,7 +1,7 @@
 //! The held item: the forge's crafting slot, reached from the player's item manager, copied into owned values.
 //! No game method is called.
 
-use crate::game::{GameError, Images, Ptr, Root, RuntimeAccess, copy_values, read_value, target, unsupported};
+use crate::game::{GameError, Images, Ptr, Root, RuntimeAccess, array_data, copy_values, read_value, target, unsupported};
 use eg_trainer_wire::forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity};
 use il2cpp_runtime::{AttachedThread, raw};
 use std::{ffi::CStr, ptr::NonNull};
@@ -39,7 +39,7 @@ impl RuntimeAccess {
             };
             self.exact(&array, array_class)?;
             let count = self.array_count(&array, byte, maximum)?;
-            let start = target(&array)?.as_ptr().cast::<u8>().add(32);
+            let start = array_data(target(&array)?.as_ptr());
             Ok(copy_values(start, count as usize))
         }
     }
@@ -69,7 +69,7 @@ impl RuntimeAccess {
             let mut values = Vec::with_capacity(count);
             for slot in 0..count {
                 let array = target(&array)?;
-                let pointer = read_value(array.as_ptr().cast::<u8>().add(32 + slot * std::mem::size_of::<Ptr>()).cast::<*mut raw::Object>());
+                let pointer = read_value(array_data(array.as_ptr()).add(slot * std::mem::size_of::<Ptr>()).cast::<*mut raw::Object>());
                 let pointer = NonNull::new(pointer).ok_or_else(|| unsupported("forge null affix"))?;
                 let affix = attached.root(pointer)?;
                 self.exact(&affix, affix_class)?;

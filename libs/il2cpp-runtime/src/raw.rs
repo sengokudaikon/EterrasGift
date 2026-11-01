@@ -25,6 +25,38 @@ pub const METHOD_ATTRIBUTE_VIRTUAL: u32 = 0x0040;
 pub const METHOD_ATTRIBUTE_ABSTRACT: u32 = 0x0400;
 pub const METHOD_ATTRIBUTE_PINVOKE_IMPL: u32 = 0x2000;
 
+/// What il2cpp_type_get_type returns, named as `IL2CPP_TYPE_*` in IL2CPP's Il2CppTypeEnum (the ECMA-335 element types).
+pub mod type_code {
+    pub const VOID: i32 = 0x01;
+    pub const BOOLEAN: i32 = 0x02;
+    pub const CHAR: i32 = 0x03;
+    pub const I1: i32 = 0x04;
+    pub const U1: i32 = 0x05;
+    pub const I2: i32 = 0x06;
+    pub const U2: i32 = 0x07;
+    pub const I4: i32 = 0x08;
+    pub const U4: i32 = 0x09;
+    pub const I8: i32 = 0x0a;
+    pub const U8: i32 = 0x0b;
+    pub const R4: i32 = 0x0c;
+    pub const R8: i32 = 0x0d;
+    pub const STRING: i32 = 0x0e;
+    pub const PTR: i32 = 0x0f;
+    pub const BYREF: i32 = 0x10;
+    pub const VALUETYPE: i32 = 0x11;
+    pub const CLASS: i32 = 0x12;
+    pub const VAR: i32 = 0x13;
+    pub const ARRAY: i32 = 0x14;
+    pub const GENERICINST: i32 = 0x15;
+    pub const TYPEDBYREF: i32 = 0x16;
+    pub const I: i32 = 0x18;
+    pub const U: i32 = 0x19;
+    pub const FNPTR: i32 = 0x1b;
+    pub const OBJECT: i32 = 0x1c;
+    pub const SZARRAY: i32 = 0x1d;
+    pub const MVAR: i32 = 0x1e;
+}
+
 pub type FieldSetValue = unsafe extern "C-unwind" fn(*mut Object, *mut FieldInfo, *mut c_void);
 pub type ElementBarrier = unsafe extern "C-unwind" fn(*mut Object, *mut *mut c_void, *mut c_void);
 

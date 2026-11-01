@@ -1339,8 +1339,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml_edit",
- "win-process",
- "windows-sys 0.61.2",
+ "win-platform",
 ]
 
 [[package]]
@@ -1368,6 +1367,7 @@ dependencies = [
  "file-ops",
  "tempfile",
  "tokio",
+ "win-platform",
  "windows-sys 0.61.2",
 ]
 
@@ -1376,7 +1376,6 @@ name = "eg-game-files"
 version = "0.1.0"
 dependencies = [
  "binary-reader",
- "il2cpp-metadata",
  "tempfile",
  "unity-files",
 ]
@@ -1397,7 +1396,7 @@ dependencies = [
  "task-runtime",
  "tempfile",
  "tokio",
- "win-process",
+ "win-platform",
 ]
 
 [[package]]
@@ -1411,6 +1410,7 @@ dependencies = [
  "il2cpp-runtime",
  "native-hooks",
  "tokio",
+ "win-platform",
  "windows-sys 0.61.2",
 ]
 
@@ -1444,7 +1444,7 @@ dependencies = [
  "task-runtime",
  "tempfile",
  "tokio",
- "windows-sys 0.61.2",
+ "win-platform",
 ]
 
 [[package]]
@@ -2691,15 +2691,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "il2cpp-metadata"
-version = "0.1.0"
-dependencies = [
- "binary-reader",
-]
-
-[[package]]
 name = "il2cpp-runtime"
 version = "0.1.0"
+dependencies = [
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "image"
@@ -5529,7 +5525,6 @@ name = "unity-files"
 version = "0.1.0"
 dependencies = [
  "binary-reader",
- "il2cpp-metadata",
  "lz4_flex",
 ]
 
@@ -6021,10 +6016,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
 
 [[package]]
-name = "win-process"
+name = "win-platform"
 version = "0.1.0"
 dependencies = [
  "jiff",
+ "tokio",
  "windows-sys 0.61.2",
 ]
 

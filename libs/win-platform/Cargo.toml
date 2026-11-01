@@ -1,0 +1,38 @@
+[package]
+name = "win-platform"
+description = "What programs ask of Windows, behind safe functions: processes and their identity, the shell, known folders, system settings, Steam's files, file versions and locked-down named pipes. Names no app or game."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+# Conversion of file times to `jiff`, for the desktop. Code that runs in the game leaves it off and does not link jiff.
+time = ["dep:jiff"]
+# Named pipe servers and their errors, on Tokio.
+pipe = ["dep:tokio", "windows-sys/Win32_Security", "windows-sys/Win32_Security_Authorization"]
+
+[dependencies]
+jiff = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Com",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_Registry",
+  "Win32_System_Threading",
+  "Win32_UI_Accessibility",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[dev-dependencies]
+tempfile.workspace = true
+# Its own tests cover every feature, with no flag to remember.
+win-platform = { path = ".", features = ["pipe", "time"] }
+
+[lints]
+workspace = true

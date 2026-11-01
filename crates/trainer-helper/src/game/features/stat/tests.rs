@@ -2,7 +2,7 @@
 use super::*;
 use crate::game::{
     Class, Ptr,
-    test_fakes::{self, rooted, rooted_objects, roots, token},
+    test_fakes::{self, corlib, rooted, rooted_objects, roots, token},
 };
 use eg_trainer_wire::fields::PlayerUnavailable;
 use il2cpp_runtime::{ThreadContext, raw};
@@ -147,9 +147,6 @@ unsafe extern "C-unwind" fn assemblies(_: *const raw::Domain, count: *mut usize)
 }
 unsafe extern "C-unwind" fn assembly_image(_: Ptr) -> Ptr {
     token(10)
-}
-unsafe extern "C-unwind" fn corlib() -> *const std::ffi::c_void {
-    token::<std::ffi::c_void>(11).cast_const()
 }
 unsafe extern "C-unwind" fn class_from_name(_: *const std::ffi::c_void, namespace: *const c_char, name: *const c_char) -> Class {
     // SAFETY: adapter supplies static, nul-terminated metadata names.

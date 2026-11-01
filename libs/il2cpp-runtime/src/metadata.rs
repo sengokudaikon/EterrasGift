@@ -16,6 +16,12 @@ use std::{
     ptr::NonNull,
 };
 
+mod collections;
+mod contract;
+mod read;
+
+pub use contract::MethodSpec;
+
 pub type Ptr = *mut c_void;
 pub type Class = *mut raw::Class;
 pub type Method = *const raw::MethodInfo;
@@ -122,6 +128,27 @@ pub unsafe fn write_bytes(destination: *mut u8, source: &[u8]) {
     }
     // SAFETY: caller validates the private byte span and excludes overlapping storage.
     unsafe { std::ptr::copy_nonoverlapping(source.as_ptr(), destination, source.len()) };
+}
+
+/// Bytes before a one-dimensional array's elements, in the x64 layout `check_allocated_adapters` proves.
+pub const ARRAY_HEADER: usize = 32;
+
+/// Where a one-dimensional array's elements start.
+///
+/// # Safety
+/// `array` is a live array whose runtime has passed `check_allocated_adapters`.
+#[inline]
+pub unsafe fn array_data(array: *mut raw::Object) -> *mut u8 {
+    // SAFETY: the caller supplies an array, whose allocation extends past its header.
+    unsafe { array.cast::<u8>().add(ARRAY_HEADER) }
+}
+
+/// The furthest offset accepted for a field's storage; a deliberate support bound.
+pub const MAX_FIELD_OFFSET: usize = 16384;
+
+/// Whether an instance field's offset lies inside the object: past its 16-byte header, up to [`MAX_FIELD_OFFSET`].
+pub fn instance_offset(offset: usize) -> bool {
+    (16..=MAX_FIELD_OFFSET).contains(&offset)
 }
 
 macro_rules! exports {
@@ -587,7 +614,10 @@ impl MetadataApi {
             let field = self.instance_field(object, name, actual)?;
             let ty = (self.field_type)(field);
             if (self.field_flags)(field) & (raw::FIELD_ATTRIBUTE_STATIC | raw::FIELD_ATTRIBUTE_INIT_ONLY | raw::FIELD_ATTRIBUTE_LITERAL) != 0
-                || !matches!((self.type_code)(ty), 0x0e | 0x12 | 0x14 | 0x15 | 0x1c | 0x1d)
+                || !matches!(
+                    (self.type_code)(ty),
+                    raw::type_code::STRING | raw::type_code::CLASS | raw::type_code::ARRAY | raw::type_code::GENERICINST | raw::type_code::OBJECT | raw::type_code::SZARRAY
+                )
             {
                 return Err(unsupported("reference store requires a mutable reference field"));
             }
@@ -727,7 +757,7 @@ impl MetadataApi {
     pub unsafe fn check_allocated_adapters(&self, attached: &AttachedThread<'_>) -> Result<(), MetadataError> {
         // SAFETY: Fresh arrays and strings stay rooted while public header APIs and bounded raw header slots are compared.
         unsafe {
-            if (self.object_header_size)() != 16 || (self.array_header_size)() != 32 || (self.array_length_offset)() != 24 || (self.array_bounds_offset)() != 16 {
+            if (self.object_header_size)() != 16 || (self.array_header_size)() != ARRAY_HEADER as u32 || (self.array_length_offset)() != 24 || (self.array_bounds_offset)() != 16 {
                 return Err(unsupported("object/array header API"));
             }
             let byte_class = self.system_class(c"Byte")?;

@@ -37,7 +37,7 @@ unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> R
         let actor = access.class(&images, c"", c"Actor")?;
         let mana = access.class(&images, c"", c"BaseMana")?;
         access
-            .mutable_field(mana, c"currentMana", c"Single", 0x0c)
+            .mutable_field(mana, c"currentMana", c"Single", raw::type_code::R4)
             .map_err(|error| unsupported(error.to_string()))?;
         let receiver = Receiver {
             online: access.hook_online_storage(&images)?,

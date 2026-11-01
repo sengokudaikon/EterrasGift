@@ -196,7 +196,9 @@ impl HelperArtifact {
         Ok(())
     }
     pub fn code_bytes(&self, rva: u32, length: usize) -> Result<&[u8]> {
-        Pe::parse(&self.bytes)?.at(rva, length, true)
+        let layout = binary_reader::pe::Layout::from_bytes(&self.bytes)?;
+        check_image_size(&layout)?;
+        Ok(layout.span(&self.bytes, rva, length, true)?)
     }
 }
 
@@ -208,93 +210,21 @@ pub struct HelperLayout {
 
 impl HelperLayout {
     pub fn parse(bytes: &[u8]) -> Result<Self> {
-        let pe = Pe::parse(bytes)?;
-        let bootstrap_rva = pe.export(b"eg_helper_bootstrap")?;
-        pe.at(bootstrap_rva, 16, true)?;
+        let layout = binary_reader::pe::Layout::from_bytes(bytes)?;
+        check_image_size(&layout)?;
+        let bootstrap_rva = layout.export(bytes, b"eg_helper_bootstrap")?;
+        layout.file_offset(u64::from(bootstrap_rva), 16, true)?;
         Ok(Self {
             bootstrap_rva,
-            image_size: pe.image_size,
+            image_size: layout.image_size,
         })
     }
 }
 
-struct Pe<'a> {
-    bytes: &'a [u8],
-    image_size: u32,
-    layout: binary_reader::pe::Layout,
-    exports: (u32, u32),
-}
-fn data(bytes: &[u8], at: usize, len: usize) -> Result<&[u8]> {
-    bytes
-        .get(at..at.checked_add(len).ok_or(BootstrapError::Invalid("PE integer overflow"))?)
-        .ok_or(BootstrapError::Invalid("PE file bounds"))
-}
-fn word(bytes: &[u8], at: usize) -> Result<u16> {
-    Ok(u16::from_le_bytes(data(bytes, at, 2)?.try_into().unwrap()))
-}
-fn dword(bytes: &[u8], at: usize) -> Result<u32> {
-    Ok(u32::from_le_bytes(data(bytes, at, 4)?.try_into().unwrap()))
-}
-impl<'a> Pe<'a> {
-    fn parse(bytes: &'a [u8]) -> Result<Self> {
-        let layout = binary_reader::pe::Layout::from_bytes(bytes)?;
-        if !layout.dll || layout.image_size == 0 || layout.image_size > 512 * 1024 * 1024 {
-            return invalid("Windows x64 DLL image size/header");
-        }
-        let exports = layout.exports;
-        if exports.0 == 0 || exports.1 < 40 || exports.0.checked_add(exports.1).is_none_or(|end| end > layout.image_size) {
-            return invalid("PE export directory bounds");
-        }
-        let pe = Self {
-            bytes,
-            image_size: layout.image_size,
-            layout,
-            exports,
-        };
-        pe.at(exports.0, 40, false)?;
-        Ok(pe)
+/// A DLL image of a size this helper's loader would map.
+fn check_image_size(layout: &binary_reader::pe::Layout) -> Result<()> {
+    if !layout.dll || layout.image_size == 0 || layout.image_size > 512 * 1024 * 1024 {
+        return invalid("Windows x64 DLL image size/header");
     }
-    fn at(&self, rva: u32, len: usize, executable: bool) -> Result<&'a [u8]> {
-        let offset = self.layout.file_offset(u64::from(rva), len, executable)?;
-        let offset = usize::try_from(offset).map_err(|_| BootstrapError::Invalid("PE file offset"))?;
-        data(self.bytes, offset, len)
-    }
-    fn name(&self, rva: u32) -> Result<Vec<u8>> {
-        let mut out = Vec::new();
-        for i in 0..256 {
-            let byte = self.at(rva.checked_add(i).ok_or(BootstrapError::Invalid("PE name overflow"))?, 1, false)?[0];
-            if byte == 0 {
-                return Ok(out);
-            }
-            out.push(byte);
-        }
-        invalid("PE export name bound")
-    }
-    fn export(&self, name: &[u8]) -> Result<u32> {
-        let dir = self.at(self.exports.0, 40, false)?;
-        let count = dword(dir, 20)?;
-        let names = dword(dir, 24)?;
-        if count == 0 || count > 4096 || names == 0 || names > 4096 {
-            return invalid("PE export count");
-        }
-        let functions = self.at(dword(dir, 28)?, count as usize * 4, false)?;
-        let name_rvas = self.at(dword(dir, 32)?, names as usize * 4, false)?;
-        let ordinals = self.at(dword(dir, 36)?, names as usize * 2, false)?;
-        let mut found = None;
-        for index in 0..names as usize {
-            if self.name(dword(name_rvas, index * 4)?)? == name {
-                let ordinal = usize::from(word(ordinals, index * 2)?);
-                if ordinal >= count as usize || found.is_some() {
-                    return invalid("PE export ordinal/ambiguity");
-                }
-                let rva = dword(functions, ordinal * 4)?;
-                if (self.exports.0..self.exports.0 + self.exports.1).contains(&rva) {
-                    return invalid("forwarded helper export");
-                }
-                self.at(rva, 1, true)?;
-                found = Some(rva);
-            }
-        }
-        found.ok_or(BootstrapError::Invalid("required helper export missing"))
-    }
+    Ok(())
 }

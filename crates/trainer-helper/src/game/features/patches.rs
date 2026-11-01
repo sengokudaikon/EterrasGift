@@ -74,15 +74,7 @@ impl RuntimeAccess {
                 if start < module.as_ptr() as usize || start >= module_end || !(1..=0x10000).contains(&spec.search) {
                     return Err(unsupported("patch method range"));
                 }
-                let mut end = start.saturating_add(spec.search).min(module_end);
-                // A managed method may span several Windows unwind records (its EH funclets). Keep the original
-                // recipe's bounded window, additionally clipping it at the next declared method and the module end.
-                for next in self.methods(owner) {
-                    let next = read_value::<*mut u8>(next?.cast()) as usize;
-                    if next > start {
-                        end = end.min(next);
-                    }
-                }
+                let end = self.code_end(owner, start, spec.search, module_end)?;
                 if end - start < 16 {
                     return Err(unsupported("patch method extent"));
                 }

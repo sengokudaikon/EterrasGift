@@ -68,7 +68,7 @@ impl RuntimeAccess {
             }
             let getter = getter.ok_or_else(|| unsupported("client app state getter missing"))?;
             let state_class = self.class(&images, c"ClientAppState", c"ClientAppStateType")?;
-            self.enum_storage(state_class, c"Int32", 0x08)?;
+            self.enum_storage(state_class, c"Int32", raw::type_code::I4)?;
             if (self.type_class)((self.method_return)(getter)) != state_class {
                 return Err(unsupported("client app state getter return type"));
             }

@@ -5,7 +5,7 @@
 //! together, so references between them resolve). `strings` reads Unity Localization's string tables.
 //!
 //! Classes stored without type trees (`resources.assets`) are read by `player` with layouts rebuilt from the IL2CPP build
-//! (`il2cpp-metadata`, `layout`): the metadata names the fields, the game assembly types them, and Unity's serialization
+//! (`il2cpp`, `layout`): the metadata names the fields, the game assembly types them, and Unity's serialization
 //! rules lay them out. Every object must decode exactly.
 
 #![forbid(unsafe_code)]
@@ -13,6 +13,7 @@
 pub mod archive;
 pub mod bundle;
 mod common_strings;
+pub mod il2cpp;
 pub mod layout;
 pub mod player;
 pub mod serialized;

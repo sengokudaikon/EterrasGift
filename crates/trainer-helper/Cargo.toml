@@ -15,6 +15,7 @@ fixture = []
 eg-trainer-wire = { path = "../trainer-wire" }
 il2cpp-runtime.workspace = true
 native-hooks.workspace = true
+win-platform = { workspace = true, features = ["pipe"] }
 detour = "=0.10.0"
 iced-x86 = { version = "=1.21.0", default-features = false, features = ["std", "decoder", "instr_info"] }
 tokio = { workspace = true, features = ["macros"] }

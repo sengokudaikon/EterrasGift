@@ -71,8 +71,8 @@ impl GameProcesses {
 impl ProcessLocator for GameProcesses {
     async fn find(&mut self) -> Result<Vec<ProcessIdentity>, BackendError> {
         let mut named = Vec::new();
-        win_process::each(|pid, executable| {
-            if win_process::is_named(executable, &self.executable_name) {
+        win_platform::process::each(|pid, executable| {
+            if win_platform::process::is_named(executable, &self.executable_name) {
                 named.push(pid);
             }
         })
@@ -117,7 +117,7 @@ impl<F: LogFactory + Clone> Connector for DesktopConnector<F> {
         }
         // Repeat the gate before opening even local helper inputs. SessionConnector
         // repeats it around preparation and transport as usual.
-        let started = win_process::from_filetime(target.created).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
+        let started = win_platform::time::from_filetime(target.created).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
         let decision = gate::evaluate(&self.logs.create(&target)?.read(started), started, now);
         if decision.verdict != GateVerdict::Allow {
             return Err(BackendError::waiting(ErrorKind::Gate, "Load an offline character to connect."));

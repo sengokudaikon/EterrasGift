@@ -1,6 +1,5 @@
 //! Finding the game: the executable chosen in Settings, else the Steam library that holds it.
 
-use crate::game::key_values::KeyValues;
 use regex::bytes::Regex;
 use std::fs;
 use std::io::Read;
@@ -87,96 +86,14 @@ pub fn find(configured: Option<&Path>, steam_directory: Option<&Path>) -> Option
     }
     match steam_directory {
         Some(steam) => from_steam(steam),
-        None => from_steam(&find_steam()?),
+        None => from_steam(&file_ops::paths::normalized(&win_platform::steam::folder()?)),
     }
 }
 
 /// Finds the library that lists the game in libraryfolders.vdf, then its folder in the app manifest.
 pub fn from_steam(steam_directory: &Path) -> Option<GameInstall> {
-    let app = STEAM_APP_ID.to_string();
-    let mut libraries: Vec<PathBuf> = Vec::new();
-    if let Some(folders) = read_key_values(&steam_directory.join("steamapps").join("libraryfolders.vdf"))
-        .as_ref()
-        .and_then(|root| root.get("libraryfolders"))
-    {
-        // Libraries that list the game first; the rest still get a look, since the list can lag behind a move.
-        for (_, folder) in &folders.children {
-            if let Some(path) = folder.get("path").and_then(|path| path.value.as_deref()) {
-                if folder.get("apps").and_then(|apps| apps.get(&app)).is_some() {
-                    libraries.insert(0, PathBuf::from(path));
-                } else {
-                    libraries.push(PathBuf::from(path));
-                }
-            }
-        }
-    }
-    libraries.push(steam_directory.to_path_buf());
-    libraries.into_iter().find_map(|library| {
-        let steamapps = library.join("steamapps");
-        let manifest = read_key_values(&steamapps.join(format!("appmanifest_{app}.acf")))?;
-        let folder = manifest.get("AppState")?.get("installdir")?.value.clone().filter(|folder| !folder.is_empty())?;
-        let executable = file_ops::paths::normalized(&steamapps.join("common").join(folder).join(EXECUTABLE_NAME));
-        executable.is_file().then(|| GameInstall::new(executable))
-    })
-}
-
-fn read_key_values(path: &Path) -> Option<KeyValues> {
-    KeyValues::parse(&fs::read_to_string(path).ok()?)
-}
-
-/// Steam's folder: as the registry has it, else its default place when that exists.
-pub fn find_steam() -> Option<PathBuf> {
-    if let Some(path) = steam_path_from_registry().filter(|path| !path.is_empty()) {
-        return Some(file_ops::paths::normalized(Path::new(&path)));
-    }
-    let fallback = PathBuf::from(std::env::var_os("ProgramFiles(x86)")?).join("Steam");
-    fallback.is_dir().then_some(fallback)
-}
-
-#[cfg(windows)]
-fn steam_path_from_registry() -> Option<String> {
-    use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_SZ, RegGetValueW};
-    let key: Vec<u16> = "Software\\Valve\\Steam\0".encode_utf16().collect();
-    let name: Vec<u16> = "SteamPath\0".encode_utf16().collect();
-    let mut size = 0u32;
-    // SAFETY: the key and value names are NUL-terminated; the first call only asks for the size.
-    if unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            key.as_ptr(),
-            name.as_ptr(),
-            RRF_RT_REG_SZ,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            &mut size,
-        )
-    } != 0
-    {
-        return None;
-    }
-    let mut buffer = vec![0u16; (size as usize).div_ceil(2)];
-    // SAFETY: the buffer holds `size` bytes, as the registry asked for.
-    if unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            key.as_ptr(),
-            name.as_ptr(),
-            RRF_RT_REG_SZ,
-            std::ptr::null_mut(),
-            buffer.as_mut_ptr().cast(),
-            &mut size,
-        )
-    } != 0
-    {
-        return None;
-    }
-    let length = buffer.iter().position(|&unit| unit == 0).unwrap_or(buffer.len());
-    Some(String::from_utf16_lossy(&buffer[..length]))
-}
-
-#[cfg(not(windows))]
-fn steam_path_from_registry() -> Option<String> {
-    None
+    let folder = win_platform::steam::install_folder(steam_directory, STEAM_APP_ID, EXECUTABLE_NAME)?;
+    Some(GameInstall::new(file_ops::paths::normalized(&folder.join(EXECUTABLE_NAME))))
 }
 
 #[cfg(test)]

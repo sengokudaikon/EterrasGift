@@ -3,11 +3,11 @@
 //! nothing is loaded or run. The sections are large, so they are read in place: the registration is searched for a
 //! chunk at a time, and records are read through a small cache of pages.
 
-use binary_reader::{Endian, Error, Reader, Result, read_at};
+use binary_reader::pe::Layout;
+use binary_reader::{Error, Result, read_at};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -18,6 +18,8 @@ const KEPT_PAGES: usize = 2048;
 const SCAN_BYTES: usize = 1 << 20;
 
 const INITIALISED_DATA: u32 = 0x40;
+/// Unwind and relocation tables are data too, but nothing the registration points at, so the search skips them.
+const TABLES: [&[u8; 8]; 2] = [b".pdata\0\0", b".reloc\0\0"];
 const CODE: u32 = 0x20;
 /// The registration's counts are sanity-bounded as Cpp2IL bounds them.
 const MAX_COUNT: u64 = 0xC_0000;
@@ -81,60 +83,25 @@ pub mod kind {
 impl Binary {
     /// Reads the data sections and finds the registration whose counts match the metadata's `type_definitions`.
     pub fn open(path: &Path, type_definitions: usize) -> Result<Binary> {
-        let mut file = File::open(path).map_err(|e| Error::io(path, e))?;
-        let mut head = vec![0; 4096];
-        file.read_exact(&mut head).map_err(|e| Error::io(path, e))?;
-        let mut r = Reader::new(&head, Endian::Little);
-        if r.take(2)? != b"MZ" {
-            return Err(Error::malformed("not a PE file"));
-        }
-        r.seek(0x3C)?;
-        let pe = r.u32()? as usize;
-        r.seek(pe)?;
-        if r.take(4)? != b"PE\0\0" {
-            return Err(Error::malformed("no PE signature"));
-        }
-        let machine = r.u16()?;
-        if machine != 0x8664 {
-            return Err(Error::unsupported(format!("PE machine {machine:#x}, not x64")));
-        }
-        let section_count = r.u16()?;
-        r.take(12)?;
-        let optional_size = r.u16()? as usize;
-        r.u16()?;
-        let optional = r.position();
-        if r.u16()? != 0x20B {
-            return Err(Error::unsupported("not a PE32+ image"));
-        }
-        r.seek(optional + 24)?;
-        let image_base = r.u64()?;
-        r.seek(optional + optional_size)?;
-        let mut headers = Vec::new();
-        for _ in 0..section_count {
-            // Unwind and relocation tables are data too, but nothing the registration points at, so the search skips them.
-            let tables = matches!(r.take(8)?, [b'.', b'p', b'd', b'a', b't', b'a', 0, 0] | [b'.', b'r', b'e', b'l', b'o', b'c', 0, 0]);
-            let (virtual_size, virtual_address, raw_size, raw_pointer) = (r.u32()?, r.u32()?, r.u32()?, r.u32()?);
-            r.take(12)?;
-            let characteristics = r.u32()?;
-            headers.push((virtual_size, virtual_address, raw_size, raw_pointer, characteristics, tables));
-        }
+        let file = File::open(path).map_err(|e| Error::io(path, e))?;
         let length = file.metadata().map_err(|e| Error::io(path, e))?.len();
+        let layout = Layout::read(length, |at, out| read_at(&file, at, out)).map_err(|e| match e.kind() {
+            std::io::ErrorKind::InvalidData => Error::malformed(e.to_string()),
+            _ => Error::io(path, e),
+        })?;
         let mut sections = Vec::new();
-        for (virtual_size, virtual_address, raw_size, raw_pointer, characteristics, tables) in headers {
-            if characteristics & INITIALISED_DATA == 0 || characteristics & CODE != 0 || tables {
+        for section in layout.sections() {
+            if section.flags & INITIALISED_DATA == 0 || section.flags & CODE != 0 || TABLES.contains(&&section.name) {
                 continue;
             }
-            if raw_size > MAX_SECTION_BYTES || virtual_size > MAX_SECTION_BYTES {
+            if section.raw_size > MAX_SECTION_BYTES || section.virtual_size > MAX_SECTION_BYTES {
                 return Err(Error::malformed("section size out of range"));
             }
-            if u64::from(raw_pointer) + u64::from(raw_size) > length {
-                return Err(Error::malformed("section runs past the end of the file"));
-            }
             sections.push(Section {
-                virtual_address: image_base + u64::from(virtual_address),
-                size: virtual_size.max(raw_size).into(),
-                raw_pointer: raw_pointer.into(),
-                raw_size: raw_size.into(),
+                virtual_address: layout.image_base + u64::from(section.va),
+                size: section.virtual_size.max(section.raw_size).into(),
+                raw_pointer: section.raw_at.into(),
+                raw_size: section.raw_size.into(),
             });
         }
         let mut binary = Binary {

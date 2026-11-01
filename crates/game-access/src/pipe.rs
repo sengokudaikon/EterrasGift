@@ -8,6 +8,7 @@ use tokio::{
     net::windows::named_pipe::ClientOptions,
     time::{Instant, sleep, timeout},
 };
+use win_platform::pipe::{exists, is_absent_or_busy};
 use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
 
 pub struct PipeClient {
@@ -51,9 +52,9 @@ impl Transport for PipeClient {
         let mut pipe = loop {
             match ClientOptions::new().open(&name) {
                 Ok(pipe) => break pipe,
-                Err(error) if matches!(error.raw_os_error(), Some(2 | 231)) => {
+                Err(error) if is_absent_or_busy(&error) => {
                     if Instant::now() >= deadline {
-                        return Err(before_send(if pipe_exists(&name).await { TransportFailure::Busy } else { TransportFailure::Missing }));
+                        return Err(before_send(if exists(&name).await { TransportFailure::Busy } else { TransportFailure::Missing }));
                     }
                     sleep(Duration::from_millis(10).min(deadline.saturating_duration_since(Instant::now()))).await;
                 }
@@ -88,27 +89,4 @@ impl Transport for PipeClient {
         }
         Ok(response)
     }
-}
-
-// The helper retains one server instance across exchanges. A busy instance is
-// still alive; listing failures also count as present rather than claiming it died.
-// These probes occur before any request byte is sent.
-async fn pipe_exists(name: &str) -> bool {
-    let wanted = std::path::Path::new(name).file_name().unwrap_or_default();
-    for _ in 0..3 {
-        match std::fs::read_dir(r"\\.\pipe\") {
-            Ok(entries) => {
-                for entry in entries {
-                    match entry {
-                        Ok(entry) if entry.file_name().to_string_lossy().eq_ignore_ascii_case(&wanted.to_string_lossy()) => return true,
-                        Err(_) => return true,
-                        _ => {}
-                    }
-                }
-            }
-            Err(_) => return true,
-        }
-        sleep(Duration::from_millis(100)).await;
-    }
-    false
 }

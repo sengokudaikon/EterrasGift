@@ -72,13 +72,7 @@ unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> R
         let roll = access.hook_method_on(access.class(&images, c"LE.Core", c"RngElement")?, &ROLL, module, size)?;
         let start = spawn.address.as_ptr() as usize;
         let module_end = (module.as_ptr() as usize).checked_add(size).ok_or_else(|| unsupported("champion module range"))?;
-        let mut end = start.saturating_add(0x280).min(module_end);
-        for next in access.methods(owner) {
-            let next = read_value::<*mut u8>(next?.cast()) as usize;
-            if next > start {
-                end = end.min(next);
-            }
-        }
+        let end = access.code_end(owner, start, 0x280, module_end)?;
         let code = std::slice::from_raw_parts(spawn.address.as_ptr(), end - start);
         let caller = caller(code, start as u64, roll.address.as_ptr() as u64)?;
         Ok(vec![roll.leaf(effect(access.hook_online_storage(&images)?, caller), None, None)])

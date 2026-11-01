@@ -1,13 +1,13 @@
 [package]
 name = "eg-companion"
-description = "The companion tier: finds, watches and starts Last Epoch from its files and Steam's. It never opens or reads the game process."
+description = "The companion tier: finds, watches and starts Last Epoch from its files and Steam's. It asks the game's process only when it started, and never reads it."
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
 [dependencies]
 file-ops.workspace = true
-win-process.workspace = true
+win-platform = { workspace = true, features = ["time"] }
 eg-core.workspace = true
 flow.workspace = true
 phrases.workspace = true
@@ -19,17 +19,6 @@ sha2.workspace = true
 tokio = { workspace = true, features = ["macros"] }
 dotscope = "=0.9.1"
 toml_edit = "=0.25.17"
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = [
-  "Win32_Foundation",
-  "Win32_System_Com",
-  "Win32_System_Diagnostics_ToolHelp",
-  "Win32_System_Registry",
-  "Win32_System_Threading",
-  "Win32_UI_Shell",
-  "Win32_UI_WindowsAndMessaging",
-] }
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -126,14 +126,14 @@ impl RuntimeAccess {
         // SAFETY: The operation class comes from retained metadata; the exact closed generic result type is checked before traversal.
         unsafe {
             self.locale_named_class(class, c"UnityEngine.ResourceManagement.AsyncOperations", c"AsyncOperationStatus", true)?;
-            self.enum_storage(class, c"Int32", 0x08)?;
+            self.enum_storage(class, c"Int32", raw::type_code::I4)?;
             Ok(())
         }
     }
 
     unsafe fn locale_text(&self, root: Option<&Root<'_, '_>>, string_class: Class) -> Result<String, GameError> {
         // SAFETY: The string object remains rooted through a bounded owned UTF-16 copy after exact class validation.
-        unsafe { self.owned_text(root, string_class, 4096) }
+        Ok(unsafe { self.owned_text(root, string_class, 4096) }?)
     }
 
     /// Observe the language of an already completed selected-locale operation and Application.version.
@@ -175,7 +175,7 @@ impl RuntimeAccess {
             let handle_field = self.field(settings_class, c"m_SelectedLocaleAsync")?;
             let handle_class = self.field_class(handle_field, "locale")?;
             self.locale_named_class(handle_class, c"UnityEngine.ResourceManagement.AsyncOperations", c"AsyncOperationHandle`1", true)?;
-            if (self.type_code)((self.class_type)(handle_class)) != 0x15 {
+            if (self.type_code)((self.class_type)(handle_class)) != raw::type_code::GENERICINST {
                 return Err(unsupported("locale closed operation handle"));
             }
             let mut alignment = 0;
@@ -186,7 +186,7 @@ impl RuntimeAccess {
             let operation_field = self.field(handle_class, c"m_InternalOp")?;
             let operation_class = self.field_class(operation_field, "locale")?;
             self.locale_named_class(operation_class, c"UnityEngine.ResourceManagement.AsyncOperations", c"AsyncOperationBase`1", false)?;
-            if (self.type_code)((self.class_type)(operation_class)) != 0x15 {
+            if (self.type_code)((self.class_type)(operation_class)) != raw::type_code::GENERICINST {
                 return Err(unsupported("locale closed operation base"));
             }
             // This field's exact Locale identity proves the closed generic graph's result type.

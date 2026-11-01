@@ -1,6 +1,6 @@
 //! Detached affix, unique and implicit roll sampling through the game's own tooltip producers and formatters.
 use crate::game::metadata_text;
-use crate::game::{Class, GameError, Images, Method, Root, RuntimeAccess, accessors::item::ForgeGraph, target, unsupported};
+use crate::game::{Class, GameError, Images, Method, Root, RuntimeAccess, accessors::item::ForgeGraph, array_data, target, unsupported};
 use eg_trainer_wire::{
     forge::ForgeSnapshot,
     mapping::{AffixMappingQuery, MAX_CONTEXT_BYTES, MappingAddress, MappingStart, MappingTarget, ModifierMappingQuery, RawMappingPage, RawValueSample},
@@ -104,7 +104,7 @@ impl RuntimeAccess {
         // SAFETY: The caller supplies the main-thread copy span; array allocation uses the exact retained Byte class and is immediately rooted.
         unsafe {
             let count = self.array_count(array, self.system_class(c"Byte")?, maximum)?;
-            let start = target(array)?.as_ptr().cast::<u8>().add(32);
+            let start = array_data(target(array)?.as_ptr());
             Ok(crate::game::copy_values(start, count as usize))
         }
     }
@@ -117,7 +117,7 @@ impl RuntimeAccess {
             if self.array_count(&array, self.system_class(c"Byte")?, maximum)? as usize != bytes.len() {
                 return Err(unsupported("detached byte array length"));
             }
-            crate::game::write_bytes(target(&array)?.as_ptr().cast::<u8>().add(32), &bytes);
+            crate::game::write_bytes(array_data(target(&array)?.as_ptr()), &bytes);
             Ok(array)
         }
     }
@@ -166,7 +166,7 @@ impl RuntimeAccess {
                     return Err(unsupported("detached affix object aliases live storage"));
                 }
             }
-            let count_field = self.mutable_field(class, c"affixCountForSetProps", c"Int32", 0x08).map_err(contract)?;
+            let count_field = self.mutable_field(class, c"affixCountForSetProps", c"Int32", raw::type_code::I4).map_err(contract)?;
             for (live, copy) in live_values.iter().zip(&copy_values) {
                 writes.set_i32(target(copy)?, count_field, self.primitive::<i32>(live, c"affixCountForSetProps")?);
             }
@@ -388,7 +388,7 @@ impl RuntimeAccess {
                 if usize::from(index) >= count {
                     return Err(unsupported("detached roll index absent"));
                 }
-                crate::game::write_bytes(target(&array)?.as_ptr().cast::<u8>().add(32 + usize::from(index)), &[roll]);
+                crate::game::write_bytes(array_data(target(&array)?.as_ptr()).add(usize::from(index)), &[roll]);
             }
             if target_kind == MappingTarget::Implicit {
                 self.mapping_refresh_implicits(attached, api, &graph.images, copy)?;
@@ -428,7 +428,7 @@ impl RuntimeAccess {
             let list = self.child(attached, item, c"affixes")?.ok_or_else(|| unsupported("detached affix list absent"))?;
             let values = self.list(attached, &list, class, 32)?;
             let affix = values.get(usize::from(slot)).ok_or_else(|| unsupported("detached affix slot absent"))?;
-            let field = self.mutable_field(class, c"affixRoll", c"Byte", 0x05).map_err(contract)?;
+            let field = self.mutable_field(class, c"affixRoll", c"Byte", raw::type_code::U1).map_err(contract)?;
             writes.set_u8(target(affix)?, field, roll);
             Ok(())
         }
@@ -491,7 +491,7 @@ impl RuntimeAccess {
                 return Err(unsupported("draft affix constructor normalized requested shape"));
             }
             if query.expected().affixes[usize::from(query.slot())].id == draft.id {
-                let field = self.mutable_field(class, c"affixCountForSetProps", c"Int32", 0x08).map_err(contract)?;
+                let field = self.mutable_field(class, c"affixCountForSetProps", c"Int32", raw::type_code::I4).map_err(contract)?;
                 writes.set_i32(
                     target(&replacement)?,
                     field,
@@ -533,7 +533,7 @@ impl RuntimeAccess {
                 .into_iter()
                 .zip(flags)
             {
-                let field = self.mutable_field(owner, name, c"Boolean", 0x02).map_err(contract)?;
+                let field = self.mutable_field(owner, name, c"Boolean", raw::type_code::BOOLEAN).map_err(contract)?;
                 writes.set_u8(target(copy)?, field, u8::from(value));
             }
             Ok(())

@@ -59,7 +59,7 @@ unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> R
         let images = access.images()?;
         let manager = access.class(&images, c"", c"EternityCacheZoneManager")?;
         let state = access.hook_field(manager, c"localCacheState", "CacheState", 4)?;
-        access.enum_storage(access.class(&images, c"", c"CacheState")?, c"Int32", 0x08)?;
+        access.enum_storage(access.class(&images, c"", c"CacheState")?, c"Int32", raw::type_code::I4)?;
         let receiver = Receiver {
             online: access.hook_online_storage(&images)?,
             storage: access.hook_player_storage(&images)?,

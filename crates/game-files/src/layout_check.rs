@@ -1,8 +1,8 @@
 //! Rebuilt layouts against every type tree a real install ships. Files only.
 
-use il2cpp_metadata::Il2Cpp;
 use std::collections::BTreeMap;
 use unity_files::archive::Archive;
+use unity_files::il2cpp::Il2Cpp;
 use unity_files::layout::Layouts;
 use unity_files::serialized::MONO_BEHAVIOUR;
 use unity_files::typetree::{ALIGN, Node};

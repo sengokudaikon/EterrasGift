@@ -1,6 +1,6 @@
 //! Last Epoch's runtime, through [`il2cpp_runtime`], in layers:
 //! - `discovery` resolves the game's image, classes and the dispatcher; it reads no object;
-//! - `read` and `apply` share typed object reads and checked one-time edits; retained gateways apply persistent effects;
+//! - `read` (liveness in the game's types) and `apply` (checked one-time edits) sit on the runtime crate's typed reads; retained gateways apply persistent effects;
 //! - `accessors` give typed access to one game object each: the player, the character's stats, the held item, play
 //!   presence, the locale, the item limits. They know nothing of what the trainer offers;
 //! - `features` are what the trainer offers, built on the accessors: stat edits, forge edits, tooltips, hooks.
@@ -11,9 +11,11 @@
 // Entry-point contracts cover the shared runtime assumptions. Keep local notes
 // for bounds, ownership and ABI details rather than repeating those contracts.
 
-use il2cpp_runtime::metadata::{Class, MetadataError, Method, Ptr, copy_values, metadata_text, read_value, target, write_bytes};
+use il2cpp_runtime::metadata::{Class, MetadataError, Method, Ptr, array_data, copy_values, instance_offset, metadata_text, read_value, target, write_bytes};
 #[cfg(test)]
 use il2cpp_runtime::metadata::{TestExportStub, Type};
+#[cfg(test)]
+use il2cpp_runtime::test_fakes;
 use il2cpp_runtime::{MetadataApi, RuntimeError, StrongRoot, raw};
 use std::{
     ffi::{CStr, c_void},
@@ -28,8 +30,6 @@ mod discovery;
 mod dispatcher_thread;
 mod features;
 mod read;
-#[cfg(test)]
-mod test_fakes;
 
 pub use accessors::presence;
 pub use apply::WriteError;

@@ -3,13 +3,13 @@
 //! layout exactly, so a layout the game no longer fits is refused rather than misread.
 
 use crate::archive::Archive;
+use crate::il2cpp::Il2Cpp;
 use crate::layout::{Layouts, mono_behaviour_header};
 use crate::serialized::Object;
 use crate::serialized::{MONO_BEHAVIOUR, MONO_SCRIPT, SerializedFile, Source};
 use crate::typetree::Node;
 use crate::value::Value;
 use binary_reader::{Error, Result};
-use il2cpp_metadata::Il2Cpp;
 use std::cell::OnceCell;
 use std::path::Path;
 use std::sync::Arc;

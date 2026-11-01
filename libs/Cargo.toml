@@ -11,7 +11,7 @@ edition = "2024"
 publish = false
 
 [workspace.dependencies]
-# Slint is pinned exactly: point releases have broken APIs before (research/slint.md).
+# Slint is pinned exactly: point releases have broken APIs before (crates/ui/README.md).
 slint = "=1.18.1"
 tokio = { version = "=1.53.3", features = ["rt", "net", "io-util", "time", "sync"] }
 # The close barrier and cancellation (task-runtime). Its `rt` needs only what tokio above already has on.
@@ -26,7 +26,6 @@ sha2 = "0.11.1"
 uuid = { version = "1.28.0", features = ["v4"] }
 
 binary-reader = { path = "binary-reader" }
-il2cpp-metadata = { path = "il2cpp-metadata" }
 flow = { path = "flow" }
 task-runtime = { path = "task-runtime" }
 
@@ -49,6 +48,11 @@ debug-assertions = false
 overflow-checks = false
 
 [profile.dev.package.native-hooks]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.win-platform]
 opt-level = 3
 debug-assertions = false
 overflow-checks = false

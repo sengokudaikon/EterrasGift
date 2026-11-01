@@ -2,6 +2,7 @@
 use super::stat::StatFeature;
 use crate::game::*;
 pub(crate) use eg_trainer_wire::hooks::GameplayHook;
+pub(crate) use il2cpp_runtime::metadata::MethodSpec;
 use native_hooks::leaf::LeafEffect;
 use native_hooks::postfix::PostfixEffect;
 mod shared;
@@ -140,22 +141,6 @@ pub(crate) fn definition(hook: GameplayHook) -> &'static HookFeature {
     FEATURES[slot_of(hook)]
 }
 
-pub(crate) struct MethodSpec {
-    pub class: &'static CStr,
-    pub method: &'static CStr,
-    pub instance: bool,
-    pub params: &'static [&'static str],
-    pub returns: &'static str,
-}
-impl MethodSpec {
-    /// Its native argument positions: the receiver when it has one, its parameters, and the MethodInfo.
-    pub(crate) const fn positions(&self) -> u8 {
-        let positions = self.params.len() + self.instance as usize + 1;
-        assert!(positions <= u8::MAX as usize, "bounded explicit method contract");
-        positions as u8
-    }
-}
-
 pub(crate) struct ResolvedMethod {
     pub name: String,
     pub address: NonNull<u8>,
@@ -245,7 +230,7 @@ impl RuntimeAccess {
         unsafe {
             let environment = self.class(images, c"EHG.Multiplayer", c"GameplayEnvironment")?;
             let online = self.static_field(environment, c"_isOnlinePlay", "System.Boolean")?;
-            self.hook_static_storage(environment, online, 1)
+            Ok(self.hook_static_storage(environment, online, 1)?)
         }
     }
     /// The storage of `PlayerFinder.playerActorComponent`, the actor in play, for code that compares a receiver with it.
@@ -256,7 +241,7 @@ impl RuntimeAccess {
         unsafe {
             let finder = self.class(images, c"", c"PlayerFinder")?;
             let player = self.static_field(finder, c"playerActorComponent", "Actor")?;
-            self.hook_static_storage(finder, player, 8)
+            Ok(self.hook_static_storage(finder, player, 8)?)
         }
     }
     /// Process-owned storage of the current local item manager; no getter runs on the gameplay caller.
@@ -267,108 +252,7 @@ impl RuntimeAccess {
         unsafe {
             let finder = self.class(images, c"", c"PlayerFinder")?;
             let manager = self.static_field(finder, c"localItemContainersManager", "ItemContainersManager")?;
-            self.hook_static_storage(finder, manager, 8)
-        }
-    }
-    // Resolve the complete parameter signature before checking the selected overload's ABI and uniqueness.
-    pub(super) unsafe fn hook_method_contract(&self, owner: Class, spec: &MethodSpec) -> Result<Method, GameError> {
-        // SAFETY: immutable attached metadata and class descriptor retained by the caller.
-        unsafe {
-            let mut found = None;
-            for method in self.methods(owner) {
-                let method = method?;
-                let actual = (self.method_name)(method);
-                if actual.is_null() {
-                    return Err(unsupported("null hook method name"));
-                }
-                if metadata_text(actual) != spec.method || (self.method_params)(method) as usize != spec.params.len() {
-                    continue;
-                }
-                let mut params_match = true;
-                for (index, expected) in spec.params.iter().enumerate() {
-                    let param = (self.method_param)(method, index as u32);
-                    if param.is_null() {
-                        return Err(unsupported("null hook parameter type"));
-                    }
-                    if (self.type_byref)(param) != expected.ends_with('&') || self.type_name(param)? != *expected {
-                        params_match = false;
-                        break;
-                    }
-                }
-                if !params_match {
-                    continue;
-                }
-                let returns = (self.method_return)(method);
-                let mut implementation = 0;
-                if found.is_some()
-                    || (self.method_instance)(method) != spec.instance
-                    || (self.method_generic)(method)
-                    || (self.method_inflated)(method)
-                    || (self.method_flags)(method, &mut implementation) & (raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT) != 0
-                    || returns.is_null()
-                    || (self.type_byref)(returns)
-                    || self.type_name(returns)? != spec.returns
-                {
-                    return Err(unsupported(format!("hook contract: {}", spec.method.to_string_lossy())));
-                }
-                found = Some(method);
-            }
-            found.ok_or_else(|| unsupported(format!("missing hook: {}", spec.method.to_string_lossy())))
-        }
-    }
-    /// The offset of `owner`'s instance field `name`, whose type's class is exactly `expected`, aligned to `alignment`
-    /// in a reference object's instance storage.
-    /// # Safety
-    /// Immutable attached metadata; `owner` and `expected` are retained class descriptors.
-    pub(super) unsafe fn hook_field_of(&self, owner: Class, name: &CStr, expected: Class, alignment: usize) -> Result<u32, GameError> {
-        // SAFETY: exact non-byref field class and instance storage are checked before returning the aligned offset.
-        unsafe {
-            let field = self.instance_field_in(owner, name, expected, "hook")?;
-            let offset = (self.field_offset)(field);
-            if (self.class_value)(owner) || !(16..=16384).contains(&offset) || !offset.is_multiple_of(alignment) {
-                return Err(unsupported(format!("hook field layout: {}", name.to_string_lossy())));
-            }
-            Ok(offset as u32)
-        }
-    }
-    pub(super) unsafe fn hook_field(&self, owner: Class, name: &CStr, expected: &str, alignment: usize) -> Result<u32, GameError> {
-        // SAFETY: immutable attached metadata, instance fields on readable managed objects.
-        unsafe {
-            let field = self.field(owner, name)?;
-            let offset = (self.field_offset)(field);
-            let ty = (self.field_type)(field);
-            if (self.class_value)(owner)
-                || (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0
-                || ty.is_null()
-                || (self.type_byref)(ty)
-                || self.type_name(ty)? != expected
-                || !(16..=16384).contains(&offset)
-                || !offset.is_multiple_of(alignment)
-            {
-                return Err(unsupported(format!("hook field layout: {}", name.to_string_lossy())));
-            }
-            Ok(offset as u32)
-        }
-    }
-    pub(crate) unsafe fn hook_static_storage(&self, owner: Class, field: Ptr, alignment: usize) -> Result<NonNull<c_void>, GameError> {
-        // SAFETY: static field type/flags validated by caller; initialize through the public field API, then obtain
-        // the owning storage through the public class API. The primitive fits in this eight-byte snapshot.
-        unsafe {
-            let mut snapshot = 0u64;
-            (self.static_get)(field, (&raw mut snapshot).cast());
-            let offset = (self.field_offset)(field);
-            let storage = (self.class_static_data)(owner);
-            if storage.is_null() || offset > 16384 || !offset.is_multiple_of(alignment) {
-                return Err(unsupported("hook static storage layout"));
-            }
-            let pointer = storage.cast::<u8>().add(offset);
-            if !(pointer as usize).is_multiple_of(alignment) {
-                return Err(unsupported("hook static storage alignment"));
-            }
-            Ok(NonNull::new(pointer.cast()).unwrap())
+            Ok(self.hook_static_storage(finder, manager, 8)?)
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

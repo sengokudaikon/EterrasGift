@@ -1,12 +1,12 @@
 //! Bounded, rooted reads of collections and definitions: nested classes, static objects, child references, arrays,
-//! lists and their values. Singleton getters and formatter bodies are not invoked.
+//! lists and their values. Singleton getters and formatter bodies are not invoked. Every function here also needs
+//! exclusive access to the object graph it reads, for the length of the call.
 
-use crate::game::metadata_text;
-use crate::game::{Class, GameError, Images, Root, RuntimeAccess, target, unsupported};
-use il2cpp_runtime::{AttachedThread, metadata::Primitive, raw};
+use super::{Class, MetadataApi, MetadataError, Primitive, array_data, copy_values, metadata_text, read_value, target, unsupported};
+use crate::{AttachedThread, StrongRoot, raw};
 use std::{ffi::CStr, ptr::NonNull};
 
-fn collection_count(count: i32, capacity: u32, maximum: u32) -> Result<usize, GameError> {
+fn collection_count(count: i32, capacity: u32, maximum: u32) -> Result<usize, MetadataError> {
     // A retained List backing store may be larger than its active population.
     if count < 0 || count as u32 > maximum || count as u32 > capacity || capacity > 65536 {
         return Err(unsupported("collection count/capacity"));
@@ -14,11 +14,15 @@ fn collection_count(count: i32, capacity: u32, maximum: u32) -> Result<usize, Ga
     Ok(count as usize)
 }
 
-impl RuntimeAccess {
-    // Every helper inherits the admitted main-thread, initialized metadata and exclusive graph
-    // access contract of its catalog operation. All child references remain in rooted parents
-    // until their own roots have been acquired; Unity native object lifetime is checked separately.
-    pub(crate) unsafe fn nested(&self, parent: Class, name: &CStr) -> Result<Class, GameError> {
+impl MetadataApi {
+    // All child references remain in rooted parents until their own roots have been acquired; Unity native object
+    // lifetime is checked separately.
+    /// The class `name` nested directly in `parent`. Stricter than [`Self::nested_class`]: a null name, two classes of
+    /// that name and a walk past its bound all refuse.
+    ///
+    /// # Safety
+    /// The lookup contract ([`crate::metadata`]).
+    pub unsafe fn nested(&self, parent: Class, name: &CStr) -> Result<Class, MetadataError> {
         // SAFETY: The parent is retained class metadata; nested descriptors and names are inspected within a bounded enumeration.
         unsafe {
             if parent.is_null() {
@@ -48,7 +52,12 @@ impl RuntimeAccess {
         }
     }
 
-    pub(crate) unsafe fn static_object<'a, 'r>(&self, attached: &'a AttachedThread<'r>, owner: Class, name: &CStr, expected: Class) -> Result<Option<Root<'a, 'r>>, GameError> {
+    /// The object a static reference field of `owner`, of exactly the class `expected`, holds, rooted; a null field is
+    /// `None`. Static value reads do not initialize the owning class or load assets.
+    ///
+    /// # Safety
+    /// As [`Self::reference`], with `owner` and `expected` class descriptors of this runtime.
+    pub unsafe fn static_object<'a, 'r>(&self, attached: &'a AttachedThread<'r>, owner: Class, name: &CStr, expected: Class) -> Result<Option<StrongRoot<'a, 'r>>, MetadataError> {
         // SAFETY: The validated static reference field writes one pointer-sized local, which is rooted before inspection.
         unsafe {
             if expected.is_null() || (self.class_value)(expected) {
@@ -74,7 +83,12 @@ impl RuntimeAccess {
         }
     }
 
-    pub(crate) unsafe fn child<'a, 'r>(&self, attached: &'a AttachedThread<'r>, parent: &Root<'_, '_>, name: &CStr) -> Result<Option<Root<'a, 'r>>, GameError> {
+    /// What a reference instance field of a rooted object holds, rooted, checked against the field's own class; a null
+    /// field is `None`.
+    ///
+    /// # Safety
+    /// As [`Self::reference`].
+    pub unsafe fn child<'a, 'r>(&self, attached: &'a AttachedThread<'r>, parent: &StrongRoot<'_, '_>, name: &CStr) -> Result<Option<StrongRoot<'a, 'r>>, MetadataError> {
         // SAFETY: The receiver is rooted and the reference field has validated storage and expected target class.
         unsafe {
             let owner = (self.object_class)(target(parent)?.as_ptr());
@@ -82,17 +96,21 @@ impl RuntimeAccess {
                 return Err(unsupported("reference owner"));
             }
             let field = self.field(owner, name)?;
-            Ok(self.reference(attached, parent, name, self.field_class(field, "catalog")?)?)
+            self.reference(attached, parent, name, self.field_class(field, "catalog")?)
         }
     }
 
-    pub(crate) unsafe fn array<'a, 'r>(
+    /// The elements of a rooted one-dimensional reference array of exactly `element`, each rooted; a null entry is `None`.
+    ///
+    /// # Safety
+    /// As [`Self::reference`], with `array` rooted in this runtime.
+    pub unsafe fn array<'a, 'r>(
         &self,
         attached: &'a AttachedThread<'r>,
-        array: &Root<'_, '_>,
+        array: &StrongRoot<'_, '_>,
         element: Class,
         maximum: u32,
-    ) -> Result<Vec<Option<Root<'a, 'r>>>, GameError> {
+    ) -> Result<Vec<Option<StrongRoot<'a, 'r>>>, MetadataError> {
         // SAFETY: The array is rooted; exact reference element type and bounded length precede every element pointer copy.
         unsafe {
             if element.is_null() || (self.class_value)(element) || maximum > 65536 {
@@ -101,13 +119,7 @@ impl RuntimeAccess {
             let count = self.array_count(array, element, maximum)?;
             let mut entries = Vec::with_capacity(count as usize);
             for index in 0..count as usize {
-                let pointer = crate::game::read_value(
-                    target(array)?
-                        .as_ptr()
-                        .cast::<u8>()
-                        .add(32 + index * std::mem::size_of::<usize>())
-                        .cast::<*mut raw::Object>(),
-                );
+                let pointer = read_value(array_data(target(array)?.as_ptr()).add(index * std::mem::size_of::<usize>()).cast::<*mut raw::Object>());
                 let root = NonNull::new(pointer).map(|pointer| attached.root(pointer)).transpose()?;
                 if let Some(root) = &root {
                     self.check_object(element, target(root)?)?;
@@ -118,7 +130,13 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn list_storage<'a, 'r>(&self, attached: &'a AttachedThread<'r>, list: &Root<'_, '_>, element: Class, maximum: u32) -> Result<(Root<'a, 'r>, usize), GameError> {
+    unsafe fn list_storage<'a, 'r>(
+        &self,
+        attached: &'a AttachedThread<'r>,
+        list: &StrongRoot<'_, '_>,
+        element: Class,
+        maximum: u32,
+    ) -> Result<(StrongRoot<'a, 'r>, usize), MetadataError> {
         // SAFETY: The list is rooted; its metadata-validated backing array and size are rooted and bounded before iteration.
         unsafe {
             if element.is_null() || maximum > 65536 {
@@ -139,7 +157,11 @@ impl RuntimeAccess {
         }
     }
 
-    pub(crate) unsafe fn list<'a, 'r>(&self, attached: &'a AttachedThread<'r>, list: &Root<'_, '_>, element: Class, maximum: u32) -> Result<Vec<Root<'a, 'r>>, GameError> {
+    /// The elements of a rooted closed `List` of reference elements, each rooted; a null entry refuses.
+    ///
+    /// # Safety
+    /// As [`Self::reference`], with `list` rooted in this runtime.
+    pub unsafe fn list<'a, 'r>(&self, attached: &'a AttachedThread<'r>, list: &StrongRoot<'_, '_>, element: Class, maximum: u32) -> Result<Vec<StrongRoot<'a, 'r>>, MetadataError> {
         // SAFETY: The validated list's rooted backing array remains live while bounded element references are copied and rooted.
         unsafe {
             if element.is_null() || (self.class_value)(element) {
@@ -148,13 +170,7 @@ impl RuntimeAccess {
             let (array, count) = self.list_storage(attached, list, element, maximum)?;
             let mut values = Vec::with_capacity(count);
             for index in 0..count {
-                let pointer = crate::game::read_value(
-                    target(&array)?
-                        .as_ptr()
-                        .cast::<u8>()
-                        .add(32 + index * std::mem::size_of::<usize>())
-                        .cast::<*mut raw::Object>(),
-                );
+                let pointer = read_value(array_data(target(&array)?.as_ptr()).add(index * std::mem::size_of::<usize>()).cast::<*mut raw::Object>());
                 let root = attached.root(NonNull::new(pointer).ok_or_else(|| unsupported("null List entry"))?)?;
                 self.check_object(element, target(&root)?)?;
                 values.push(root);
@@ -163,7 +179,11 @@ impl RuntimeAccess {
         }
     }
 
-    pub(crate) unsafe fn values<T: Primitive>(&self, attached: &AttachedThread<'_>, list: &Root<'_, '_>, element: Class, maximum: u32) -> Result<Vec<T>, GameError> {
+    /// The elements of a rooted closed `List` of the primitive `T`, or of an enum stored as `T`, copied.
+    ///
+    /// # Safety
+    /// As [`Self::reference`], with `list` rooted in this runtime.
+    pub unsafe fn values<T: Primitive>(&self, attached: &AttachedThread<'_>, list: &StrongRoot<'_, '_>, element: Class, maximum: u32) -> Result<Vec<T>, MetadataError> {
         // SAFETY: The rooted value array has exact primitive element width and a bounded count before reading its elements.
         unsafe {
             let expected = self.system_class(T::NAME)?;
@@ -180,15 +200,18 @@ impl RuntimeAccess {
                 }
             }
             let (array, count) = self.list_storage(attached, list, element, maximum)?;
-            Ok(crate::game::copy_values(target(&array)?.as_ptr().cast::<u8>().add(32).cast::<T>(), count))
+            Ok(copy_values(array_data(target(&array)?.as_ptr()).cast::<T>(), count))
         }
     }
 
     // `_attached` is not read: holding it proves this thread is attached for the reads below.
-    pub(crate) unsafe fn is_live(&self, _attached: &AttachedThread<'_>, images: &Images, object: &Root<'_, '_>) -> Result<bool, GameError> {
+    /// Whether a rooted Unity object still has its native object. The native address is compared, never dereferenced.
+    ///
+    /// # Safety
+    /// The lookup contract ([`crate::metadata`]), with `object` rooted in this runtime and `unity_object` `UnityEngine.Object`.
+    pub unsafe fn is_live(&self, _attached: &AttachedThread<'_>, unity_object: Class, object: &StrongRoot<'_, '_>) -> Result<bool, MetadataError> {
         // SAFETY: The rooted Unity wrapper's validated native pointer is copied and compared without dereferencing the native address.
         unsafe {
-            let unity_object = self.class(images, c"UnityEngine", c"Object")?;
             self.check_object(unity_object, target(object)?)?;
             let field = self.field(unity_object, c"m_CachedPtr")?;
             if self.field_class(field, "catalog")? != self.system_class(c"IntPtr")? || (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0 {
@@ -204,11 +227,11 @@ impl RuntimeAccess {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::{
-        Ptr, Type,
-        test_fakes::{self, frees, roots, token},
+    use crate::{
+        ThreadContext,
+        metadata::{Ptr, Type},
+        test_fakes::{self, corlib, frees, roots, token},
     };
-    use il2cpp_runtime::ThreadContext;
     use std::cell::Cell;
 
     const CHILD: usize = 0x1000;
@@ -247,7 +270,7 @@ mod tests {
         token(0x8000)
     }
     unsafe extern "C-unwind" fn type_code(ty: Type) -> i32 {
-        if ty as usize == BASE_TYPE { 0x05 } else { 0x1d }
+        if ty as usize == BASE_TYPE { raw::type_code::U1 } else { raw::type_code::SZARRAY }
     }
     unsafe extern "C-unwind" fn element(_: Class) -> Class {
         token(ELEMENT.get())
@@ -297,7 +320,7 @@ mod tests {
         }
     }
     unsafe extern "C-unwind" fn name(_: Class) -> *const std::ffi::c_char {
-        c"SP".as_ptr()
+        c"Kind".as_ptr()
     }
     unsafe extern "C-unwind" fn class_enum(_: *const raw::Class) -> bool {
         IS_ENUM.get()
@@ -306,15 +329,12 @@ mod tests {
         ENUM_BASE_CALLS.set(ENUM_BASE_CALLS.get() + 1);
         token(BASE_TYPE)
     }
-    unsafe extern "C-unwind" fn corlib() -> *const std::ffi::c_void {
-        token::<std::ffi::c_void>(0xb000).cast_const()
-    }
     unsafe extern "C-unwind" fn class_from_name(_: *const std::ffi::c_void, _: *const std::ffi::c_char, name: *const std::ffi::c_char) -> Class {
         // SAFETY: production supplies a static, nul-terminated primitive name.
         assert_eq!(unsafe { CStr::from_ptr(name) }, c"Byte");
         token(BYTE_CLASS)
     }
-    fn fixture() -> (RuntimeAccess, ThreadContext) {
+    fn fixture() -> (MetadataApi, ThreadContext) {
         let context = test_fakes::thread();
         ARRAY.set(0);
         RANK.set(1);
@@ -325,7 +345,7 @@ mod tests {
         IS_ENUM.set(true);
         BASE_CLASS.set(BYTE_CLASS);
         ENUM_BASE_CALLS.set(0);
-        let mut access = RuntimeAccess::test_stubs();
+        let mut access = MetadataApi::test_stubs();
         access.object_class = object_class;
         access.class_value = class_value;
         access.class_rank = rank;

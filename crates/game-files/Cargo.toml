@@ -7,7 +7,6 @@ publish.workspace = true
 
 [dependencies]
 binary-reader.workspace = true
-il2cpp-metadata.workspace = true
 unity-files.workspace = true
 
 [dev-dependencies]

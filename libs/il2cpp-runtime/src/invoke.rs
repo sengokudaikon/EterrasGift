@@ -287,7 +287,7 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
                             return Err(InvokeError::InvalidValueTypeContract);
                         }
                         let underlying = (api.class_enum_basetype)(class.as_ptr());
-                        if underlying.is_null() || (api.type_is_byref)(underlying) || (api.type_get_type)(underlying) != 0x08 {
+                        if underlying.is_null() || (api.type_is_byref)(underlying) || (api.type_get_type)(underlying) != raw::type_code::I4 {
                             return Err(InvokeError::InvalidValueTypeContract);
                         }
                         let corlib = (api.get_corlib)();
@@ -388,15 +388,18 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
             if by_ref && position == SignaturePosition::Return {
                 return Err(unsupported());
             }
-            let kind = if code == 0x01 && position == SignaturePosition::Return {
+            let kind = if code == raw::type_code::VOID && position == SignaturePosition::Return {
                 ValueKind::Void
             } else if let Some(scalar) = ScalarKind::from_code(code) {
                 ValueKind::Scalar(scalar)
             } else if !by_ref
-                && (matches!(code, 0x0e | 0x12 | 0x14 | 0x1c | 0x1d) || (code == 0x15 && closed_references.iter().any(|class| class.as_ptr() == (api.class_from_type)(metadata))))
+                && (matches!(
+                    code,
+                    raw::type_code::STRING | raw::type_code::CLASS | raw::type_code::ARRAY | raw::type_code::OBJECT | raw::type_code::SZARRAY
+                ) || (code == raw::type_code::GENERICINST && closed_references.iter().any(|class| class.as_ptr() == (api.class_from_type)(metadata))))
             {
                 ValueKind::Reference
-            } else if code == 0x11 && !by_ref && !contracts.is_empty() {
+            } else if code == raw::type_code::VALUETYPE && !by_ref && !contracts.is_empty() {
                 let class = NonNull::new((api.class_from_type)(metadata)).ok_or(InvokeError::InvalidMetadata)?;
                 match contracts.iter().find(|contract| contract.class() == class) {
                     Some(ValueTypeContract::BoxedReturn { .. }) if position == SignaturePosition::Return => ValueKind::Boxed,

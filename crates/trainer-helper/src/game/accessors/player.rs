@@ -137,7 +137,7 @@ impl RuntimeAccess {
             let boolean = self.system_class(c"Boolean")?;
             let single = self.system_class(c"Single")?;
             let int_ptr = self.system_class(c"IntPtr")?;
-            for (class, code) in [(boolean, 0x02), (single, 0x0c), (int_ptr, 0x18)] {
+            for (class, code) in [(boolean, raw::type_code::BOOLEAN), (single, raw::type_code::R4), (int_ptr, raw::type_code::I)] {
                 let ty = (self.class_type)(class);
                 if !(self.class_value)(class) || ty.is_null() || (self.type_byref)(ty) || (self.type_code)(ty) != code {
                     return Err(unsupported("player primitive code/value class").into());

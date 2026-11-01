@@ -44,7 +44,7 @@ unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> R
         let images = access.images()?;
         let state = access.class(&images, c"", c"State")?;
         let controller = access.class(&images, c"", c"StateController")?;
-        access.enum_storage(access.class(&images, c"", c"AT")?, c"Int32", 0x08)?;
+        access.enum_storage(access.class(&images, c"", c"AT")?, c"Int32", raw::type_code::I4)?;
         let layout = Layout {
             online: access.hook_online_storage(&images)?,
             player: access.hook_player_storage(&images)?,
