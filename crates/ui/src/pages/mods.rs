@@ -81,12 +81,6 @@ struct Window {
 }
 
 pub(crate) fn bind(window: &MainWindow, page: ModsPage, background: Background, shell: &ShellHandle) -> ModsHandle {
-    // A task that panics ends the app at once, whoever queued it: a start's preparation from Home shares the worker.
-    page.worker.on_fault(|| {
-        let _ = slint::invoke_from_event_loop(|| {
-            let _ = slint::quit_event_loop();
-        });
-    });
     let closed: OnClosed = Rc::default();
     let host = Window {
         services: page,

@@ -432,4 +432,19 @@ mod tests {
         assert!(!directory.join("placed.json").exists());
         mods.close();
     }
+
+    #[test]
+    fn a_stopped_library_refuses_a_start_with_mods_and_keeps_the_proxy_aside() {
+        let temp = tempfile::tempdir().unwrap();
+        let install = game(temp.path());
+        fs::write(install.directory().join(loader::SET_ASIDE_NAME), b"proxy").unwrap();
+        let mods = ModWorker::new(ModLibrary::new(temp.path().join("Library")));
+        let panicked = mods.enqueue(|_| -> std::io::Result<()> { panic!("a test's fault in the mod library") }).unwrap();
+        assert!(panicked.recv().is_err());
+        let host = host(temp.path(), &install).with_mod_worker(mods.clone());
+        let result = host.launch(LaunchMode::OfflineWithMods, Some(&install), &CancellationToken::default());
+        assert!(matches!(result, Err(LaunchError::Refused(reason)) if reason.starts_with("The mods could not be made ready, so the game was not started:")));
+        assert_eq!(host.read_mod_loader(Some(&install)), ModLoaderState::SetAside);
+        mods.close();
+    }
 }

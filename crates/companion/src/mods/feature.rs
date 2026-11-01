@@ -53,7 +53,7 @@ phrases! {
     SourcesChanged: "Its sources changed since this build."
     OtherSettings: "Other settings"
     Repeated: "Repeated {count} times, last at {time}"
-    LibraryStopped: "The mod library stopped."
+    LibraryStopped: "The mod library stopped. Restart the app to use it again."
     NoSdk: "Building mods from their sources needs the .NET SDK, which was not found. Install it, or choose its folder in Settings, to see and build the mod projects here."
     SourcesUnreadable: "The mod sources in {folder} could not be read: {error}"
     Removed: "{name} is removed. Its DLL leaves the Mods folder the next time you play with mods; its settings stay in MelonPreferences.cfg."

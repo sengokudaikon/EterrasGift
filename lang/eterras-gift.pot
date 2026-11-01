@@ -268,7 +268,7 @@ msgid "The latest build isn't installed. Its sources changed since."
 msgstr ""
 
 #: crates/companion/src/mods/feature.rs crates/companion/src/mods/worker.rs
-msgid "The mod library stopped."
+msgid "The mod library stopped. Restart the app to use it again."
 msgstr ""
 
 #: crates/companion/src/mods/feature.rs
@@ -549,10 +549,6 @@ msgstr ""
 
 #: crates/companion/src/mods/worker.rs
 msgid "The mod library is closing."
-msgstr ""
-
-#: crates/companion/src/mods/worker.rs
-msgid "The mod library stopped after a fault."
 msgstr ""
 
 #: crates/core/src/logs.rs

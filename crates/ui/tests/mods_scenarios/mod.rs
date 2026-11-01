@@ -214,6 +214,40 @@ pub(super) fn capture_mods(session: &Session) {
 
     mods_input(session);
     mods_sources(session);
+    mods_library_stopped(session);
+}
+
+/// A panic in the library stops the library and nothing else: the page says so once and doesn't keep asking. `idle` would
+/// never return if it did.
+fn mods_library_stopped(session: &Session) {
+    const STOPPED: &str = "The mod library stopped. Restart the app to use it again.";
+    let fixture = session.mods_fixture(true);
+    let ui = session.open_mods(&fixture, 1100, 700);
+    let state = ui.global::<ModsState>();
+
+    // The page's change waits behind the panic, so it gets no reply, as work already queued does on a real fault.
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let panicked = fixture
+        .worker
+        .enqueue(move |_| -> std::io::Result<()> {
+            let _ = held.recv();
+            panic!("a capture's fault in the mod library");
+        })
+        .unwrap();
+    state.invoke_toggle_mod(0);
+    release.send(()).unwrap();
+    assert!(panicked.recv().is_err());
+    assert!(fixture.worker.faulted());
+    wait_for("the page to say the library stopped", || state.get_change_message().contains(STOPPED));
+    session.idle();
+    assert!(!state.get_busy());
+    session.capture(&ui, "mods-library-stopped");
+
+    // Later work is refused at once, and the page is still up to say so.
+    state.invoke_toggle_mod(0);
+    session.idle();
+    assert!(state.get_change_message().contains(STOPPED));
+    assert!(!state.get_busy());
 }
 
 fn mods_sources(session: &Session) {
