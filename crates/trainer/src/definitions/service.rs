@@ -1,4 +1,4 @@
-//! The game's definitions, kept by the app: read from the shipped files (`crate::definitions::files`) on a thread of their own, saved
+//! The game's definitions, kept by the app: read from the shipped files (`crate::definitions::files`) on the blocking pool, saved
 //! beside the trainer's other data, and shared through a watch channel. Nothing here touches the game process, and
 //! nothing asks the game for definitions; a session only checks that it runs the build they were read from.
 //!
@@ -10,11 +10,12 @@ use crate::definitions::cache::CatalogCache;
 use crate::definitions::catalog::{CatalogIdentity, EXTRACTION_VERSION, GameLocale};
 use crate::definitions::files::{self, FileCatalog, Fingerprint, SAVED_LOCALE};
 use eg_core::fault::FaultLog;
+use eg_runtime::{CancellationToken, Tasks};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 
 /// The index of the saved catalog: the folder and the files it was read from.
 const INDEX_FILE: &str = "files.json";
@@ -35,7 +36,7 @@ pub enum GameData {
 /// The service's side for its users: the current state, and a way to ask for a folder's catalog.
 #[derive(Clone)]
 pub struct GameDataHandle {
-    requests: Option<mpsc::Sender<Request>>,
+    requests: Option<mpsc::UnboundedSender<Request>>,
     state: watch::Receiver<GameData>,
 }
 
@@ -103,11 +104,12 @@ impl GameDataHandle {
     }
 }
 
-/// Starts the service on its own thread. With `folder` (the installed game, when found), it reads at once; with
-/// `store`, it saves what it reads and loads it back on the next start. The thread ends with the last handle.
-pub fn start(folder: Option<PathBuf>, store: Option<PathBuf>, faults: Option<FaultLog>) -> std::io::Result<GameDataHandle> {
+/// Starts the service on `tasks`. With `folder` (the installed game, when found), it reads at once; with `store`, it
+/// saves what it reads and loads it back on the next start. It ends with the last handle or the runtime's close, which
+/// waits for a read already under way; requests still queued are told it has stopped.
+pub fn start(folder: Option<PathBuf>, store: Option<PathBuf>, faults: Option<FaultLog>, tasks: &Tasks) -> GameDataHandle {
     let (publish, state) = watch::channel(GameData::NoGame);
-    let (requests, incoming) = mpsc::channel::<Request>();
+    let (requests, incoming) = mpsc::unbounded_channel::<Request>();
     if folder.is_some() {
         let _ = requests.send(Request {
             folder,
@@ -115,14 +117,22 @@ pub fn start(folder: Option<PathBuf>, store: Option<PathBuf>, faults: Option<Fau
             reply: None,
         });
     }
-    let mut service = Service {
+    let service = Service {
         store: store.map(Store::new),
         faults,
         publish,
         folder: None,
     };
-    std::thread::Builder::new().name("game data".into()).spawn(move || {
-        while let Ok(request) = incoming.recv() {
+    // Refused only on a runtime already closing: with the receiver gone, every request is told it has stopped.
+    let _ = tasks.spawn(answer(service, incoming, tasks.clone(), tasks.token()));
+    GameDataHandle { requests: Some(requests), state }
+}
+
+/// One read at a time, in the order asked.
+async fn answer(mut service: Service, mut incoming: mpsc::UnboundedReceiver<Request>, tasks: Tasks, closing: CancellationToken) {
+    let publish = service.publish.clone();
+    while let Some(Some(request)) = closing.run_until_cancelled(incoming.recv()).await {
+        let read = tasks.spawn_blocking(move || {
             let state = match request.folder.or_else(|| service.folder.clone()) {
                 Some(folder) => service.serve(&folder, request.again),
                 None => GameData::NoGame,
@@ -130,9 +140,20 @@ pub fn start(folder: Option<PathBuf>, store: Option<PathBuf>, faults: Option<Fau
             if let Some(reply) = request.reply {
                 let _ = reply.send(state);
             }
+            service
+        });
+        let Ok(read) = read else {
+            return;
+        };
+        match read.await {
+            Ok(kept) => service = kept,
+            // The hook has reported the panic. Waiting requests hear the service has stopped, and so does anyone watching.
+            Err(_) => {
+                publish.send_replace(GameData::Unavailable("The game data service has stopped.".into()));
+                return;
+            }
         }
-    })?;
-    Ok(GameDataHandle { requests: Some(requests), state })
+    }
 }
 
 struct Service {
@@ -354,7 +375,8 @@ mod tests {
         let mut read = catalog(game.path());
         read.updated_at = Some("2026-10-21T17:15:00Z".parse().unwrap());
         Store::new(data.path().to_path_buf()).save(game.path(), &read).unwrap();
-        let service = start(None, Some(data.path().to_path_buf()), None).unwrap();
+        let owner = eg_runtime::Runtime::start().unwrap();
+        let service = start(None, Some(data.path().to_path_buf()), None, &owner.tasks());
         assert_eq!(service.current(), GameData::NoGame);
         let GameData::Ready(loaded) = runtime.block_on(service.for_folder(game.path())) else {
             panic!("the saved catalog loads");
@@ -378,6 +400,13 @@ mod tests {
         let elsewhere = data.path().join("no game here");
         assert!(matches!(runtime.block_on(service.for_folder(&elsewhere)), GameData::Unavailable(_)));
         assert!(matches!(service.current(), GameData::Unavailable(_)));
+        assert!(!owner.shutdown());
+        let stopped = runtime.block_on(service.for_folder(game.path()));
+        assert_eq!(
+            stopped,
+            GameData::Unavailable("The game data service has stopped.".into()),
+            "and says so once the runtime has closed"
+        );
     }
 
     #[test]

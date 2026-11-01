@@ -3,6 +3,7 @@ use eg_companion::{game::folders, game::install};
 use eg_core::fault::FaultLog;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::{ModuleSettings, SettingsService};
+use eg_runtime::Tasks;
 use eg_trainer::connect::host::{DesktopConnector, GameProcesses, HelperPackage};
 use eg_trainer::{
     backend::{self, BackendHandle, BackendOptions, Command, SubmitError, SystemClock},
@@ -55,11 +56,11 @@ impl Module {
         eg_trainer::item::template::TemplateStore::new(self.templates.clone())
     }
 
-    pub fn start(&mut self, settings: &SettingsService, game: Option<&Path>, no_connect: bool, faults: &FaultLog) -> Option<Trainer> {
+    pub fn start(&mut self, settings: &SettingsService, game: Option<&Path>, no_connect: bool, faults: &FaultLog, tasks: &Tasks) -> Option<Trainer> {
         if !self.chosen || self.choice.problem.is_some() {
             return None;
         }
-        match self.launch(settings, game, no_connect, faults) {
+        match self.launch(settings, game, no_connect, faults, tasks) {
             Ok(runtime) => Some(runtime),
             Err(error) => {
                 self.choice.problem = Some(start_failed(faults, self.choice.title.get(), &error.to_string()));
@@ -70,7 +71,7 @@ impl Module {
 
     /// The helper is in the exe; it is written under the app's local folder only when a game connects. The game data
     /// is read from `game`'s folder (the installed game, when found) at once, and saved in the module's folder.
-    fn launch(&self, settings: &SettingsService, game: Option<&Path>, no_connect: bool, faults: &FaultLog) -> Result<Trainer, Box<dyn Error>> {
+    fn launch(&self, settings: &SettingsService, game: Option<&Path>, no_connect: bool, faults: &FaultLog, tasks: &Tasks) -> Result<Trainer, Box<dyn Error>> {
         let helper = helper()?;
         let module = settings.module(trainer_settings::ID);
         let saved = module.read();
@@ -84,7 +85,8 @@ impl Module {
                 game.and_then(Path::parent).map(Path::to_path_buf),
                 Some(self.game_data.clone()),
                 Some(faults.clone()),
-            )?),
+                tasks,
+            )),
             unique_mods_in_use: Some(self.game_data.join(eg_trainer::definitions::unique_mods::IN_USE_FILE)),
             ..Default::default()
         };

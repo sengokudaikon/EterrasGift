@@ -39,7 +39,7 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
     let settings_unreadable = store.startup_error().is_some();
     let service = SettingsService::new(store, &runtime.tasks());
     // The trainer saves its profiles through the service, so it starts once the service runs.
-    let trainer_runtime = trainer.start(&service, found_game.as_deref(), startup.arguments.no_connect, &faults);
+    let trainer_runtime = trainer.start(&service, found_game.as_deref(), startup.arguments.no_connect, &faults, &runtime.tasks());
     let start = if startup.arguments.settings || settings_unreadable || trainer.choice.problem.is_some() {
         Page::Settings
     } else {

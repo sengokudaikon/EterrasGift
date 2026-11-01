@@ -1414,6 +1414,7 @@ dependencies = [
  "eg-game-access",
  "eg-game-files",
  "eg-i18n",
+ "eg-runtime",
  "eg-trainer-wire",
  "jiff",
  "serde_json",

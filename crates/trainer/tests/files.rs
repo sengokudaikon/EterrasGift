@@ -130,10 +130,11 @@ fn a_second_start_loads_the_saved_catalog_instead_of_reading_the_files() {
     let folder = std::path::PathBuf::from(std::env::var_os("EG_LAST_EPOCH").expect("set EG_LAST_EPOCH to the game folder"));
     let store = tempfile::tempdir().unwrap();
     let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+    let owner = eg_runtime::Runtime::start().unwrap();
     let mut catalogs = Vec::new();
     for start in ["first start, reads the files", "second start, loads the saved catalog"] {
         let started = Instant::now();
-        let service = service::start(None, Some(store.path().to_path_buf()), None).unwrap();
+        let service = service::start(None, Some(store.path().to_path_buf()), None, &owner.tasks());
         let GameData::Ready(catalog) = runtime.block_on(service.for_folder(&folder)) else {
             panic!("{start}: {:?}", service.current());
         };
