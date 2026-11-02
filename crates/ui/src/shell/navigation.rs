@@ -388,6 +388,7 @@ impl Feature for Shell {
     type State = State;
     type Intent = Intent;
     type Effect = Effect;
+    type Output = spiderland::Never;
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
         let handled = Outcome::Handled { focus: None };
@@ -427,9 +428,9 @@ mod tests {
     #[test]
     fn a_page_coming_to_show_says_so_once_and_counts() {
         let mut state = State::new(navigation());
-        assert_eq!(step::<Shell>(&mut state, Intent::Navigate(Page::Logs)), [Effect::Entered(Page::Logs)]);
+        assert_eq!(step::<Shell>(&mut state, Intent::Navigate(Page::Logs)).effects, [Effect::Entered(Page::Logs)]);
         assert_eq!(state.page_serial(), 1);
-        assert!(step::<Shell>(&mut state, Intent::Navigate(Page::Logs)).is_empty(), "it shows already");
+        assert!(step::<Shell>(&mut state, Intent::Navigate(Page::Logs)).effects.is_empty(), "it shows already");
         assert_eq!(state.page_serial(), 1);
     }
 

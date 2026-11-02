@@ -227,6 +227,7 @@ impl Feature for Logs {
     type State = State;
     type Intent = Intent;
     type Effect = Effect;
+    type Output = spiderland::Never;
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
         match intent {
@@ -284,7 +285,7 @@ mod tests {
     use std::io::Write;
 
     fn send(state: &mut State, intent: Intent) -> Vec<Effect> {
-        step::<Logs>(state, intent)
+        step::<Logs>(state, intent).effects
     }
 
     fn contents(text: &str) -> Contents {

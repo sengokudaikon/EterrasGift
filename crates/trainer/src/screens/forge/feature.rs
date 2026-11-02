@@ -333,6 +333,7 @@ impl Feature for Forge {
     type State = State;
     type Intent = Intent;
     type Effect = Effect;
+    type Output = spiderland::Never;
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
         let editor = &mut state.editor;
@@ -622,8 +623,8 @@ mod tests {
     #[test]
     fn a_refused_write_with_nothing_waiting_asks_nothing_more() {
         let mut state = state(true);
-        assert!(step::<Forge>(&mut state, Intent::WriteRefused { batch: true }).is_empty());
-        assert!(step::<Forge>(&mut state, Intent::WriteAnswered(Ok(()))).is_empty());
+        assert!(step::<Forge>(&mut state, Intent::WriteRefused { batch: true }).effects.is_empty());
+        assert!(step::<Forge>(&mut state, Intent::WriteAnswered(Ok(()))).effects.is_empty());
     }
 
     #[test]
@@ -653,32 +654,32 @@ mod tests {
     #[test]
     fn a_run_without_a_template_folder_never_asks_for_one() {
         let mut state = state(true);
-        assert!(step::<Forge>(&mut state, Intent::ReadTemplates).is_empty());
-        assert!(step::<Forge>(&mut state, Intent::TemplatesOpened).is_empty());
-        assert!(step::<Forge>(&mut state, Intent::TemplateSave("Boots".into(), false)).is_empty());
+        assert!(step::<Forge>(&mut state, Intent::ReadTemplates).effects.is_empty());
+        assert!(step::<Forge>(&mut state, Intent::TemplatesOpened).effects.is_empty());
+        assert!(step::<Forge>(&mut state, Intent::TemplateSave("Boots".into(), false)).effects.is_empty());
         assert_eq!(state.editor().template_message, "Templates are not kept in this run.");
     }
 
     #[test]
     fn templates_are_read_when_the_flyout_opens_and_after_each_change() {
         let mut state = keeping();
-        assert!(matches!(step::<Forge>(&mut state, Intent::TemplatesOpened).as_slice(), [Effect::ReadTemplates]));
-        assert!(step::<Forge>(&mut state, Intent::TemplatesRead(Ok(vec![template("Boots")]))).is_empty());
+        assert!(matches!(step::<Forge>(&mut state, Intent::TemplatesOpened).effects.as_slice(), [Effect::ReadTemplates]));
+        assert!(step::<Forge>(&mut state, Intent::TemplatesRead(Ok(vec![template("Boots")]))).effects.is_empty());
         assert_eq!(state.editor().templates.len(), 1);
         // Typing reads nothing: what a name would replace comes from what was read.
-        assert!(step::<Forge>(&mut state, Intent::TemplateName("BOOTS".into())).is_empty());
+        assert!(step::<Forge>(&mut state, Intent::TemplateName("BOOTS".into())).effects.is_empty());
         assert_eq!(state.editor().template_replaces().as_deref(), Some("Boots"));
         let saved = Intent::TemplateSaved {
             name: "BOOTS".into(),
             replaced: Some("Boots".into()),
             result: Ok(Ok(())),
         };
-        assert!(matches!(step::<Forge>(&mut state, saved).as_slice(), [Effect::ReadTemplates]));
+        assert!(matches!(step::<Forge>(&mut state, saved).effects.as_slice(), [Effect::ReadTemplates]));
         assert_eq!(state.editor().template_message, "Saved \"BOOTS\" in place of \"Boots\".");
         assert_eq!(state.editor().template_name, "", "a saved name is done with");
-        let effects = step::<Forge>(&mut state, Intent::TemplateDelete(0));
+        let effects = step::<Forge>(&mut state, Intent::TemplateDelete(0)).effects;
         assert!(matches!(effects.as_slice(), [Effect::DeleteTemplate(name)] if name == "Boots"));
-        assert!(step::<Forge>(&mut state, Intent::TemplateDelete(5)).is_empty(), "no such row");
+        assert!(step::<Forge>(&mut state, Intent::TemplateDelete(5)).effects.is_empty(), "no such row");
     }
 
     #[test]
@@ -709,7 +710,7 @@ mod tests {
     #[test]
     fn keys_on_a_cell_move_the_selection_and_ask_for_focus() {
         let mut state = state(true);
-        let effects = step::<Forge>(&mut state, Intent::MoveRow { row: 0, delta: 1, part: 2 });
+        let effects = step::<Forge>(&mut state, Intent::MoveRow { row: 0, delta: 1, part: 2 }).effects;
         assert!(matches!(
             effects.as_slice(),
             [Effect::Focus {

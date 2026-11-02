@@ -732,6 +732,7 @@ impl Feature for SettingsPage {
     type State = State;
     type Intent = Intent;
     type Effect = Effect;
+    type Output = spiderland::Never;
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
         match intent {
@@ -979,7 +980,7 @@ mod tests {
         fn send(&mut self, intent: Intent) {
             let mut queue = VecDeque::from([intent]);
             while let Some(intent) = queue.pop_front() {
-                for effect in step::<SettingsPage>(&mut self.state, intent) {
+                for effect in step::<SettingsPage>(&mut self.state, intent).effects {
                     match effect {
                         Effect::Switched { key, on, .. } => self.switched.borrow_mut().push((key.into(), on)),
                         Effect::Submit(save, submission) => queue.extend(submit(&self.service, save, submission)),

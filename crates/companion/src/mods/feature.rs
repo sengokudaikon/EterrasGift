@@ -761,6 +761,7 @@ impl Feature for Mods {
     type State = State;
     type Intent = Intent;
     type Effect = Effect;
+    type Output = spiderland::Never;
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
         match intent {
@@ -1350,7 +1351,7 @@ mod tests {
     use spiderland::step;
 
     fn send(state: &mut State, intent: Intent) -> Vec<Effect> {
-        step::<Mods>(state, intent)
+        step::<Mods>(state, intent).effects
     }
 
     fn state() -> State {

@@ -143,6 +143,7 @@ impl Feature for ConnectionFeature {
     type State = State;
     type Intent = Intent;
     type Effect = Effect;
+    type Output = spiderland::Never;
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
         match intent {
@@ -359,7 +360,7 @@ mod tests {
         live.connected = true;
         live.access = Access::Live;
         state.view.set(live);
-        assert!(step::<ConnectionFeature>(&mut state, Intent::WorkerLost).is_empty());
+        assert!(step::<ConnectionFeature>(&mut state, Intent::WorkerLost).effects.is_empty());
         let view = &*state.view;
         assert!(!view.connected && view.stopped && !view.show_action);
         assert_eq!(view.access, Access::Locked);
@@ -368,7 +369,7 @@ mod tests {
     #[test]
     fn asking_to_connect_hides_the_button_only_once_the_worker_takes_it() {
         let mut state = State::new(false);
-        assert_eq!(step::<ConnectionFeature>(&mut state, Intent::Connect), [Effect::Connect]);
+        assert_eq!(step::<ConnectionFeature>(&mut state, Intent::Connect).effects, [Effect::Connect]);
         assert!(state.view.show_action);
         step::<ConnectionFeature>(&mut state, Intent::ConnectAccepted);
         assert!(!state.view.show_action);
@@ -378,9 +379,9 @@ mod tests {
     fn the_ash_follows_only_while_a_trainer_page_shows() {
         let mut state = State::new(false);
         state.wait = Some(BloomPhase::Budding);
-        assert!(step::<ConnectionFeature>(&mut state, Intent::OtherPageEntered).is_empty());
+        assert!(step::<ConnectionFeature>(&mut state, Intent::OtherPageEntered).effects.is_empty());
         assert_eq!(
-            step::<ConnectionFeature>(&mut state, Intent::TrainerPageEntered),
+            step::<ConnectionFeature>(&mut state, Intent::TrainerPageEntered).effects,
             [Effect::Drift {
                 phase: BloomPhase::Budding,
                 entering: true
