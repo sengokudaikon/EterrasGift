@@ -16,7 +16,13 @@ impl<T: Transport> Session<T> {
         self.set_gameplay_hook_with_value(hook, on, hook.default_value(), control).await
     }
 
-    pub async fn set_gameplay_hook_with_value(&mut self, hook: GameplayHook, on: bool, value: u64, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, SessionError> {
+    pub async fn set_gameplay_hook_with_value(
+        &mut self,
+        hook: GameplayHook,
+        on: bool,
+        value: eg_trainer_wire::hooks::HookValue,
+        control: &mut dyn WriteControl,
+    ) -> Result<WriteOutcome<bool>, SessionError> {
         hook.validate_value(value).map_err(SessionError::Protocol)?;
         self.admit()?;
         let dispatcher = self.dispatcher()?;

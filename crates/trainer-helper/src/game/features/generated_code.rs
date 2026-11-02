@@ -11,6 +11,7 @@
 use super::{
     any_waypoint, champions,
     damage::{DamageLayout, OffenseLayout},
+    death_drops, duplicate_on_drop,
     encounter_counts::{self, Counts},
     eternity_cache_anywhere, experimental_uniques,
     gains::{experience_multiplier, faction_gains, rank_up_per_gain},
@@ -294,6 +295,23 @@ fn record() -> Recorded {
     r.postfix("one_echo_type", &[OneEchoType], one_echo_type::effect(online));
     r.postfix("tier_7_affixes", &[Tier7Affixes], tier_7_affixes::effect(online));
 
+    r.leaf(
+        "death_drops",
+        &[DropRates, ExtraRare],
+        death_drops::Layout {
+            online,
+            override_item: 0x20,
+            item_chance: 0x24,
+            item_multiplier: 0x28,
+            override_gold: 0x2c,
+            gold_chance: 0x30,
+            gold_multiplier: 0x34,
+            extra_rare: 0x38,
+        }
+        .effect(),
+    );
+
+    r.leaf("duplicate_on_drop", &[DuplicateOnDrop], duplicate_on_drop::effect(online, at(MANAGER), CALLER, 0x2c));
     // SAFETY: prepared and read, never published or called, so the destination is never reached.
     let dispatcher = unsafe { CallbackGate::prepare(CALLBACK as *const ()) }.unwrap();
     r.add("dispatcher", &[], dispatcher.entry(), None);

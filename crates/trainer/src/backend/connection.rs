@@ -44,6 +44,16 @@ pub trait BackendConnection: Send + 'static {
     /// this game. Definitions are never captured from the game.
     fn build_hashes(&self) -> (String, String);
     fn read_forge(&mut self) -> impl Future<Output = Result<Option<ForgeSnapshot>, BackendError>> + Send;
+    fn read_fields(&mut self, _: eg_trainer_wire::field_edits::FieldSet) -> impl Future<Output = Result<eg_trainer_wire::field_edits::Snapshot, BackendError>> + Send {
+        async { Err(BackendError::blocked(ErrorKind::NotReady, "field reads are unavailable")) }
+    }
+    fn apply_fields(
+        &mut self,
+        _: &eg_trainer_wire::field_edits::Edit,
+        _: &mut dyn WriteControl,
+    ) -> impl Future<Output = Result<WriteOutcome<eg_trainer_wire::field_edits::Snapshot>, BackendError>> + Send {
+        async { Ok(WriteOutcome::refused("field edits are unavailable")) }
+    }
     fn describe_implicits(&mut self, _: &ForgeSnapshot) -> impl Future<Output = Result<Option<Vec<ModifierSnapshot>>, BackendError>> + Send {
         async { Ok(None) }
     }
@@ -106,6 +116,7 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
             affix_change: true,
             affix_list: true,
             gameplay_hooks: [true; GameplayHook::COUNT],
+            fields: [true; 3],
         }
     }
     async fn write(&mut self, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
@@ -149,6 +160,16 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
     }
     async fn read_forge(&mut self) -> Result<Option<ForgeSnapshot>, BackendError> {
         Ok(Session::read_forge(self).await?)
+    }
+    async fn read_fields(&mut self, set: eg_trainer_wire::field_edits::FieldSet) -> Result<eg_trainer_wire::field_edits::Snapshot, BackendError> {
+        Ok(Session::read_fields(self, set).await?)
+    }
+    async fn apply_fields(
+        &mut self,
+        edit: &eg_trainer_wire::field_edits::Edit,
+        control: &mut dyn WriteControl,
+    ) -> Result<WriteOutcome<eg_trainer_wire::field_edits::Snapshot>, BackendError> {
+        Ok(Session::apply_fields(self, edit, control).await?)
     }
     async fn register_affixes(&mut self, affixes: &[eg_trainer_wire::new_affixes::NewAffix]) -> Result<(), BackendError> {
         Ok(Session::register_affixes(self, affixes).await?)

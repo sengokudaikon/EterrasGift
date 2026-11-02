@@ -289,12 +289,12 @@ mod tests {
         SETTINGS.set(&gate, IncomingDamage, true, 50);
         gate.set_enabled(true);
         for multiplier in [0.0f64, 1.0, 2.5, 3.125, 100.0] {
-            SETTINGS.set(&gate, EnemyDamage, true, multiplier.to_bits());
+            SETTINGS.set(&gate, EnemyDamage, true, multiplier.to_bits().into());
             assert_eq!(hit(&target, 200.0), (200.0 * multiplier) as f32 + 7.0);
             assert_eq!(hit(&target, -200.0), (-200.0 * multiplier) as f32 + 7.0);
             assert_eq!(hit(&mine, 200.0), 107.0);
         }
-        SETTINGS.set(&gate, EnemyDamage, true, 101.0f64.to_bits());
+        SETTINGS.set(&gate, EnemyDamage, true, 101.0f64.to_bits().into());
         assert_eq!(hit(&target, 200.0), 1007.0);
         assert_eq!(hit(&target, 2000.0), 2007.0); // never reduce a larger hit
         assert_eq!(hit(&target, 0.0), 7.0);
@@ -327,10 +327,10 @@ mod tests {
         assert_eq!(hit(&target, 200.0), 207.0);
         assert_eq!(hit(&mine, 200.0), 207.0);
         online.store(0, SeqCst);
-        SETTINGS.set(&gate, EnemyDamage, false, 1.0f64.to_bits());
+        SETTINGS.set(&gate, EnemyDamage, false, 1.0f64.to_bits().into());
         assert_eq!(hit(&target, 200.0), 207.0);
         assert_eq!(hit(&mine, 200.0), 107.0);
-        SETTINGS.set(&gate, EnemyDamage, true, 2.0f64.to_bits());
+        SETTINGS.set(&gate, EnemyDamage, true, 2.0f64.to_bits().into());
         SETTINGS.set(&gate, IncomingDamage, false, 50);
         assert_eq!(hit(&target, 200.0), 407.0);
         assert_eq!(hit(&mine, 200.0), 207.0);

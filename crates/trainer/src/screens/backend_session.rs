@@ -1,14 +1,24 @@
 //! Trainer pages on the worker's owned snapshots. Independent hook controls use the shared profile/change/readback
-//! path. Unported direct field editors keep the common interface but advertise no operation support.
+//! path. Count editors share typed read/apply receipts; remaining editors advertise no operation support.
 
 use super::profiles::Profile;
-use super::session::{FieldError, FieldRequest, FieldWrite, HookState, NotAvailable, Settling, TrainerSession};
+use super::session::{FieldError, FieldRequest, FieldWrite, GameField, HookState, NotAvailable, Settling, TrainerSession};
 use crate::backend::{BackendHandle, BackendSnapshot, Command, Pending, Phase};
 use crate::features::profiles::ProfileKey;
 use crate::features::{FeatureIntents, HookId};
+use spiderland_phrases::phrases;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
+
+phrases! {
+    ReadFieldsFirst: "Read these fields before applying changes"
+    FieldsChanged: "The field observation changed; read again"
+    FieldRange: "A count must be a whole number from 0 to 2147483647"
+    FieldsGone: "The field observation is no longer available; read again"
+    WorkerStopped: "The trainer worker stopped."
+    WorkerBusy: "Wait for the current trainer operation to finish."
+}
 
 pub struct BackendSession {
     backend: BackendHandle,
@@ -29,6 +39,13 @@ struct Changes {
     last: u64,
 }
 
+struct CountPending(Rc<RefCell<Changes>>);
+impl Drop for CountPending {
+    fn drop(&mut self) {
+        self.0.borrow_mut().changing -= 1;
+    }
+}
+
 impl Changes {
     fn next(&mut self) -> u64 {
         self.last += 1;
@@ -43,6 +60,40 @@ impl BackendSession {
             changes: Rc::default(),
             settling: RefCell::default(),
         }
+    }
+    fn count_request(&self, set: eg_trainer_wire::field_edits::FieldSet, command: Command) -> FieldRequest {
+        let receipt = match self.backend.try_submit(command) {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                return refused(match error {
+                    crate::backend::SubmitError::Full => WorkerBusy.get(),
+                    crate::backend::SubmitError::Stopped => WorkerStopped.get(),
+                });
+            }
+        };
+        let backend = self.backend.clone();
+        let changes = self.changes.clone();
+        changes.borrow_mut().changing += 1;
+        let pending = CountPending(changes);
+        FieldRequest::Pending(Box::pin(async move {
+            let _pending = pending;
+            let result = receipt.wait().await;
+            result.map_err(|error| FieldError {
+                details: error.message,
+                nothing_sent: error.delivery != Some(crate::backend::Delivery::MayHaveRun),
+            })?;
+            backend
+                .peek(|snapshot| {
+                    snapshot
+                        .fields
+                        .get(&set)
+                        .map(|read| read.snapshot.fields.iter().map(|field| GameField::new(&field.label, f64::from(field.value))).collect())
+                })
+                .ok_or_else(|| FieldError {
+                    details: FieldsGone.into(),
+                    nothing_sent: false,
+                })
+        }))
     }
 
     /// Waits for `receipt`, whatever its answer: the snapshot says what the change did. `taken` then lets go of it.
@@ -105,6 +156,7 @@ impl TrainerSession for BackendSession {
                 use crate::features::{FeatureKey, NativeSupport};
                 match FeatureKey::parse(id).map(|key| key.descriptor().native_support()) {
                     Some(NativeSupport::GameplayOverride(hook)) => snapshot.capabilities.gameplay_hooks[hook as usize],
+                    Some(NativeSupport::FieldEditor(set)) => snapshot.capabilities.fields[set as usize],
                     _ => false,
                 }
             })
@@ -208,11 +260,41 @@ impl TrainerSession for BackendSession {
         self.settling.take()
     }
 
-    fn read_fields(&self, _: &str) -> FieldRequest {
-        refused(NotAvailable.get())
+    fn read_fields(&self, id: &str) -> FieldRequest {
+        let Some(set) = eg_trainer_wire::field_edits::FieldSet::from_id(id) else {
+            return refused(NotAvailable.get());
+        };
+        self.count_request(set, Command::ReadFields(set))
     }
-    fn write_fields(&self, _: &str, _: &[FieldWrite]) -> FieldRequest {
-        refused(NotAvailable.get())
+    fn write_fields(&self, id: &str, fields: &[FieldWrite]) -> FieldRequest {
+        let Some(set) = eg_trainer_wire::field_edits::FieldSet::from_id(id) else {
+            return refused(NotAvailable.get());
+        };
+        let Some(expected) = self.backend.peek(|snapshot| snapshot.fields.get(&set).cloned()) else {
+            return refused(ReadFieldsFirst.get());
+        };
+        if fields.len() != expected.snapshot.fields.len()
+            || fields
+                .iter()
+                .zip(&expected.snapshot.fields)
+                .any(|(write, read)| write.read != f64::from(read.value) || (set != eg_trainer_wire::field_edits::FieldSet::Currency && write.label != read.label))
+        {
+            return refused(FieldsChanged.get());
+        }
+        let mut values = Vec::with_capacity(fields.len());
+        for field in fields {
+            if !field.wanted.is_finite() || field.wanted.fract() != 0.0 || !(0.0..=f64::from(i32::MAX)).contains(&field.wanted) {
+                return refused(FieldRange.get());
+            }
+            values.push(field.changes().then_some(field.wanted as i32));
+        }
+        self.count_request(
+            set,
+            Command::WriteFields {
+                expected: Box::new(expected),
+                values,
+            },
+        )
     }
 }
 

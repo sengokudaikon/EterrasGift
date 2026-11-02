@@ -27,7 +27,7 @@ fn fixed_area_sends_its_value_and_confirms_it_from_independent_readback() {
             HookObservation {
                 patch: PatchState::Patched,
                 enabled: true,
-                value: actual.to_bits(),
+                value: actual.to_bits().into(),
             }
             .encode(),
         ));
@@ -39,7 +39,7 @@ fn fixed_area_sends_its_value_and_confirms_it_from_independent_readback() {
         let outcome = run(BackendConnection::set_hook(&mut session, &request, &mut AllowWrite)).unwrap();
         assert_eq!(outcome, if confirmed { WriteOutcome::Confirmed(true) } else { WriteOutcome::NotKept(true) });
         let sent = wire.requests();
-        assert!(matches!(sent[sent.len()-2], Request::SetGameplayHook { hook: actual, value, .. } if actual == hook && value == wanted.to_bits()));
+        assert!(matches!(sent[sent.len()-2], Request::SetGameplayHook { hook: actual, value, .. } if actual == hook && value == wanted.to_bits().into()));
         assert!(matches!(sent[sent.len()-1], Request::ReadGameplayHook { hook: actual, .. } if actual == hook));
     }
     let before = wire.requests().len();
@@ -135,6 +135,59 @@ fn experience_pair_is_one_write_and_each_lane_must_match_independent_readback() 
 }
 
 #[test]
+fn drop_rates_send_all_four_values_and_confirm_every_lane_from_independent_readback() {
+    let hook = GameplayHook::DropRates;
+    let numbers = [0.123, 1.234, 0.456, 7.89];
+    let value = hook.value_kind().encode(&numbers).unwrap();
+    let fixture = Fixture::rehashing();
+    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
+    let mut session = fixture.session(&wire);
+    session.enable();
+    run(session.connect()).unwrap();
+    for lane in 0..=4 {
+        let mut observed = numbers;
+        if lane < 4 {
+            observed[lane] = 0.0;
+        }
+        let actual = hook.value_kind().encode(&observed).unwrap();
+        wire.push(done(vec![]));
+        wire.push(done(
+            HookObservation {
+                patch: PatchState::Patched,
+                enabled: true,
+                value: actual,
+            }
+            .encode(),
+        ));
+        let request = HookRequest {
+            id: HookId::parse(hook.id()).unwrap(),
+            on: true,
+            values: numbers.to_vec(),
+        };
+        assert_eq!(
+            run(BackendConnection::set_hook(&mut session, &request, &mut AllowWrite)).unwrap(),
+            if lane == 4 { WriteOutcome::Confirmed(true) } else { WriteOutcome::NotKept(true) }
+        );
+        let sent = wire.requests();
+        assert!(matches!(sent[sent.len()-2], Request::SetGameplayHook { hook: actual, value: packed, .. } if actual == hook && packed == value));
+        assert!(matches!(sent[sent.len()-1], Request::ReadGameplayHook { hook: actual, .. } if actual == hook));
+    }
+    let before = wire.requests().len();
+    for numbers in [vec![0.1], vec![1.1, 2.0, 0.1, 2.0], vec![0.1, 101.0, 0.1, 2.0], vec![0.1, 2.0, f64::NAN, 2.0]] {
+        let request = HookRequest {
+            id: HookId::parse(hook.id()).unwrap(),
+            on: true,
+            values: numbers,
+        };
+        assert!(matches!(
+            run(BackendConnection::set_hook(&mut session, &request, &mut AllowWrite)).unwrap(),
+            WriteOutcome::NotApplied { .. }
+        ));
+    }
+    assert_eq!(wire.requests().len(), before);
+}
+
+#[test]
 fn shared_patch_ownership_is_reported_by_the_helper_for_any_disabled_feature() {
     for hook in GameplayHook::ALL {
         let fixture = Fixture::rehashing();
@@ -182,7 +235,7 @@ fn persistent_stats_use_independent_hook_values_and_readback() {
             HookObservation {
                 patch: if on { PatchState::Patched } else { PatchState::Original },
                 enabled: on,
-                value: if on { value.to_bits() } else { hook.default_value() },
+                value: if on { value.to_bits().into() } else { hook.default_value() },
             }
             .encode(),
         ));
@@ -197,10 +250,10 @@ fn persistent_stats_use_independent_hook_values_and_readback() {
         );
         let sent = wire.requests();
         assert!(matches!(sent[sent.len()-2],Request::SetGameplayHook { hook: actual, on: enabled, value: bits, .. }
-            if actual==hook && enabled==on && bits==value.to_bits()));
+            if actual==hook && enabled==on && bits==value.to_bits().into()));
     }
     assert!(!session.hook_observation(GameplayHook::FixedAttackRate).unwrap().enabled);
-    assert_eq!(session.hook_observation(GameplayHook::FixedLeechRate).unwrap().value, 2.5f64.to_bits());
+    assert_eq!(session.hook_observation(GameplayHook::FixedLeechRate).unwrap().value, 2.5f64.to_bits().into());
     assert!(session.hook_observation(GameplayHook::FixedLeechRate).unwrap().enabled);
 }
 
@@ -217,7 +270,7 @@ fn rift_mode_is_sent_and_confirmed_independently_of_enabled_state() {
             HookObservation {
                 patch: if on { PatchState::Patched } else { PatchState::Original },
                 enabled: on,
-                value: u64::from(actual_answer),
+                value: u128::from(actual_answer),
             }
             .encode(),
         ));
@@ -231,7 +284,7 @@ fn rift_mode_is_sent_and_confirmed_independently_of_enabled_state() {
             if kept { WriteOutcome::Confirmed(on) } else { WriteOutcome::NotKept(on) }
         );
         let sent = wire.requests();
-        assert!(matches!(sent[sent.len()-2], Request::SetGameplayHook { on: sent_on, value, .. } if sent_on == on && value == u64::from(choice != 2.0)));
+        assert!(matches!(sent[sent.len()-2], Request::SetGameplayHook { on: sent_on, value, .. } if sent_on == on && value == u128::from(choice != 2.0)));
     }
 }
 
@@ -296,6 +349,7 @@ fn each_gameplay_hook_requires_a_separate_readback_for_on_and_off() {
                     ValueKind::Real { neutral, .. } => vec![neutral],
                     ValueKind::RealPair { neutral, .. } => vec![f64::from(neutral); 2],
                     ValueKind::Choice(_) => vec![0.0],
+                    ValueKind::Reals(lanes) => lanes.iter().map(|(_, _, neutral)| f64::from(*neutral)).collect(),
                 },
             };
             assert_eq!(
@@ -437,7 +491,7 @@ fn outgoing_modes_require_exact_readback_and_off_accepts_a_verified_shared_targe
             HookObservation {
                 patch: if on { PatchState::Patched } else { PatchState::Shared },
                 enabled: on,
-                value: actual.to_bits(),
+                value: actual.to_bits().into(),
             }
             .encode(),
         ));

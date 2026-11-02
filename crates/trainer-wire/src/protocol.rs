@@ -41,6 +41,8 @@ pub mod op {
     pub const CHANGE_MODIFIER_ROLLS: u32 = 28;
     pub const MAP_MODIFIER_ROLL: u32 = 29;
     pub const REGISTER_AFFIXES: u32 = 30;
+    pub const READ_FIELDS: u32 = 31;
+    pub const WRITE_FIELDS: u32 = 32;
 }
 
 pub const MAGIC: u32 = 0x4546_4735;
@@ -83,7 +85,7 @@ pub enum Request {
         expected_manager: u64,
         hook: crate::hooks::GameplayHook,
         on: bool,
-        value: u64,
+        value: crate::hooks::HookValue,
     },
     ReadGameplayHook {
         dispatcher: DispatcherSpec,
@@ -100,6 +102,15 @@ pub enum Request {
     /// Reads an owned snapshot of the current forge item on the Unity main thread.
     ReadForge {
         dispatcher: DispatcherSpec,
+    },
+    ReadFields {
+        dispatcher: DispatcherSpec,
+        expected_manager: u64,
+        set: crate::field_edits::FieldSet,
+    },
+    WriteFields {
+        dispatcher: DispatcherSpec,
+        edit: Box<crate::field_edits::Edit>,
     },
     /// Reads the completed locale selection and application version, without starting selection.
     ReadLocale {
@@ -130,6 +141,8 @@ impl Request {
             | Self::ReadGameplayHook { dispatcher, .. }
             | Self::ClearHooks { dispatcher }
             | Self::ReadForge { dispatcher }
+            | Self::ReadFields { dispatcher, .. }
+            | Self::WriteFields { dispatcher, .. }
             | Self::ReadLocale { dispatcher } => Some(*dispatcher),
             Self::EditForge(write) => Some(write.dispatcher()),
             Self::DescribeImplicits(query) | Self::DescribeUnique(query) => Some(query.dispatcher),
@@ -375,34 +388,34 @@ fn append_text(out: &mut Vec<u8>, value: &str) -> Result<(), ProtocolError> {
     Ok(())
 }
 
-struct Reader<'a> {
+pub(crate) struct Reader<'a> {
     remaining: &'a [u8],
 }
 
 impl<'a> Reader<'a> {
-    fn new(remaining: &'a [u8]) -> Self {
+    pub(crate) fn new(remaining: &'a [u8]) -> Self {
         Self { remaining }
     }
 
-    fn take(&mut self, length: usize) -> Result<&'a [u8], ProtocolError> {
+    pub(crate) fn take(&mut self, length: usize) -> Result<&'a [u8], ProtocolError> {
         let (value, remaining) = self.remaining.split_at_checked(length).ok_or(ProtocolError::InvalidData)?;
         self.remaining = remaining;
         Ok(value)
     }
 
-    fn array<const N: usize>(&mut self) -> Result<[u8; N], ProtocolError> {
+    pub(crate) fn array<const N: usize>(&mut self) -> Result<[u8; N], ProtocolError> {
         self.take(N)?.try_into().map_err(|_| ProtocolError::InvalidData)
     }
 
-    fn byte(&mut self) -> Result<u8, ProtocolError> {
+    pub(crate) fn byte(&mut self) -> Result<u8, ProtocolError> {
         Ok(self.array::<1>()?[0])
     }
 
-    fn u32(&mut self) -> Result<u32, ProtocolError> {
+    pub(crate) fn u32(&mut self) -> Result<u32, ProtocolError> {
         Ok(u32::from_le_bytes(self.array()?))
     }
 
-    fn u64(&mut self) -> Result<u64, ProtocolError> {
+    pub(crate) fn u64(&mut self) -> Result<u64, ProtocolError> {
         Ok(u64::from_le_bytes(self.array()?))
     }
 
@@ -414,7 +427,7 @@ impl<'a> Reader<'a> {
         std::str::from_utf8(self.take(length)?).map_err(|_| ProtocolError::InvalidData)
     }
 
-    fn finish(self) -> Result<(), ProtocolError> {
+    pub(crate) fn finish(self) -> Result<(), ProtocolError> {
         if self.remaining.is_empty() { Ok(()) } else { Err(ProtocolError::InvalidData) }
     }
 }

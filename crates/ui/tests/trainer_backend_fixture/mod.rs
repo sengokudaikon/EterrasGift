@@ -88,6 +88,7 @@ impl BackendConnection for OwnedConnection {
     // The owned connection reads back independently for the editor route; it serves three hooks.
     fn capabilities(&self) -> backend::Capabilities {
         backend::Capabilities {
+            fields: [false; 3],
             gameplay_hooks: GameplayHook::ALL.map(|hook| matches!(hook, GameplayHook::MysteriousRift | GameplayHook::AnyOffhand | GameplayHook::IncomingDamage)),
             read_forge: true,
             level_requirement: true,

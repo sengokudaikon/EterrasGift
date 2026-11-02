@@ -9,6 +9,8 @@ use eg_trainer_wire::hooks::{GameplayHook, HookObservation, PatchState};
 
 #[cfg(test)]
 mod arguments;
+#[cfg(test)]
+mod drops;
 mod effect;
 use effect::{Effect, FeatureBinding};
 use native_hooks::entry::{self, Entry};
@@ -112,7 +114,13 @@ pub(super) fn count() -> u32 {
 
 /// Caller resolves metadata on the main thread. The mutex fences publication against control-thread clear/unload;
 /// it is never acquired by a gameplay call. A prepared group is retained before any entry transaction can publish it.
-unsafe fn change(hook: GameplayHook, on: bool, value: u64, binding: FeatureBinding, targets: impl FnOnce() -> Result<Vec<GameplayHookTarget>, Response>) -> Result<(), Response> {
+unsafe fn change(
+    hook: GameplayHook,
+    on: bool,
+    value: eg_trainer_wire::hooks::HookValue,
+    binding: FeatureBinding,
+    targets: impl FnOnce() -> Result<Vec<GameplayHookTarget>, Response>,
+) -> Result<(), Response> {
     if hook.validate_value(value).is_err() {
         return Err(server::failure(ResponseCode::Refused, "Invalid hook setting"));
     }
@@ -141,7 +149,7 @@ unsafe fn change(hook: GameplayHook, on: bool, value: u64, binding: FeatureBindi
     Ok(())
 }
 
-fn change_group(group: &Group, hook: GameplayHook, on: bool, value: u64) -> Result<(), Response> {
+fn change_group(group: &Group, hook: GameplayHook, on: bool, value: eg_trainer_wire::hooks::HookValue) -> Result<(), Response> {
     let target_on = group.effect.target_on(hook, on);
     group.effect.close();
     group.effect.restore().map_err(|e| server::failure(ResponseCode::Failed, e))?;
@@ -170,7 +178,7 @@ pub(super) fn read(hook: GameplayHook) -> HookObservation {
     observation(hooks.slots[slot_of(hook)].as_ref(), hook)
 }
 
-pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Option<(bool, u64)>) -> Response {
+pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Option<(bool, eg_trainer_wire::hooks::HookValue)>) -> Response {
     // SAFETY: admitted main thread; same runtime/graph lifetime as status. The supplied manager is compared only.
     unsafe {
         runtime_operation(|runtime, access, attached| {
@@ -210,7 +218,7 @@ pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Op
 pub(super) unsafe fn fixture_change(
     hook: GameplayHook,
     on: bool,
-    value: u64,
+    value: eg_trainer_wire::hooks::HookValue,
     address: *mut u8,
     receiver_class: Option<NonNull<c_void>>,
     extras: &[*mut u8],
@@ -392,7 +400,7 @@ mod tests {
         };
         owner.slots[slot_of(GameplayHook::FixedAttackRate)] = Some(group(attack as *mut u8, 0));
         owner.slots[slot_of(GameplayHook::FixedLeechRate)] = Some(group(leech as *mut u8, 4));
-        let set = |owner: &Hooks, hook: GameplayHook, on, value: f64| change_group(owner.slots[slot_of(hook)].as_ref().unwrap(), hook, on, value.to_bits()).unwrap();
+        let set = |owner: &Hooks, hook: GameplayHook, on, value: f64| change_group(owner.slots[slot_of(hook)].as_ref().unwrap(), hook, on, value.to_bits().into()).unwrap();
         set(&owner, GameplayHook::FixedAttackRate, true, 6.0);
         set(&owner, GameplayHook::FixedLeechRate, true, 2.0);
         // SAFETY: the live entries preserve their authored signature and the test owns both fields.
@@ -489,10 +497,10 @@ mod tests {
             assert_eq!(group.hooks[0].state(), HookState::Disabled);
         }
         change_group(group, IncomingDamage, true, 0).unwrap();
-        change_group(group, EnemyDamage, true, 101.0f64.to_bits()).unwrap();
+        change_group(group, EnemyDamage, true, 101.0f64.to_bits().into()).unwrap();
         owner.clear().unwrap();
         let group = owner.slots[2].as_ref().unwrap();
-        change_group(group, EnemyDamage, true, 2.5f64.to_bits()).unwrap();
+        change_group(group, EnemyDamage, true, 2.5f64.to_bits().into()).unwrap();
         assert!(observation(Some(group), IncomingDamage).confirmed(false));
         assert!(observation(Some(group), EnemyDamage).confirmed(true));
         owner.clear().unwrap();
@@ -557,17 +565,17 @@ mod tests {
         assert_eq!(invoke(call, 42, 9), 6.25);
         for (on, multiplier, expected) in [(true, 2.5f64, 15.625), (true, 0.0, 6.25), (true, 0.5, 3.125), (false, 0.5, 6.25), (true, 3.0, 18.75)] {
             let group = owner.slots[slot].as_ref().unwrap();
-            change_group(group, hook, on, multiplier.to_bits()).unwrap();
+            change_group(group, hook, on, multiplier.to_bits().into()).unwrap();
             let actual = observation(Some(group), hook);
             assert!(actual.confirmed(on));
-            assert_eq!(actual.value, multiplier.to_bits());
+            assert_eq!(actual.value, multiplier.to_bits().into());
             assert_eq!(invoke(call, 42, 9), expected);
             assert_eq!(invoke(call, 43, 9), 6.25);
         }
         owner.observe_manager(2).unwrap();
         assert!(observation(owner.slots[slot].as_ref(), hook).confirmed(false));
         assert_eq!(invoke(call, 42, 9), 6.25);
-        change_group(owner.slots[slot].as_ref().unwrap(), hook, true, 2.0f64.to_bits()).unwrap();
+        change_group(owner.slots[slot].as_ref().unwrap(), hook, true, 2.0f64.to_bits().into()).unwrap();
         assert_eq!(invoke(call, 42, 9), 12.5);
         owner.closing = true;
         owner.clear().unwrap();
@@ -680,9 +688,9 @@ mod tests {
         calls(3, 2.25, 8.75);
         for (hook, value) in controls.into_iter().zip(values) {
             let group = owner.slots[slot_of(hook)].as_ref().unwrap();
-            change_group(group, hook, true, value).unwrap();
+            change_group(group, hook, true, value.into()).unwrap();
             assert!(observation(Some(group), hook).confirmed(true));
-            assert_eq!(observation(Some(group), hook).value, value);
+            assert_eq!(observation(Some(group), hook).value, value.into());
         }
         calls(0, 3.5, 98.75);
         let primordials = owner.slots[slot_of(SeveralPrimordials)].as_ref().unwrap();
@@ -690,8 +698,8 @@ mod tests {
         assert!(observation(Some(primordials), SeveralPrimordials).confirmed(false));
         calls(3, 3.5, 98.75);
         let area = owner.slots[slot_of(FixedArea)].as_ref().unwrap();
-        change_group(area, FixedArea, true, 6.25f64.to_bits()).unwrap();
-        assert_eq!(observation(Some(area), FixedArea).value, 6.25f64.to_bits());
+        change_group(area, FixedArea, true, 6.25f64.to_bits().into()).unwrap();
+        assert_eq!(observation(Some(area), FixedArea).value, 6.25f64.to_bits().into());
         calls(3, 6.25, 98.75);
         owner.observe_manager(2).unwrap();
         for hook in controls {
@@ -699,7 +707,7 @@ mod tests {
         }
         calls(3, 2.25, 8.75);
         for (hook, value) in controls.into_iter().zip(values) {
-            change_group(owner.slots[slot_of(hook)].as_ref().unwrap(), hook, true, value).unwrap();
+            change_group(owner.slots[slot_of(hook)].as_ref().unwrap(), hook, true, value.into()).unwrap();
         }
         owner.closing = true;
         owner.clear().unwrap();

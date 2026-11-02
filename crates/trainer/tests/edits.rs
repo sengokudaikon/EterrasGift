@@ -727,14 +727,14 @@ fn weaver_counters_allow_spent_values_and_override_byte_values() {
     i.status.weavers_touch = 1;
     refresh(&mut i);
     let expected = observation(i, &c);
-    for value in [0, 1, 3, 78, 255] {
+    for value in [0, 1, 3, 77] {
         let edit = status(StatusField::WeaversTouch, value, true);
         assert_eq!(prepare(&expected, &c, edit.clone(), false, None), Err(EditError::OverrideRequired));
         let prepared = prepare(&expected, &c, edit, true, None).unwrap();
         assert_eq!(i32::from(prepared.projected().status.weavers_touch), value);
         assert!(prepared.inspect_readback(Some(prepared.projected())).confirmed());
     }
-    for value in [-1, 256] {
+    for value in [-1, 78, 255, 256] {
         assert_eq!(
             prepare(&expected, &c, status(StatusField::WeaversTouch, value, true), true, None),
             Err(EditError::InvalidStatus)

@@ -8,7 +8,9 @@
 //! The watch snapshot is the worker's one report of its state.
 mod connection;
 mod faults;
+mod fields;
 mod hooks;
+pub use fields::FieldRead;
 mod mapping;
 mod new_affixes;
 mod profiles;
@@ -113,6 +115,11 @@ pub enum Command {
     Disconnect,
     RefreshCatalog,
     ReadForge,
+    ReadFields(eg_trainer_wire::field_edits::FieldSet),
+    WriteFields {
+        expected: Box<FieldRead>,
+        values: Vec<Option<i32>>,
+    },
     DescribeUnique {
         expected: Box<crate::item::edit::ExpectedObservation>,
     },
@@ -368,6 +375,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
     let game_data = options.game_data.as_ref().map(GameDataHandle::subscribe);
     let in_use = crate::definitions::unique_mods::InUse::open(options.unique_mods_in_use.clone());
     let state = BackendSnapshot {
+        fields: BTreeMap::new(),
         revision: 0,
         generation: 0,
         enabled: false,
@@ -458,7 +466,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     self.read_cancel = envelope.read_cancel;
                     let reading = !matches!(
                         envelope.command,
-                        Command::Write(_) | Command::UndoForge(_) | Command::SetHookWanted { .. } | Command::SetHookValues { .. }
+                        Command::Write(_) | Command::UndoForge(_) | Command::WriteFields { .. } | Command::SetHookWanted { .. } | Command::SetHookValues { .. }
                     );
                     let result = self.command(envelope.command).await;
                     self.drain_departure().await;
@@ -527,6 +535,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         let idle = ready && self.state.activity.is_none();
         let served = self.connection.as_ref().map(BackendConnection::capabilities).unwrap_or_default();
         self.state.capabilities = Capabilities {
+            fields: served.fields.map(|field| idle && field),
             gameplay_hooks: served.gameplay_hooks.map(|hook| idle && hook),
             read_forge: ready,
             level_requirement: idle && served.level_requirement,
@@ -704,6 +713,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 Ok(())
             }
             Command::ReadForge => self.read(CatalogRead::Keep, true).await,
+            Command::ReadFields(set) => self.read_fields(set).await,
+            Command::WriteFields { expected, values } => {
+                let result = self.write_fields(*expected, values).await;
+                self.check_write_failure(result)
+            }
             Command::BeginForgeBatch => {
                 self.forge_history.begin_batch();
                 Ok(())

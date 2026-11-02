@@ -1,4 +1,5 @@
 //! Serialized control session, owned observations and explicit guarded writes. No automatic retry.
+mod fields;
 mod hooks;
 mod mapping;
 mod unique;

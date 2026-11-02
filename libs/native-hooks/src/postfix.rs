@@ -11,6 +11,7 @@ struct Data {
     value: AtomicU64,
     switch: u64,
     slots: [AtomicU64; 2],
+    wide: super::settings::Wide,
 }
 
 /// Byte displacements from RAX for the feature's post-call code.
@@ -18,11 +19,18 @@ pub struct Frame {
     pub switch: u8,
     pub value: u8,
     pub slots: [u8; 2],
+    /// Version, low payload word, high payload word, as in the leaf frame.
+    pub wide: [u8; 3],
 }
 pub const FRAME: Frame = Frame {
     switch: std::mem::offset_of!(Data, switch) as u8,
     value: std::mem::offset_of!(Data, value) as u8,
     slots: [std::mem::offset_of!(Data, slots) as u8, (std::mem::offset_of!(Data, slots) + 8) as u8],
+    wide: [
+        std::mem::offset_of!(Data, wide) as u8,
+        (std::mem::offset_of!(Data, wide) + 8) as u8,
+        (std::mem::offset_of!(Data, wide) + 16) as u8,
+    ],
 };
 
 /// The original caller's return address is at `[RSP + frame_size(positions)]` during effect execution.
@@ -78,6 +86,7 @@ impl PostfixGate {
             let data = allocation.add(4096).cast::<Data>();
             data.write(Data {
                 enabled: AtomicU64::new(0),
+                wide: super::settings::Wide::new(),
                 original: AtomicU64::new(0),
                 value: AtomicU64::new(1),
                 switch: shared.map_or(data as u64, |gate| gate.switch as *const AtomicU64 as u64),
@@ -118,6 +127,13 @@ impl PostfixGate {
     }
     pub fn entry(&self) -> *const () {
         self.entry as *const ()
+    }
+    /// Serialized control owner only, as for a leaf's wide setting.
+    pub fn set_wide(&self, value: u128) {
+        self.data.wide.set(value);
+    }
+    pub fn wide(&self) -> u128 {
+        self.data.wide.get().expect("serialized settings owner")
     }
     /// # Safety
     /// Original has this gateway's exact declared ABI and remains process-owned; set once before publication.

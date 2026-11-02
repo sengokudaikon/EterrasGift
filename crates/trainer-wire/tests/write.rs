@@ -287,14 +287,19 @@ fn potential_and_weaver_rules_keep_literal_bounds_identity_and_override_distinct
         (1, true, true),
         (4, true, true),
         (77, true, true),
-        (78, true, true),
-        (255, true, true),
+        (78, true, false),
+        (255, true, false),
         (-1, true, false),
         (256, true, false),
         (1, false, false),
     ] {
-        assert_eq!(StatusField::WeaversTouch.allows(&item, &limits, value, flag, None), expected);
+        assert_eq!(StatusField::WeaversTouch.allows(&item, &limits, value, flag, None), expected, "{value}/{flag}");
     }
+    item.status.weavers_touch = 200;
+    for (value, expected) in [(0, true), (77, true), (150, true), (200, true), (201, false)] {
+        assert_eq!(StatusField::WeaversTouch.allows(&item, &limits, value, true, None), expected, "held 200/{value}");
+    }
+    item.status.weavers_touch = 1;
     item.item_type = 24;
     assert!(!StatusField::WeaversTouch.allows(&item, &limits, 4, true, None));
 }

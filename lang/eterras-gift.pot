@@ -1969,6 +1969,30 @@ msgctxt "seal"
 msgid "Sealed"
 msgstr ""
 
+#: crates/trainer/src/screens/backend_session.rs
+msgid "A count must be a whole number from 0 to 2147483647"
+msgstr ""
+
+#: crates/trainer/src/screens/backend_session.rs
+msgid "Read these fields before applying changes"
+msgstr ""
+
+#: crates/trainer/src/screens/backend_session.rs
+msgid "The field observation changed; read again"
+msgstr ""
+
+#: crates/trainer/src/screens/backend_session.rs
+msgid "The field observation is no longer available; read again"
+msgstr ""
+
+#: crates/trainer/src/screens/backend_session.rs
+msgid "The trainer worker stopped."
+msgstr ""
+
+#: crates/trainer/src/screens/backend_session.rs
+msgid "Wait for the current trainer operation to finish."
+msgstr ""
+
 #: crates/trainer/src/screens/connection.rs
 msgid "Applying changes…"
 msgstr ""

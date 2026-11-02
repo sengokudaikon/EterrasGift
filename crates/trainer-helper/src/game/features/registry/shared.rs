@@ -1,6 +1,8 @@
-//! Independent controls on one generated gateway. A single atomic word holds each setting, or OFF; closing a group
-//! fences every control. Reopening clears sibling words before publishing the newly requested control.
+//! Independent controls on one generated gateway. A control word holds a setting or OFF; a larger value uses the
+//! gate's version-checked atomic snapshot and its control word as an enable marker. Closing fences every control;
+//! reopening clears sibling controls before publishing the newly requested one.
 use super::GameplayHook;
+use eg_trainer_wire::hooks::HookValue;
 use native_hooks::gate::SettingGate;
 
 pub(crate) const OFF: u64 = u64::MAX;
@@ -25,19 +27,37 @@ impl SharedSettings {
     fn control(&self, hook: GameplayHook) -> &ControlSetting {
         self.0.iter().find(|setting| setting.hook == hook).expect("control belongs to this feature")
     }
-    pub fn set(&self, gate: &impl SettingGate, hook: GameplayHook, on: bool, value: u64) {
-        let value = if on { value } else { OFF };
+    pub fn set(&self, gate: &impl SettingGate, hook: GameplayHook, on: bool, value: HookValue) {
+        if hook.value_kind().wide() {
+            gate.set_wide(value);
+        }
+        let value = if !on {
+            OFF
+        } else if hook.value_kind().wide() {
+            1
+        } else {
+            value as u64
+        };
         match self.control(hook).slot {
             None => gate.set_value(value),
             Some(slot) => gate.set_slot(slot, value),
         }
     }
-    pub fn setting(&self, gate: &impl SettingGate, hook: GameplayHook) -> (bool, u64) {
+    pub fn setting(&self, gate: &impl SettingGate, hook: GameplayHook) -> (bool, HookValue) {
         let value = match self.control(hook).slot {
             None => gate.value(),
             Some(slot) => gate.slot(slot),
         };
-        (gate.enabled() && value != OFF, if value == OFF { hook.default_value() } else { value })
+        (
+            gate.enabled() && value != OFF,
+            if value == OFF {
+                hook.default_value()
+            } else if hook.value_kind().wide() {
+                gate.wide()
+            } else {
+                value.into()
+            },
+        )
     }
     pub fn has_other(&self, gate: &impl SettingGate, hook: GameplayHook) -> bool {
         self.0.iter().any(|other| other.hook != hook && self.setting(gate, other.hook).0)

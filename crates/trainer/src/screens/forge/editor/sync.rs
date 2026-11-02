@@ -360,7 +360,8 @@ impl ForgeEditor {
                 StatusField::WeaversTouch,
                 tr::WeaversTouch.get(),
                 status.weavers_touch,
-                limits.map(|l| l.weavers_touch),
+                // An idol already holding more than the game's maximum stays editable, to bring it down.
+                limits.map(|l| (l.weavers_touch.0, l.weavers_touch.1.max(status.weavers_touch))),
                 if enabled { "" } else { &locked },
                 tr::WeaversTouchNote.get(),
                 "",

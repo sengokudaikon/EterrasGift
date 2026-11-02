@@ -3,6 +3,7 @@
 
 pub mod bootstrap;
 pub mod definitions;
+pub mod field_edits;
 pub mod fields;
 pub mod forge;
 pub mod hooks;

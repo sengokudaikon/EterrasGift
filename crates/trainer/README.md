@@ -2,6 +2,10 @@
 
 `eg-trainer` owns offline admission (`connect`), the game catalog (`definitions`), the feature catalog and profiles
 (`features`), Forge edit planning and conditional Undo (`item`), and the serialized background worker (`backend`).
+
+Count editors share typed read/apply commands and receipts. Their observations bind the process, connection generation,
+manager and full container/entry snapshot. Apply never retries and needs independent readback; the helper owns currency,
+quantity and removal semantics. The feature catalog declares these editors separately from persistent gameplay hooks.
 `eg-trainer-wire` owns the bounded messages and codecs; the helper (`eg-trainer-helper`) runs them in the game. The
 companion stays independent of all of it.
 

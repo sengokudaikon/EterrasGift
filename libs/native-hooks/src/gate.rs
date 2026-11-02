@@ -78,6 +78,8 @@ impl Gate {
 
 /// Settings access, for an owner that keeps several independent settings on one gateway of either family.
 pub trait SettingGate {
+    fn wide(&self) -> u128;
+    fn set_wide(&self, value: u128);
     fn value(&self) -> u64;
     fn set_value(&self, value: u64);
     fn slot(&self, slot: usize) -> u64;
@@ -85,6 +87,12 @@ pub trait SettingGate {
     fn enabled(&self) -> bool;
 }
 impl SettingGate for LeafGate {
+    fn wide(&self) -> u128 {
+        LeafGate::wide(self)
+    }
+    fn set_wide(&self, value: u128) {
+        LeafGate::set_wide(self, value);
+    }
     fn value(&self) -> u64 {
         LeafGate::value(self)
     }
@@ -102,6 +110,12 @@ impl SettingGate for LeafGate {
     }
 }
 impl SettingGate for PostfixGate {
+    fn wide(&self) -> u128 {
+        PostfixGate::wide(self)
+    }
+    fn set_wide(&self, value: u128) {
+        PostfixGate::set_wide(self, value);
+    }
     fn value(&self) -> u64 {
         PostfixGate::value(self)
     }

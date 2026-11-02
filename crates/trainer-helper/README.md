@@ -82,8 +82,9 @@ runs. Only owned authored Unity validation is claimed. Later game recalculation 
 Gameplay hooks: each module under `game/features` owns its targets, ABI contracts, effect and receiver rules, and
 documents its behaviour in its `//!` docs. `game/features/registry` lists those features (`FEATURES`), each with the
 controls it serves; a feature's place is its patch group (several controls can share one, as damage and experience
-do). Shared settings map each control to its own atomic word, including independent readback and last-owner
-removal; the coordinator has no feature-specific sibling handling. The wire carries feature
+do). Shared settings map each control to its own atomic word or a bounded four-float snapshot. The latter uses atomic
+payload words with a version check: a game thread skips a paused/changed writer instead of spinning. Independent
+readback checks every lane, with last-owner removal; the coordinator has no feature-specific sibling handling. The wire carries feature
 IDs, settings and observations, never patch ownership. `engine/gameplay_hooks` coordinates admission, entry
 transactions and cleanup ordering: Clear closes all effects, restores receiver state and entry bytes, then releases
 receiver-bound groups, and every failure retains the affected owners and pins. Generated gameplay code stays outside
@@ -111,6 +112,16 @@ Movement speed selects updateSpeed's checked, single movement-stat call inside `
 postfix gateway preserves all eleven native positions, the original property register and caller return address;
 no thread-local mark or helper frame spans the original. Unsupported call recipes refuse activation. Nested calls
 are independent, and normal recalculation (such as re-equipping boots) applies an on/off or value change.
+
+Drop rates and extra rare share a before-original death-drop gateway. Component writes remain for delayed drop work.
+Duplicate on drop selects the local manager's checked direct call from AttemptItemDropInWorld; unrelated drops are
+unchanged and there is no retained scope to clean up on exceptions.
+
+Count editors use `field_edits` snapshots with full container/entry/data/type identities and quantities. Main-thread
+Apply prevalidates every destination and compares the whole current observation before invoking any setter/removal
+or currency-delta method. Once a method is entered, any failure is uncertain. The desktop submits no automatic retry
+and requires a separate readback. Names are presentation: a surviving entry keeps its displayed label until Read,
+even when removing a duplicate-name neighbour changes the game's disambiguation.
 
 Loot Lizards and Rune Wardens share one original-first gateway and keep independent settings. Two words in each
 call's incoming home area capture its context and done/enable flags before the original; these survive original

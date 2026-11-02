@@ -18,7 +18,7 @@ fn record(a: i64, b: i64, c: i64, method: usize) {
     CALLS.set(CALLS.get() + 1);
     assert!(!THROW.get(), "original exception");
 }
-fn pair(first: f64, second: f64) -> u64 {
+fn pair(first: f64, second: f64) -> eg_trainer_wire::hooks::HookValue {
     GameplayHook::ExperienceMultiplier.value_kind().encode(&[first, second]).unwrap()
 }
 fn online() -> &'static AtomicU8 {
@@ -124,14 +124,14 @@ fn experience_reads_one_complete_pair_while_settings_change() {
     let online = online();
     let player = Box::leak(Box::new(AtomicUsize::new(42)));
     let gate = gate(xp_layout(online, player).effect(), xp as *const ());
-    gate.set_value(pair(2.0, 3.0));
+    gate.set_value(pair(2.0, 3.0) as u64);
     // SAFETY: exact authored five-position ABI; all storage outlives the scoped threads.
     let call: extern "C-unwind" fn(*const Tracker, i64, i64, i64, usize) = unsafe { std::mem::transmute(gate.entry()) };
     std::thread::scope(|scope| {
         let gate = &gate;
         scope.spawn(move || {
             for i in 0..10000 {
-                gate.set_value(if i % 2 == 0 { pair(2.0, 3.0) } else { pair(5.0, 7.0) });
+                gate.set_value(if i % 2 == 0 { pair(2.0, 3.0) } else { pair(5.0, 7.0) } as u64);
             }
         });
         for _ in 0..3 {

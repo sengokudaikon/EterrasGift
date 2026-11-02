@@ -36,21 +36,21 @@ fn encounter_controls_share_one_entry_and_keep_independent_values_through_off_ma
         assert_eq!((f.context.tallies[0].total, f.context.tallies[1].total), counts);
     };
     let group = owner.slots[slot_of(lizards)].as_ref().unwrap();
-    change_group(group, lizards, true, 5.0f64.to_bits()).unwrap();
-    change_group(group, wardens, true, 7.0f64.to_bits()).unwrap();
+    change_group(group, lizards, true, 5.0f64.to_bits().into()).unwrap();
+    change_group(group, wardens, true, 7.0f64.to_bits().into()).unwrap();
     for (hook, value) in [(lizards, 5.0f64), (wardens, 7.0)] {
         let read = observation(Some(group), hook);
         assert!(read.confirmed(true));
-        assert_eq!(read.value, value.to_bits());
+        assert_eq!(read.value, value.to_bits().into());
     }
     check((5, 7));
-    change_group(group, lizards, false, 5.0f64.to_bits()).unwrap();
+    change_group(group, lizards, false, 5.0f64.to_bits().into()).unwrap();
     let off = observation(Some(group), lizards);
     assert!(off.confirmed(false));
     assert_eq!(off.patch, PatchState::Shared);
     assert!(observation(Some(group), wardens).confirmed(true));
     check((4, 7));
-    change_group(group, lizards, true, 0.0f64.to_bits()).unwrap();
+    change_group(group, lizards, true, 0.0f64.to_bits().into()).unwrap();
     check((0, 7));
     owner.observe_manager(2).unwrap();
     for hook in [lizards, wardens] {
@@ -58,12 +58,12 @@ fn encounter_controls_share_one_entry_and_keep_independent_values_through_off_ma
     }
     check((4, 4));
     let group = owner.slots[slot_of(lizards)].as_ref().unwrap();
-    change_group(group, wardens, true, 20.0f64.to_bits()).unwrap();
+    change_group(group, wardens, true, 20.0f64.to_bits().into()).unwrap();
     check((4, 20));
-    change_group(group, wardens, false, 20.0f64.to_bits()).unwrap();
+    change_group(group, wardens, false, 20.0f64.to_bits().into()).unwrap();
     check((4, 4));
     assert_eq!(group.hooks[0].state(), HookState::Disabled);
-    change_group(group, lizards, true, 10.0f64.to_bits()).unwrap();
+    change_group(group, lizards, true, 10.0f64.to_bits().into()).unwrap();
     check((10, 4));
     owner.closing = true;
     owner.clear().unwrap();

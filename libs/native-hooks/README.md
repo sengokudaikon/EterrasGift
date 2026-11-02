@@ -11,6 +11,11 @@ that family's effect; `Code::gated` is the same admission for code written direc
 app's effects can be pinned byte for byte by preparing their gateways from fixed inputs and reading the published pages: nothing is
 called, and only the page addresses differ between runs.
 
+Leaf and postfix gates also retain a two-word settings snapshot. Its serialized owner uses `set_wide`; `Code::snapshot`
+loads the payload into XMM4/XMM5 only when its version stayed even and unchanged. Payload words are atomic, and a
+reader makes one attempt: a paused or concurrent writer skips the effect instead of making a caller spin. This storage,
+like the gateway itself, survives the module that prepared it.
+
 ## Retained detours
 
 `RetainedHook` leaks each `RawDetour` immediately; callers retain module lifetime through entry restoration and callback drain.

@@ -132,12 +132,12 @@ impl Effect {
     }
     /// # Safety
     /// Serialized main-thread owner, after close/restore and successful entry transaction. The group retains storage.
-    pub(super) unsafe fn publish(&self, hook: GameplayHook, on: bool, value: u64, target_on: bool) -> Result<(), Response> {
+    pub(super) unsafe fn publish(&self, hook: GameplayHook, on: bool, value: eg_trainer_wire::hooks::HookValue, target_on: bool) -> Result<(), Response> {
         match self.behavior {
             Behavior::Scalar(_) if on => {
                 let gate = self.gates[0].scalar();
                 // SAFETY: caller owns the pinned scalar and excludes recalculation over this synchronous span.
-                unsafe { gate.enable(value) };
+                unsafe { gate.enable(value as u64) };
                 // SAFETY: the same retained pin covers independent storage readback.
                 if !unsafe { gate.matches() } {
                     return Err(server::failure(ResponseCode::Failed, "Scalar readback differs"));
@@ -149,7 +149,7 @@ impl Effect {
                     let gate = gate.postfix();
                     match self.behavior {
                         Behavior::SharedPostfix(settings) => settings.set(gate, hook, on, value),
-                        _ => gate.set_value(value),
+                        _ => gate.set_value(value as u64),
                     }
                     gate.set_enabled(target_on);
                 }
@@ -167,7 +167,7 @@ impl Effect {
                         Gate::Leaf(gate) => {
                             match self.behavior {
                                 Behavior::SharedLeaf(settings) => settings.set(gate, hook, on, value),
-                                _ => gate.set_value(value),
+                                _ => gate.set_value(value as u64),
                             }
                             gate.set_enabled(target_on);
                         }
@@ -184,7 +184,7 @@ impl Effect {
         let (enabled, value) = match self.behavior {
             Behavior::SharedLeaf(settings) => settings.setting(first.leaf(), hook),
             Behavior::SharedPostfix(settings) => settings.setting(first.postfix(), hook),
-            _ => (self.gates.iter().all(Gate::enabled), first.value()),
+            _ => (self.gates.iter().all(Gate::enabled), first.value().into()),
         };
         if let Gate::Scalar(gate) = first {
             // SAFETY: the installed owner retains storage until close/drain/restore.

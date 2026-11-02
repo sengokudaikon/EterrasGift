@@ -11,15 +11,19 @@ use crate::{
 
 impl StatusField {
     /// Weaver values are remaining counters, so spent values below their generated minimum are valid.
-    /// The explicit override permits the entire stored byte rather than only the generated roll range.
+    /// The explicit override permits Weaver's Will the entire stored byte. Weaver's Touch needs the override but stops at the
+    /// game's maximum all the same; 0 takes it off.
     pub fn editing_range(self, natural: ValueRange, unrestricted: bool) -> ValueRange {
-        if matches!(self, Self::WeaversWill | Self::WeaversTouch) {
-            ValueRange {
+        match self {
+            Self::WeaversWill => ValueRange {
                 minimum: 0,
                 maximum: if unrestricted { u8::MAX } else { natural.maximum },
-            }
-        } else {
-            natural
+            },
+            Self::WeaversTouch => ValueRange {
+                minimum: 0,
+                maximum: natural.maximum,
+            },
+            _ => natural,
         }
     }
 
@@ -39,7 +43,11 @@ impl StatusField {
             Self::ForgingPotential => !matches!(item.rarity, 7..=9) && in_range(limits.forging_potential),
             Self::LevelRequirement => !matches!(item.rarity, 7..=9) && in_range(limits.level_requirement),
             Self::Corrupted | Self::Ruined => matches!(value, 0 | 1),
-            Self::WeaversTouch => unrestricted && (25..=33).contains(&item.item_type),
+            // An idol already holding more than the maximum can come down from it, and never go up.
+            Self::WeaversTouch => {
+                let maximum = limits.weavers_touch.maximum.max(status.weavers_touch);
+                unrestricted && (25..=33).contains(&item.item_type) && in_range(ValueRange { maximum, ..limits.weavers_touch })
+            }
             Self::LegendaryPotential | Self::WeaversWill => {
                 let will = self == Self::WeaversWill;
                 if will && unrestricted && item.rarity == 9 {

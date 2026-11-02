@@ -55,8 +55,14 @@ fn every_gameplay_hook_runs_exactly_one_hook_feature() {
         assert_eq!(descriptor.key, FeatureKey::Hook(HookId::parse(hook.id()).unwrap()));
         assert_eq!(descriptor.native_support(), NativeSupport::GameplayOverride(hook));
     }
-    let supported = DESCRIPTORS.iter().filter(|descriptor| descriptor.native_support() != NativeSupport::Unsupported).count();
+    let supported = DESCRIPTORS
+        .iter()
+        .filter(|descriptor| matches!(descriptor.native_support(), NativeSupport::GameplayOverride(_)))
+        .count();
     assert_eq!(supported, GameplayHook::ALL.len());
+    for set in eg_trainer_wire::field_edits::FieldSet::ALL {
+        assert_eq!(FeatureKey::parse(set.id()).unwrap().descriptor().native_support(), NativeSupport::FieldEditor(set));
+    }
 }
 
 #[test]
@@ -76,6 +82,12 @@ fn each_hooks_values_are_what_the_helper_takes() {
                 }
             }
             (ValueKind::Choice(sent), [value]) => assert_eq!(value.choices.len(), sent.len(), "{id}"),
+            (ValueKind::Reals(lanes), values) => {
+                assert_eq!(values.len(), lanes.len(), "{id}");
+                for (value, (min, max, _)) in values.iter().zip(lanes) {
+                    assert_eq!((value.minimum, value.maximum, value.choices.len()), (*min, *max, 0), "{id}");
+                }
+            }
             (kind, values) => panic!("{id}: {kind:?} with {} values", values.len()),
         }
     }

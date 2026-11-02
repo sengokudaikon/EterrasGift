@@ -17,6 +17,7 @@ mod page;
 pub mod patch;
 pub mod postfix;
 pub mod scalar;
+mod settings;
 mod unwind;
 
 pub use unwind::begins_function;

@@ -233,6 +233,21 @@ unsafe fn read_forge() -> Response {
     }
 }
 
+unsafe fn count_fields(manager: u64, set: eg_trainer_wire::field_edits::FieldSet, edit: Option<&eg_trainer_wire::field_edits::Edit>) -> Response {
+    // SAFETY: admitted main thread with the same rooted graph and method-execution contract as the Forge operations.
+    unsafe {
+        runtime_operation(|runtime, access, attached| {
+            if let Some(edit) = edit {
+                access.apply_counts(attached, runtime.invocation, edit).map_err(write_failure)?;
+                done(Vec::new())
+            } else {
+                let snapshot = access.read_counts(attached, runtime.invocation, manager, set).map_err(write_failure)?;
+                encoded(snapshot.encode())
+            }
+        })
+    }
+}
+
 unsafe fn describe_implicits(query: &eg_trainer_wire::mapping::ForgeDescriptionRequest) -> Response {
     // SAFETY: the scheduler supplies the same supported main-thread runtime and
     // synchronous rooted graph span as read_forge, including tooltip allocations.
@@ -422,6 +437,10 @@ fn after_original(state: &Shared) {
                 Request::ReadGameplayHook { expected_manager, hook, .. } => unsafe { gameplay_hooks::operation(expected_manager, hook, None) },
                 // SAFETY: same main-thread and per-operation graph ownership contract above.
                 Request::ReadForge { .. } => unsafe { read_forge() },
+                // SAFETY: admitted main thread; each operation validates the current offline manager and retains its graph.
+                Request::ReadFields { expected_manager, set, .. } => unsafe { count_fields(expected_manager, set, None) },
+                // SAFETY: same admission; full stale/destination checks precede the shared store boundary.
+                Request::WriteFields { edit, .. } => unsafe { count_fields(edit.expected.manager, edit.expected.set, Some(&edit)) },
                 // SAFETY: verified callback thread and the rooted tooltip graph span assumed by unsafe start.
                 Request::DescribeImplicits(query) => unsafe { describe_implicits(&query) },
                 // SAFETY: verified callback thread and the rooted tooltip graph span assumed by unsafe start.

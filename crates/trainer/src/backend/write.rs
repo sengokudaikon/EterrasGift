@@ -153,7 +153,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     }
     /// What every write checks again right before it is sent: the gate, a fresh status from the helper, and the
     /// same character manager its plan was made for.
-    async fn recheck_before_write(&mut self, epoch: u64, target: &ProcessIdentity, manager: u64) -> Result<(), BackendError> {
+    pub(super) async fn recheck_before_write(&mut self, epoch: u64, target: &ProcessIdentity, manager: u64) -> Result<(), BackendError> {
         let status = match self.call(epoch, target, async |connection| connection.refresh().await).await? {
             Ok(status) => status,
             Err(error) => {

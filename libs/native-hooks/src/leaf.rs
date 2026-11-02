@@ -20,6 +20,7 @@ struct Data {
     switch: u64,
     answer: AtomicU64,
     effect: [AtomicU64; EFFECT_SLOTS],
+    wide: super::settings::Wide,
 }
 
 /// Byte displacements from RAX into a leaf's data block, for code written against it.
@@ -33,6 +34,8 @@ pub struct Frame {
     pub answer: u8,
     /// A generated effect's own slots ([`GeneratedEffect::slots`], [`LeafGate::set_slot`]).
     pub effect: [u8; EFFECT_SLOTS],
+    /// Version, low payload word, high payload word of a coherent settings snapshot.
+    pub wide: [u8; 3],
     receiver_class: u8,
 }
 
@@ -50,6 +53,11 @@ pub const FRAME: Frame = {
         answer: displacement(offset_of!(Data, answer)),
         effect: [displacement(effect), displacement(effect + 8), displacement(effect + 16), displacement(effect + 24)],
         receiver_class: displacement(offset_of!(Data, receiver_class)),
+        wide: [
+            displacement(offset_of!(Data, wide)),
+            displacement(offset_of!(Data, wide) + 8),
+            displacement(offset_of!(Data, wide) + 16),
+        ],
     }
 };
 
@@ -120,6 +128,7 @@ impl LeafGate {
             let data = allocation.add(4096).cast::<Data>();
             data.write(Data {
                 enabled: AtomicU64::new(0),
+                wide: super::settings::Wide::new(),
                 original: AtomicU64::new(0),
                 answer: AtomicU64::new(1),
                 effect: match &answer {
@@ -184,6 +193,14 @@ impl LeafGate {
     }
     pub fn entry(&self) -> *const () {
         self.entry as *const ()
+    }
+    /// Serialized control owner only; publication uses atomic payload words and a version fence.
+    pub fn set_wide(&self, value: u128) {
+        self.data.wide.set(value);
+    }
+    /// Control-owner readback; game code uses one nonblocking snapshot attempt instead.
+    pub fn wide(&self) -> u128 {
+        self.data.wide.get().expect("serialized settings owner")
     }
     /// # Safety
     /// Original is a process-lifetime Windows x64 function with the selected return type.

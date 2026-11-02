@@ -68,6 +68,16 @@ impl Code {
         self.emit(&[0x4c, 0x8b, 0x58, slot, 0x4d, 0x8b, 0x1b]); // mov r11,[rax+slot]; mov r11,[r11]
         self.nonnull(&[0x4d, 0x85, 0xdb]);
     }
+    /// One attempt at a coherent two-word settings snapshot, in XMM4/XMM5 (low 64 bits each). RAX is the data page;
+    /// scratch R11 and flags. On odd/changed version exit without applying any writes. x64 ordered atomic loads pair
+    /// with the serialized writer's sequentially consistent atomic stores; no payload is accessed nonatomically.
+    pub fn snapshot(&mut self, [version, low, high]: [u8; 3]) {
+        self.emit(&[0x4c, 0x8b, 0x58, version, 0x41, 0xf6, 0xc3, 1]);
+        self.exit(0x85);
+        self.emit(&[0xf3, 0x0f, 0x7e, 0x60, low, 0xf3, 0x0f, 0x7e, 0x68, high]);
+        self.emit(&[0x4c, 0x3b, 0x58, version]);
+        self.exit(0x85);
+    }
     /// The branch at `at` lands here.
     pub fn bind(&mut self, at: usize) {
         self.bind_at(at, self.bytes.len());

@@ -1517,28 +1517,38 @@ mod tests {
 
     #[test]
     fn weaver_counters_below_generated_minima_stay_editable() {
-        for field in [StatusField::WeaversTouch, StatusField::WeaversWill] {
-            for game in [0, 1, 4, 14, 255] {
-                let mut draft = FieldDraft::number(1, field, "Weaver", game, Some((5, 14)), "", "", "", true);
-                assert!(draft.is_editable(), "{field:?}/{game}");
-                let editor = draft.editor.as_ref().unwrap();
-                assert_eq!(editor.value(game), f64::from(game));
-                assert_eq!(editor.parse("0"), Some(0.0));
-                assert_eq!(editor.parse("1"), Some(1.0));
-                assert_eq!(editor.parse("255"), Some(255.0));
-                assert_eq!(editor.parse("-1"), None);
-                assert_eq!(editor.parse("256"), None);
-                let next = if game == 255 { 1 } else { 255 };
-                assert!(draft.set_roll(next));
-                assert_eq!(
-                    draft.read_edit(),
-                    ItemEdit::Status(crate::item::edit::StatusEdit {
-                        field,
-                        value: i32::from(next),
-                        unrestricted: true,
-                    })
-                );
-            }
+        let field = StatusField::WeaversWill;
+        for game in [0, 1, 4, 14, 255] {
+            let mut draft = FieldDraft::number(1, field, "Weaver", game, Some((5, 14)), "", "", "", true);
+            assert!(draft.is_editable(), "{field:?}/{game}");
+            let editor = draft.editor.as_ref().unwrap();
+            assert_eq!(editor.value(game), f64::from(game));
+            assert_eq!(editor.parse("0"), Some(0.0));
+            assert_eq!(editor.parse("1"), Some(1.0));
+            assert_eq!(editor.parse("255"), Some(255.0));
+            assert_eq!(editor.parse("-1"), None);
+            assert_eq!(editor.parse("256"), None);
+            let next = if game == 255 { 1 } else { 255 };
+            assert!(draft.set_roll(next));
+            assert_eq!(
+                draft.read_edit(),
+                ItemEdit::Status(crate::item::edit::StatusEdit {
+                    field,
+                    value: i32::from(next),
+                    unrestricted: true,
+                })
+            );
+        }
+        for game in [0, 1, 4, 14] {
+            let draft = FieldDraft::number(1, StatusField::WeaversTouch, "Weaver", game, Some((5, 14)), "", "", "", true);
+            assert!(draft.is_editable(), "{game}");
+            let editor = draft.editor.as_ref().unwrap();
+            assert_eq!(editor.value(game), f64::from(game));
+            assert_eq!(editor.parse("0"), Some(0.0));
+            assert_eq!(editor.parse("1"), Some(1.0));
+            assert_eq!(editor.parse("14"), Some(14.0));
+            assert_eq!(editor.parse("15"), None);
+            assert_eq!(editor.parse("255"), None);
         }
         let draft = FieldDraft::number(1, StatusField::WeaversWill, "Weaver", 1, Some((5, 28)), "", "", "", false);
         assert!(draft.is_editable());

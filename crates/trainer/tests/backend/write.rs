@@ -128,7 +128,7 @@ fn queued_override_revocation_refuses_old_plans_and_undo_before_io() {
         connected(&handle).await;
         let edit = StatusEdit {
             field: StatusField::WeaversTouch,
-            value: 255,
+            value: 9,
             unrestricted: true,
         };
         assert_eq!(handle.snapshot().status_edit_plan(edit.clone()), Err(EditError::OverrideRequired));

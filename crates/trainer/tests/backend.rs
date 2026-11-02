@@ -8,6 +8,8 @@ use std::{
     },
     time::Duration,
 };
+#[path = "backend/fields.rs"]
+mod fields;
 #[path = "backend/mapping.rs"]
 mod mappings;
 #[path = "backend/profiles.rs"]
@@ -137,6 +139,8 @@ struct Shared {
     forge_item: Mutex<Option<ForgeSnapshot>>,
     write_result: Mutex<Option<WriteStatus>>,
     hooks_supported: AtomicBool,
+    counts: Mutex<BTreeMap<eg_trainer_wire::field_edits::FieldSet, eg_trainer_wire::field_edits::Snapshot>>,
+    counts_kept: AtomicBool,
     hooks_suspended: AtomicBool,
     /// Answers to hook changes in turn; without one the game confirms what was asked.
     hook_results: Mutex<VecDeque<Result<WriteOutcome<bool>, BackendError>>>,
@@ -183,6 +187,8 @@ impl Shared {
             forge_item: Mutex::new(None),
             write_result: Mutex::new(None),
             hooks_supported: AtomicBool::new(false),
+            counts: Mutex::new(BTreeMap::new()),
+            counts_kept: AtomicBool::new(true),
             hooks_suspended: AtomicBool::new(false),
             hook_results: Mutex::new(VecDeque::new()),
             hook_requests: Mutex::new(vec![]),
@@ -255,6 +261,7 @@ impl BackendConnection for Connection {
     fn capabilities(&self) -> backend::Capabilities {
         let writes = self.shared.write_enabled.load(Ordering::SeqCst);
         backend::Capabilities {
+            fields: eg_trainer_wire::field_edits::FieldSet::ALL.map(|set| self.shared.counts.lock().unwrap().contains_key(&set)),
             read_forge: true,
             level_requirement: writes,
             status_fields: [writes; 7],
@@ -290,6 +297,41 @@ impl BackendConnection for Connection {
             return Err(error);
         }
         Ok(self.shared.forge_item.lock().unwrap().clone())
+    }
+    async fn read_fields(&mut self, set: eg_trainer_wire::field_edits::FieldSet) -> Result<eg_trainer_wire::field_edits::Snapshot, BackendError> {
+        self.shared.call("fields-read", &self.shared.forge_block).await;
+        self.shared
+            .counts
+            .lock()
+            .unwrap()
+            .get(&set)
+            .cloned()
+            .ok_or_else(|| BackendError::blocked(ErrorKind::NotReady, "stash loading"))
+    }
+    async fn apply_fields(
+        &mut self,
+        edit: &eg_trainer_wire::field_edits::Edit,
+        _: &mut dyn WriteControl,
+    ) -> Result<WriteOutcome<eg_trainer_wire::field_edits::Snapshot>, BackendError> {
+        self.shared.call("fields-write", &self.shared.write_block).await;
+        let mut counts = self.shared.counts.lock().unwrap();
+        let actual = counts.get_mut(&edit.expected.set).unwrap();
+        if !actual.same_values(&edit.expected) {
+            return Ok(WriteOutcome::refused("entry changed"));
+        }
+        for (field, value) in actual.fields.iter_mut().zip(&edit.values) {
+            if let Some(value) = value {
+                field.value = *value;
+            }
+        }
+        if actual.set != eg_trainer_wire::field_edits::FieldSet::Currency {
+            actual.fields.retain(|field| field.value != 0);
+        }
+        Ok(if self.shared.counts_kept.load(Ordering::SeqCst) {
+            WriteOutcome::Confirmed(actual.clone())
+        } else {
+            WriteOutcome::NotKept(actual.clone())
+        })
     }
     async fn register_affixes(&mut self, affixes: &[eg_trainer_wire::new_affixes::NewAffix]) -> Result<(), BackendError> {
         self.shared.record("register");

@@ -151,7 +151,7 @@ pub(crate) unsafe fn invoke(entry: usize, placement: *mut Placement) {
 fn set(gate: &PostfixGate, hook: GameplayHook, on: bool, value: f64) {
     let active = SETTINGS.target_on(gate, hook, on);
     gate.set_enabled(false);
-    SETTINGS.set(gate, hook, on, value.to_bits());
+    SETTINGS.set(gate, hook, on, value.to_bits().into());
     gate.set_enabled(active);
 }
 fn gate(online: &AtomicU8) -> PostfixGate {

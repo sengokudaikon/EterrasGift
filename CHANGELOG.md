@@ -5,6 +5,14 @@ code and its tests, and what is still to build in [the helper's backlog](crates/
 
 ## 2026-11-02
 
+- Trainer: item and gold drop chances and multipliers apply together to new enemy deaths.
+- Trainer: an extra rare item per enemy uses its own control on the shared death-drop hook.
+- Stash: edit gold, soul embers and ancient bones through the game's currency methods.
+- Stash: read and edit held keys and consumables, including removing a stack by setting its quantity to zero.
+- Stash: read and edit held woven echoes through the same checked quantity workflow.
+- Stash: duplicate player-dropped items; keys, consumables and woven echoes use the stack multiplier.
+
+- Forge: Weaver's Touch stops at the game's maximum again, with the override too; an idol already above it can only come down.
 - Trainer: connecting while the game freezes for a few seconds during a load waits it out, instead of stopping at Blocked.
 - Mods: once the mod library has stopped, the page is read-only, a change that never reached it is shown undone, and the app can close and restart.
 

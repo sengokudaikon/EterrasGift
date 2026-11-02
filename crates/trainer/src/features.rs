@@ -117,6 +117,7 @@ impl FeatureKey {
 pub enum NativeSupport {
     Unsupported,
     GameplayOverride(eg_trainer_wire::hooks::GameplayHook),
+    FieldEditor(eg_trainer_wire::field_edits::FieldSet),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -191,10 +192,11 @@ impl FeatureDescriptor {
     pub const fn fills_section(&self) -> bool {
         matches!(self.key, FeatureKey::Forge)
     }
-    /// The game hook that runs this feature, if this version has one.
+    /// The hook or read/apply editor that serves this feature in this version.
     pub fn native_support(&self) -> NativeSupport {
         match self.key {
             FeatureKey::Hook(id) => id.native().map_or(NativeSupport::Unsupported, NativeSupport::GameplayOverride),
+            FeatureKey::Fields(id) => eg_trainer_wire::field_edits::FieldSet::from_id(id.as_str()).map_or(NativeSupport::Unsupported, NativeSupport::FieldEditor),
             _ => NativeSupport::Unsupported,
         }
     }
@@ -312,7 +314,7 @@ impl FeatureIntents {
             });
         }
         for (index, (specification, value)) in descriptor.values.iter().zip(values).enumerate() {
-            if !specification.accepts(*value) || id.native().is_some_and(|hook| !hook.value_kind().takes(*value)) {
+            if !specification.accepts(*value) || id.native().is_some_and(|hook| !hook.value_kind().takes_at(index, *value)) {
                 return Err(FeatureError::InvalidValue { id, index });
             }
         }
@@ -349,9 +351,10 @@ impl FeatureIntents {
                 specification
                     .iter()
                     .zip(entry.values)
-                    .map(|(specification, value)| {
+                    .enumerate()
+                    .map(|(index, (specification, value))| {
                         let fitted = specification.fit_saved(value);
-                        id.native().and_then(|hook| hook.value_kind().fit(fitted)).unwrap_or(fitted)
+                        id.native().and_then(|hook| hook.value_kind().fit_at(index, fitted)).unwrap_or(fitted)
                     })
                     .collect(),
             );

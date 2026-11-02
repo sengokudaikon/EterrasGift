@@ -76,7 +76,10 @@ impl Request {
                 body.u64(*expected_manager);
                 body.byte(*hook as u8);
                 body.flag(*on);
-                body.u64(*value);
+                body.u64(*value as u64);
+                if hook.value_kind().wide() || *value > u64::MAX as crate::hooks::HookValue {
+                    body.u64((*value >> 64) as u64);
+                }
                 op::SET_GAMEPLAY_HOOK
             }
             Self::ReadGameplayHook { expected_manager, hook, .. } => {
@@ -108,6 +111,22 @@ impl Request {
             Self::Status { .. } => op::STATUS,
             Self::ClearHooks { .. } => op::CLEAR_HOOKS,
             Self::ReadForge { .. } => op::READ_FORGE,
+            Self::ReadFields { expected_manager, set, .. } => {
+                body.u64(*expected_manager);
+                body.byte(*set as u8);
+                op::READ_FIELDS
+            }
+            Self::WriteFields { edit, .. } => {
+                body.blob(&edit.expected.encode().expect("validated field edit"));
+                body.u32(edit.values.len() as u32);
+                for value in &edit.values {
+                    body.flag(value.is_some());
+                    if let Some(value) = value {
+                        body.u32(*value as u32);
+                    }
+                }
+                op::WRITE_FIELDS
+            }
             Self::ReadLocale { .. } => op::READ_LOCALE,
             Self::DescribeImplicits(query) | Self::DescribeUnique(query) => {
                 body.u64(query.manager());
@@ -281,7 +300,9 @@ impl Request {
             op::DISCOVER | op::UNLOAD => Some(0),
             op::STATUS | op::CLEAR_HOOKS | op::READ_FORGE | op::READ_LOCALE => Some(DISPATCHER),
             op::READ_GAMEPLAY_HOOK => Some(DISPATCHER + 8 + 1),
-            op::SET_GAMEPLAY_HOOK => Some(DISPATCHER + 8 + 1 + 1 + 8),
+            op::READ_FIELDS => Some(DISPATCHER + 8 + 1),
+            op::WRITE_FIELDS if (DISPATCHER..=crate::field_edits::MAX_BYTES + 32 * 1024).contains(&length) => Some(length),
+            op::SET_GAMEPLAY_HOOK if [DISPATCHER + 8 + 1 + 1 + 8, DISPATCHER + 8 + 1 + 1 + 16].contains(&length) => Some(length),
             // A conditional item request carries its expected item, whose size varies.
             op::CHANGE_AFFIX
             | op::CHANGE_AFFIX_ROLLS
@@ -338,7 +359,13 @@ impl Request {
                         expected_manager,
                         hook,
                         on: body.flag()?,
-                        value: hook.validate_value(body.u64()?)?,
+                        value: {
+                            let mut value = crate::hooks::HookValue::from(body.u64()?);
+                            if hook.value_kind().wide() {
+                                value |= crate::hooks::HookValue::from(body.u64()?) << 64;
+                            }
+                            hook.validate_value(value)?
+                        },
                     }
                 } else {
                     Self::ReadGameplayHook {
@@ -367,6 +394,32 @@ impl Request {
             op::STATUS => Self::Status { dispatcher },
             op::CLEAR_HOOKS => Self::ClearHooks { dispatcher },
             op::READ_FORGE => Self::ReadForge { dispatcher },
+            op::READ_FIELDS => {
+                let expected_manager = body.u64()?;
+                if expected_manager == 0 {
+                    return Err(ProtocolError::InvalidData);
+                }
+                Self::ReadFields {
+                    dispatcher,
+                    expected_manager,
+                    set: crate::field_edits::FieldSet::decode(body.byte()?)?,
+                }
+            }
+            op::WRITE_FIELDS => {
+                let length = body.u32()? as usize;
+                let expected = crate::field_edits::Snapshot::decode(body.take(length)?)?;
+                let count = body.u32()? as usize;
+                if count != expected.fields.len() {
+                    return Err(ProtocolError::InvalidData);
+                }
+                let mut values = Vec::with_capacity(count);
+                for _ in 0..count {
+                    values.push(if body.flag()? { Some(i32::from_le_bytes(body.array()?)) } else { None });
+                }
+                let edit = crate::field_edits::Edit { expected, values };
+                edit.validate()?;
+                Self::WriteFields { dispatcher, edit: Box::new(edit) }
+            }
             op::READ_LOCALE => Self::ReadLocale { dispatcher },
             op::DESCRIBE_UNIQUE | op::DESCRIBE_IMPLICITS => {
                 let manager = body.u64()?;

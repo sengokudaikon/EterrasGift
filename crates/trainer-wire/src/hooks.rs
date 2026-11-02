@@ -1,6 +1,9 @@
 //! Concrete supported gameplay effects; arbitrary signatures never cross the pipe.
 use crate::protocol::ProtocolError;
 
+/// A bounded settings snapshot: existing scalar/pair encodings use the low word; up to four game floats use both.
+pub type HookValue = u128;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum GameplayHook {
@@ -54,6 +57,9 @@ pub enum GameplayHook {
     RevealObjective = 47,
     ProphecyAnyDistance = 48,
     NewItemRarity = 49,
+    DropRates = 50,
+    ExtraRare = 51,
+    DuplicateOnDrop = 52,
 }
 
 /// What a hook's value is: how the desktop's number for it is sent, which values the helper takes, and the one it
@@ -69,66 +75,115 @@ pub enum ValueKind {
     Real { min: f64, max: f64, infinity: Option<f64>, neutral: f64 },
     /// Two finite single-precision numbers, low word first, published together in one aligned 64-bit store.
     RealPair { min: f64, max: f64, neutral: f32 },
+    /// Up to four single-precision values, each with its own bounds and neutral value, low lane first.
+    Reals(&'static [(f64, f64, f32)]),
     /// One of the desktop's choices, by index, each sent as its value here.
     Choice(&'static [u64]),
 }
 
 impl ValueKind {
     /// The value it rests at while off.
-    pub const fn neutral(self) -> u64 {
+    pub const fn neutral(self) -> HookValue {
         match self {
             Self::Switch => 1,
             Self::Percent => 100,
-            Self::Real { neutral, .. } => neutral.to_bits(),
-            Self::RealPair { neutral, .. } => neutral.to_bits() as u64 | ((neutral.to_bits() as u64) << 32),
-            Self::Choice(values) => values[0],
+            Self::Real { neutral, .. } => neutral.to_bits() as HookValue,
+            Self::RealPair { neutral, .. } => neutral.to_bits() as HookValue | ((neutral.to_bits() as HookValue) << 32),
+            Self::Reals(lanes) => {
+                assert!(!lanes.is_empty() && lanes.len() <= 4);
+                let mut value = 0;
+                let mut index = 0;
+                while index < lanes.len() {
+                    value |= (lanes[index].2.to_bits() as HookValue) << (32 * index);
+                    index += 1;
+                }
+                value
+            }
+            Self::Choice(values) => values[0] as HookValue,
         }
     }
 
-    pub fn accepts(self, value: u64) -> bool {
+    pub fn accepts(self, value: HookValue) -> bool {
+        if !self.wide() && value > u64::MAX as HookValue {
+            return false;
+        }
         match self {
             Self::Switch => value == 1,
             Self::Percent => value <= 100,
-            Self::Real { .. } => self.takes(f64::from_bits(value)),
+            Self::Real { .. } => self.takes(f64::from_bits(value as u64)),
             Self::RealPair { .. } => [value as u32, (value >> 32) as u32].into_iter().all(|bits| self.takes(f64::from(f32::from_bits(bits)))),
-            Self::Choice(values) => values.contains(&value),
+            Self::Reals(lanes) => {
+                (1..=4).contains(&lanes.len())
+                    && lanes
+                        .iter()
+                        .enumerate()
+                        .all(|(index, _)| self.takes_at(index, f64::from(f32::from_bits((value >> (32 * index)) as u32))))
+                    && (lanes.len() == 4 || value >> (32 * lanes.len()) == 0)
+            }
+            Self::Choice(values) => values.contains(&(value as u64)),
         }
     }
 
     /// Whether the desktop's number is one this value takes.
     pub fn takes(self, number: f64) -> bool {
+        self.takes_at(0, number)
+    }
+
+    pub fn wide(self) -> bool {
+        matches!(self, Self::Reals(_))
+    }
+
+    pub fn takes_at(self, index: usize, number: f64) -> bool {
         number.is_finite()
             && match self {
                 Self::Switch => false,
                 Self::Percent => number.fract() == 0.0 && (0.0..=100.0).contains(&number),
                 Self::Real { min, max, infinity, .. } => (min..=max).contains(&number) || Some(number) == infinity,
                 Self::RealPair { min, max, .. } => (min..=max).contains(&number),
+                Self::Reals(lanes) => lanes.get(index).is_some_and(|(min, max, _)| (*min..=*max).contains(&number)),
                 Self::Choice(values) => number.fract() == 0.0 && number >= 0.0 && number < values.len() as f64,
             }
     }
 
     /// A saved number as this value takes it now: rounded and within its range, or `None` when nothing fits.
     pub fn fit(self, number: f64) -> Option<f64> {
+        self.fit_at(0, number)
+    }
+
+    pub fn fit_at(self, index: usize, number: f64) -> Option<f64> {
         let fitted = match self {
             Self::Percent => number.round().clamp(0.0, 100.0),
             Self::Real { min, max, infinity, .. } if Some(number) != infinity => number.clamp(min, max),
             Self::RealPair { min, max, .. } => number.clamp(min, max),
+            Self::Reals(lanes) => {
+                let (min, max, _) = lanes.get(index)?;
+                number.clamp(*min, *max)
+            }
             _ => number,
         };
-        self.takes(fitted).then_some(fitted)
+        self.takes_at(index, fitted).then_some(fitted)
     }
 
-    /// The value sent for the desktop's numbers: none for a switch, one otherwise.
-    pub fn encode(self, numbers: &[f64]) -> Option<u64> {
+    /// Encode the desktop's numbers, preserving each game-float lane for multi-value settings.
+    pub fn encode(self, numbers: &[f64]) -> Option<HookValue> {
         match (self, numbers) {
             (Self::Switch, []) => Some(1),
-            (Self::Percent, [number]) if self.takes(*number) => Some(*number as u64),
-            (Self::Real { .. }, [number]) if self.takes(*number) => Some(number.to_bits()),
+            (Self::Percent, [number]) if self.takes(*number) => Some(*number as HookValue),
+            (Self::Real { .. }, [number]) if self.takes(*number) => Some(number.to_bits().into()),
             (Self::RealPair { .. }, [first, second]) if self.takes(*first) && self.takes(*second) => {
-                let packed = u64::from((*first as f32).to_bits()) | (u64::from((*second as f32).to_bits()) << 32);
+                let packed = HookValue::from((*first as f32).to_bits()) | (HookValue::from((*second as f32).to_bits()) << 32);
                 self.accepts(packed).then_some(packed)
             }
-            (Self::Choice(values), [number]) if self.takes(*number) => Some(values[*number as usize]),
+            (Self::Reals(lanes), numbers)
+                if (1..=4).contains(&lanes.len()) && numbers.len() == lanes.len() && numbers.iter().enumerate().all(|(index, value)| self.takes_at(index, *value)) =>
+            {
+                let packed = numbers
+                    .iter()
+                    .enumerate()
+                    .fold(0, |packed, (index, value)| packed | (HookValue::from((*value as f32).to_bits()) << (32 * index)));
+                self.accepts(packed).then_some(packed)
+            }
+            (Self::Choice(values), [number]) if self.takes(*number) => Some(values[*number as usize].into()),
             _ => None,
         }
     }
@@ -235,11 +290,18 @@ pub const SPECS: [HookSpec; GameplayHook::COUNT] = {
         switch(RevealObjective, "reveal-objective"),
         switch(ProphecyAnyDistance, "prophecy-any-distance"),
         spec(NewItemRarity, "new-item-rarity", ValueKind::Choice(&[0, 1, 3, 7, 8])),
+        spec(
+            DropRates,
+            "drop-rates",
+            ValueKind::Reals(&[(0.0, 1.0, 0.1), (0.0, 100.0, 1.0), (0.0, 1.0, 0.1), (0.0, 100.0, 2.0)]),
+        ),
+        switch(ExtraRare, "extra-rare"),
+        real(DuplicateOnDrop, "duplicate-on-drop", 1.0, 20.0, 2.0),
     ]
 };
 
 impl GameplayHook {
-    pub const COUNT: usize = 50;
+    pub const COUNT: usize = 53;
     /// Every hook by its number on the pipe, checked against [`SPECS`] when the crate builds.
     pub const ALL: [Self; Self::COUNT] = {
         let mut all = [Self::MysteriousRift; Self::COUNT];
@@ -264,10 +326,10 @@ impl GameplayHook {
         SPECS.iter().find(|spec| spec.id == id).map(|spec| spec.hook)
     }
     /// The value it rests at while off.
-    pub fn default_value(self) -> u64 {
+    pub fn default_value(self) -> HookValue {
         self.value_kind().neutral()
     }
-    pub fn validate_value(self, value: u64) -> Result<u64, ProtocolError> {
+    pub fn validate_value(self, value: HookValue) -> Result<HookValue, ProtocolError> {
         if self.value_kind().accepts(value) { Ok(value) } else { Err(ProtocolError::InvalidData) }
     }
     pub(crate) fn decode(value: u8) -> Result<Self, ProtocolError> {
@@ -288,7 +350,7 @@ pub enum PatchState {
 pub struct HookObservation {
     pub patch: PatchState,
     pub enabled: bool,
-    pub value: u64,
+    pub value: HookValue,
 }
 impl HookObservation {
     pub fn confirmed(self, wanted: bool) -> bool {
@@ -309,7 +371,10 @@ impl HookObservation {
             },
             u8::from(self.enabled),
         ];
-        bytes.extend(self.value.to_le_bytes());
+        bytes.extend((self.value as u64).to_le_bytes());
+        if self.value > u64::MAX as HookValue {
+            bytes.extend(((self.value >> 64) as u64).to_le_bytes());
+        }
         bytes
     }
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
@@ -325,7 +390,11 @@ impl HookObservation {
                 _ => return Err(ProtocolError::InvalidData),
             },
             enabled: enabled != 0,
-            value: u64::from_le_bytes(value.try_into().map_err(|_| ProtocolError::InvalidData)?),
+            value: match value.len() {
+                8 => u64::from_le_bytes(value.try_into().unwrap()).into(),
+                16 => HookValue::from_le_bytes(value.try_into().unwrap()),
+                _ => return Err(ProtocolError::InvalidData),
+            },
         })
     }
 }
@@ -345,8 +414,8 @@ mod tests {
     #[test]
     fn numbers_encode_as_their_kind() {
         let enemy = GameplayHook::EnemyDamage.value_kind();
-        assert_eq!(enemy.encode(&[2.5]), Some(2.5f64.to_bits()));
-        assert_eq!(enemy.encode(&[101.0]), Some(101.0f64.to_bits()));
+        assert_eq!(enemy.encode(&[2.5]), Some(2.5f64.to_bits().into()));
+        assert_eq!(enemy.encode(&[101.0]), Some(101.0f64.to_bits().into()));
         assert_eq!(enemy.encode(&[100.5]), None);
         assert_eq!((enemy.fit(150.0), enemy.fit(101.0)), (Some(100.0), Some(101.0)));
         let damage = GameplayHook::IncomingDamage.value_kind();
@@ -368,7 +437,7 @@ mod tests {
             assert_eq!(kind.encode(values), None);
         }
         for rarity in [2, 4, 6, 9, u64::MAX] {
-            assert!(GameplayHook::NewItemRarity.validate_value(rarity).is_err());
+            assert!(GameplayHook::NewItemRarity.validate_value(rarity.into()).is_err());
         }
     }
 
@@ -386,7 +455,7 @@ mod tests {
                 u64::from(bad.to_bits()) | (u64::from(2.0f32.to_bits()) << 32),
                 u64::from(2.0f32.to_bits()) | (u64::from(bad.to_bits()) << 32),
             ] {
-                assert!(GameplayHook::ExperienceMultiplier.validate_value(packed).is_err());
+                assert!(GameplayHook::ExperienceMultiplier.validate_value(packed.into()).is_err());
             }
         }
     }
@@ -426,5 +495,48 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn four_float_settings_validate_each_lane_and_roundtrip_both_words() {
+        let hook = GameplayHook::DropRates;
+        let kind = hook.value_kind();
+        let numbers = [0.123, 1.234, 0.456, 7.89];
+        let value = kind.encode(&numbers).unwrap();
+        for (index, number) in numbers.into_iter().enumerate() {
+            assert_eq!(f32::from_bits((value >> (index * 32)) as u32), number as f32);
+        }
+        for count in [0, 1, 2, 3, 5] {
+            assert!(kind.encode(&vec![0.0; count]).is_none());
+        }
+        for (index, maximum) in [1.0, 100.0, 1.0, 100.0].into_iter().enumerate() {
+            for bad in [-0.1, maximum + 0.1, f64::NAN, f64::INFINITY] {
+                let mut invalid = numbers;
+                invalid[index] = bad;
+                assert!(kind.encode(&invalid).is_none());
+                let invalid_bits = (value & !(HookValue::from(u32::MAX) << (32 * index))) | (HookValue::from((bad as f32).to_bits()) << (32 * index));
+                assert!(hook.validate_value(invalid_bits).is_err());
+            }
+        }
+        let dispatcher = DispatcherSpec { rva: 32, bytes: [0x90; 16] };
+        let request = Request::SetGameplayHook {
+            dispatcher,
+            expected_manager: 7,
+            hook,
+            on: true,
+            value,
+        };
+        let bytes = request.encode();
+        assert_eq!(Request::decode(&bytes).unwrap(), request);
+        assert!(Request::decode(&bytes[..bytes.len() - 8]).is_err());
+        for value in [value, 0] {
+            let observation = HookObservation {
+                patch: PatchState::Patched,
+                enabled: true,
+                value,
+            };
+            assert_eq!(HookObservation::decode(&observation.encode()).unwrap(), observation);
+        }
+        assert!(GameplayHook::ExtraRare.validate_value((1 << 64) | 1).is_err());
     }
 }

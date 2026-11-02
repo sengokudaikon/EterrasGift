@@ -543,6 +543,7 @@ mod tests {
 
     fn snapshot(revision: u64, phase: Phase) -> BackendSnapshot {
         BackendSnapshot {
+            fields: BTreeMap::new(),
             revision,
             generation: 0,
             enabled: true,
