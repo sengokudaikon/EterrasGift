@@ -366,6 +366,8 @@ struct Pending {
     settings: Vec<SettingKey>,
     clears_build: bool,
     failure: Failure,
+    /// The mod whose switch this job flips, shown flipped already.
+    toggled: Option<String>,
     answer: Option<Answer>,
 }
 
@@ -376,6 +378,8 @@ struct BuildJob {
 }
 
 pub struct State {
+    /// The library's worker stopped: nothing more can change or read the library in this run, so the page is read-only.
+    stopped: bool,
     inventory: Tracked<Inventory>,
     version: Option<String>,
     sources: Tracked<SourceSnapshot>,
@@ -429,6 +433,7 @@ impl State {
             editing: BTreeSet::new(),
             removed: None,
             message: None,
+            stopped: false,
             read: false,
             visible: false,
             running: false,
@@ -504,6 +509,7 @@ fn enqueue(state: &mut State, effects: &mut Effects<Effect>, change: Change, set
         settings,
         clears_build,
         failure,
+        toggled: None,
         answer: None,
     });
     effects.push(Effect::Enqueue {
@@ -538,6 +544,10 @@ fn retain_failed_settings(state: &mut State, settings: Vec<SettingKey>) {
 }
 
 fn commit_settings(state: &mut State, effects: &mut Effects<Effect>) {
+    // Nothing can keep them now; asking would only be refused, and a close would wait on that each time.
+    if state.stopped {
+        return;
+    }
     let unsaved = std::mem::take(&mut state.unsaved);
     if unsaved.is_empty() {
         return;
@@ -587,8 +597,16 @@ fn settle(state: &mut State, effects: &mut Effects<Effect>) {
         }
         match job.answer.expect("the loop's condition") {
             Answer::Stopped(error) => {
+                let said = std::mem::replace(&mut state.stopped, true);
+                // Nothing will read the library again to put this right: the switch goes back to what the library holds.
+                if let Some(item) = job.toggled.and_then(|file| state.inventory.mods.iter_mut().find(|item| item.installed.file == file)) {
+                    item.installed.enabled = !item.installed.enabled;
+                }
                 retain_failed_settings(state, job.settings);
-                say(state, job.failure.message(&error), true);
+                // Once is enough for a closing page: saying it again would hold the window open for what can't change.
+                if !(said && state.closing) {
+                    say(state, job.failure.message(&error), true);
+                }
             }
             Answer::Failed(error) => {
                 retain_failed_settings(state, job.settings);
@@ -839,7 +857,10 @@ impl Feature for Mods {
                 let (file, enabled) = (item.installed.file.clone(), item.installed.enabled);
                 state.message = None;
                 state.removed = None;
-                edit(state, effects, Change::SetEnabled { file, enabled });
+                edit(state, effects, Change::SetEnabled { file: file.clone(), enabled });
+                if let Some(job) = state.pending.back_mut() {
+                    job.toggled = Some(file);
+                }
             }
             Intent::Refresh => refresh(state, effects),
             Intent::CommitSettings => commit_settings(state, effects),
@@ -897,6 +918,7 @@ impl Feature for Mods {
                     .collect();
                 edit(state, effects, Change::Revert { root, visible });
             }
+            Intent::PickMod if state.stopped => say(state, LibraryStopped.get(), true),
             Intent::PickMod => effects.push(Effect::PickMod),
             Intent::Add(path) => {
                 commit_settings(state, effects);
@@ -1187,7 +1209,7 @@ impl State {
             readiness: if self.read { readiness.text } else { Reading.get().to_owned() },
             facts: if self.read { readiness.facts } else { Vec::new() },
             warning: readiness.warning,
-            can_play: self.read && readiness.can_play && !self.closing,
+            can_play: self.read && readiness.can_play && !self.closing && !self.stopped,
             is_read: self.read,
             can_open_folder: inventory.mods_folder.is_some(),
             can_open_log: inventory.loader_log.is_some(),
@@ -1202,7 +1224,7 @@ impl State {
             installed: inventory.mods.len(),
             enabled: inventory.mods.iter().filter(|item| item.installed.enabled).count(),
             selected_index: if inventory.mods.is_empty() { -1 } else { self.selection as i32 },
-            busy: !self.read,
+            busy: !self.read || self.stopped,
             building: self.building.is_some(),
             draft_count,
             can_undo: self.removed.is_some(),
@@ -1462,6 +1484,99 @@ mod tests {
         );
         assert!(revisions(&effects).is_empty(), "asking a stopped worker again would never end");
         assert!(state.status().change_is_error);
+    }
+
+    #[test]
+    fn a_stopped_worker_leaves_the_page_read_only_with_the_switch_as_the_library_holds_it() {
+        let mut state = state();
+        let revision = shown(&mut state);
+        let mut held = observation();
+        held.inventory.mods.push(ModReport {
+            installed: InstalledMod {
+                file: "Beta.dll".into(),
+                hash: String::new(),
+                enabled: true,
+            },
+            name: "Beta".into(),
+            version: None,
+            author: None,
+            description: None,
+            link: None,
+            was_on: true,
+            loaded_last_time: None,
+            problem: None,
+            log: Vec::new(),
+            settings: Vec::new(),
+            log_from_other_build: false,
+            build_waiting: false,
+            project_version: None,
+        });
+        send(
+            &mut state,
+            Intent::Answered {
+                revision,
+                answer: Answer::Observed(Box::new(held)),
+            },
+        );
+        assert!(!state.status().busy);
+
+        let effects = send(&mut state, Intent::Toggle(0));
+        assert!(!state.mod_rows()[0].enabled, "the switch moves at once");
+        send(
+            &mut state,
+            Intent::Answered {
+                revision: revisions(&effects)[0],
+                answer: Answer::library_stopped(),
+            },
+        );
+        assert!(state.mod_rows()[0].enabled, "the change never reached the library");
+        let status = state.status();
+        assert!(status.busy && !status.can_play && status.change_is_error);
+        assert!(
+            !send(&mut state, Intent::PickMod).iter().any(|effect| matches!(effect, Effect::PickMod)),
+            "nothing could add what it picks"
+        );
+    }
+
+    #[test]
+    fn a_stopped_worker_never_holds_the_window_open() {
+        let mut state = state();
+        let revision = shown(&mut state);
+        send(
+            &mut state,
+            Intent::Answered {
+                revision,
+                answer: Answer::library_stopped(),
+            },
+        );
+        state.unsaved.insert(("Category".into(), "Key".into()));
+        let effects = send(&mut state, Intent::CloseRequested);
+        assert!(revisions(&effects).is_empty(), "a setting nothing can keep isn't asked for again");
+        assert!(effects.iter().any(|effect| matches!(effect, Effect::Closed)), "{effects:?}");
+    }
+
+    #[test]
+    fn a_library_that_stops_during_a_close_is_said_once_and_the_next_close_goes_ahead() {
+        let mut state = state();
+        let first = shown(&mut state);
+        let second = revisions(&send(&mut state, Intent::Refresh))[0];
+        send(&mut state, Intent::CloseRequested);
+        send(
+            &mut state,
+            Intent::Answered {
+                revision: first,
+                answer: Answer::library_stopped(),
+            },
+        );
+        let effects = send(
+            &mut state,
+            Intent::Answered {
+                revision: second,
+                answer: Answer::library_stopped(),
+            },
+        );
+        assert!(effects.iter().any(|effect| matches!(effect, Effect::CloseAbandoned)), "the page shows it once");
+        assert!(send(&mut state, Intent::CloseRequested).iter().any(|effect| matches!(effect, Effect::Closed)));
     }
 
     #[test]

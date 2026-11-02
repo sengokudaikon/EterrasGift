@@ -3,6 +3,10 @@
 What the rewrite can do, newest first, one line per feature. Add a line when a feature lands; details live in the
 code and its tests, and what is still to build in [the helper's backlog](crates/trainer-helper/BACKLOG.md).
 
+## 2026-11-02
+
+- Mods: once the mod library has stopped, the page is read-only, a change that never reached it is shown undone, and the app can close and restart.
+
 ## 2026-11-01
 
 - Mods: a build tool left running no longer stalls reading or building mod projects, or closing the app.

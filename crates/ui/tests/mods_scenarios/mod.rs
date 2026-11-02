@@ -240,14 +240,20 @@ fn mods_library_stopped(session: &Session) {
     assert!(fixture.worker.faulted());
     wait_for("the page to say the library stopped", || state.get_change_message().contains(STOPPED));
     session.idle();
-    assert!(!state.get_busy());
+    assert!(state.get_busy() && !state.get_can_play(), "the switches and Play go with the library");
+    assert!(state.get_mods().row_data(0).unwrap().enabled, "the toggle never reached the library");
     session.capture(&ui, "mods-library-stopped");
 
     // Later work is refused at once, and the page is still up to say so.
     state.invoke_toggle_mod(0);
     session.idle();
     assert!(state.get_change_message().contains(STOPPED));
-    assert!(!state.get_busy());
+    assert!(state.get_mods().row_data(0).unwrap().enabled);
+
+    // A setting nothing can keep doesn't hold the window: the app still closes, so it can be restarted.
+    state.invoke_setting_edited(1, "5".into());
+    session.window.dispatch_event(WindowEvent::CloseRequested);
+    wait_for("the window to close", || !ui.window().is_visible());
 }
 
 fn mods_sources(session: &Session) {

@@ -82,6 +82,7 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
     eg_ui::follow_system_settings(&window);
     eg_ui::system::follow_dark_title_bar(&window);
     let result = window.run();
+    let mods = companion.mods.clone();
     let Some(settings) = shutdown(&window, trainer_runtime, companion, runtime, background, service) else {
         // A shutdown fault outranks every restart request and the window's own result.
         return Ok(ExitCode::FAILURE);
@@ -93,11 +94,12 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
             return Ok(ExitCode::FAILURE);
         }
     }
-    result.map(|()| ExitCode::SUCCESS)
+    // A stopped mod library is what a restart is for, so it doesn't prevent one; this run still reports it.
+    result.map(|()| if mods.faulted() { ExitCode::FAILURE } else { ExitCode::SUCCESS })
 }
 
 /// Drain accepted trainer work, cancel producers, then close writers and settle the game's mod-loader proxy. The settings
-/// as closed, or None when a worker or a writer faulted: the app then exits with a non-zero code.
+/// as closed, or None when the trainer, the runtime or a writer faulted: the app then exits with a non-zero code.
 fn shutdown(window: &MainWindow, trainer: Option<trainer::Trainer>, companion: Companion, runtime: Runtime, background: Tasks, settings: SettingsService) -> Option<Snapshot> {
     let trainer_closed = trainer.is_none_or(|runtime| runtime.close());
     companion.launcher.cancel();
@@ -112,6 +114,6 @@ fn shutdown(window: &MainWindow, trainer: Option<trainer::Trainer>, companion: C
     companion.launcher.stop();
     // Last: everything above runs on it or waits on what does.
     let runtime_fault = runtime.shutdown();
-    let faulted = !trainer_closed || runtime_fault || companion.mods.faulted() || matches!(settings.outcome, SaveOutcome::Faulted(_));
+    let faulted = !trainer_closed || runtime_fault || matches!(settings.outcome, SaveOutcome::Faulted(_));
     (!faulted).then_some(settings)
 }
