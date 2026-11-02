@@ -96,8 +96,7 @@ pub fn bind(window: &MainWindow, navigation: Navigation) -> ShellHandle {
 }
 
 fn answer(store: &Store<Shell>, intent: Intent) -> NavOutcome {
-    store.send(intent);
-    match store.try_read(State::answer) {
+    match store.ask(intent, State::answer) {
         Some(Outcome::Handled { .. }) => NavOutcome::Handled,
         Some(Outcome::OpenFlyout) => NavOutcome::OpenFlyout,
         Some(Outcome::Ignored) | None => NavOutcome::Ignored,

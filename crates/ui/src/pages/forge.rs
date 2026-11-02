@@ -15,7 +15,7 @@ use eg_trainer::screens::forge::feature::{Effect, FocusTarget, Forge, Intent, St
 use eg_trainer::screens::forge::game::{PREVIEW_DELAY, Request};
 use slint::{ComponentHandle, Timer, Weak};
 use spiderland::{Host, Intents, Store, Subscriptions};
-use spiderland_slint::{Background, Dropping, after, finish, local, on_watch};
+use spiderland_slint::{Background, Dropping, after, on_watch};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -177,7 +177,7 @@ impl ForgeHost {
                 match self.backend.try_submit(*command) {
                     Ok(receipt) => {
                         let (backend, intents) = (self.backend.clone(), intents.clone());
-                        finish(receipt.wait(), move |result| {
+                        self.background.finish(receipt.wait(), move |result| {
                             intents.send(observed(&backend));
                             intents.send(Intent::WriteAnswered(result));
                         });
@@ -189,7 +189,7 @@ impl ForgeHost {
             Request::Mapping { id, expected, request } => match self.backend.try_resolve_mapping(*expected, *request) {
                 Ok(mut read) => {
                     let (backend, intents) = (self.backend.clone(), intents.clone());
-                    let reading = local(async move { read.wait().await }, move |result| {
+                    let reading = self.background.local(async move { read.wait().await }, move |result| {
                         intents.send(observed(&backend));
                         intents.send(Intent::MappingAnswered {
                             id,
@@ -210,7 +210,7 @@ impl ForgeHost {
             Request::Preview { expected, draft } => match self.backend.try_submit(Command::PreviewUnique { expected, draft: *draft }) {
                 Ok(receipt) => {
                     let (backend, intents) = (self.backend.clone(), intents.clone());
-                    finish(receipt.wait(), move |result| {
+                    self.background.finish(receipt.wait(), move |result| {
                         intents.send(observed(&backend));
                         intents.send(Intent::PreviewAnswered {
                             error: result.err().map(|error| error.message),

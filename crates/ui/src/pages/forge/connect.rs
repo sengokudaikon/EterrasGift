@@ -18,17 +18,11 @@ pub(super) fn connect(forge: &ForgeState, store: &Store<Forge>) {
     macro_rules! ask {
         ($on:ident, $gone:expr, || $intent:expr) => {{
             let store = store.clone();
-            forge.$on(move || {
-                store.send($intent);
-                store.try_read(State::answer).unwrap_or($gone)
-            });
+            forge.$on(move || store.ask($intent, State::answer).unwrap_or($gone));
         }};
         ($on:ident, $gone:expr, |$($arg:ident),*| $intent:expr) => {{
             let store = store.clone();
-            forge.$on(move |$($arg),*| {
-                store.send($intent);
-                store.try_read(State::answer).unwrap_or($gone)
-            });
+            forge.$on(move |$($arg),*| store.ask($intent, State::answer).unwrap_or($gone));
         }};
     }
     callbacks!(forge, store, {
