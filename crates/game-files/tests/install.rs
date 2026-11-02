@@ -6,7 +6,7 @@ use std::time::Instant;
 
 fn install() -> Install {
     let folder = std::env::var_os("EG_LAST_EPOCH").expect("set EG_LAST_EPOCH to the game folder (the one holding Last Epoch.exe)");
-    Install::at(folder).unwrap()
+    Install::of(std::path::Path::new(&folder).join("Last Epoch.exe")).unwrap()
 }
 
 #[test]

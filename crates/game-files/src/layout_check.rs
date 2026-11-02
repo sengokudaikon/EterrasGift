@@ -10,7 +10,7 @@ use unity_files::value::Value;
 #[test]
 #[ignore = "compares with a Last Epoch install named by EG_LAST_EPOCH"]
 fn generated_layouts_match_the_shipped_type_trees() {
-    let install = crate::Install::at(std::env::var_os("EG_LAST_EPOCH").expect("EG_LAST_EPOCH")).unwrap();
+    let install = crate::Install::of(std::path::Path::new(&std::env::var_os("EG_LAST_EPOCH").expect("EG_LAST_EPOCH")).join("Last Epoch.exe")).unwrap();
     let il2cpp = Il2Cpp::open(&install.game_assembly(), &install.metadata()).unwrap();
     let layouts = Layouts::new(&il2cpp);
     let mut archive = Archive::open(install.definition_sources()).unwrap();

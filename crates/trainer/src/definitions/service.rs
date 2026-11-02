@@ -4,7 +4,7 @@
 //!
 //! A start with an unchanged install loads the saved catalog: every file it was read from, the two hashed binaries
 //! among them, still has the size and write time it had, so nothing is decoded or hashed again. A changed install (a
-//! Steam update) is read again, at start and whenever a connect asks for the folder its game runs from.
+//! Steam update) is read again, at start and whenever a connect asks for the game it is connecting to.
 
 use crate::definitions::cache::CatalogCache;
 use crate::definitions::catalog::{CatalogIdentity, EXTRACTION_VERSION, GameLocale};
@@ -19,15 +19,15 @@ use std::time::{Duration, SystemTime};
 use task_runtime::{CancellationToken, Tasks};
 use tokio::sync::{mpsc, oneshot, watch};
 
-/// The index of the saved catalog: the folder and the files it was read from.
+/// The index of the saved catalog: the game and the files it was read from.
 const INDEX_FILE: &str = "files.json";
 /// The game's names by language, saved beside the catalog and read only with its index.
 const NAMES_FILE: &str = "names.json";
-const INDEX_VERSION: u64 = 2;
+const INDEX_VERSION: u64 = 3;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum GameData {
-    /// No game folder is known yet.
+    /// No game is known yet.
     NoGame,
     Reading,
     Ready(Arc<FileCatalog>),
@@ -35,7 +35,7 @@ pub enum GameData {
     Unavailable(String),
 }
 
-/// The service's side for its users: the current state, and a way to ask for a folder's catalog.
+/// The service's side for its users: the current state, and a way to ask for a game's catalog.
 #[derive(Clone)]
 pub struct GameDataHandle {
     requests: Option<mpsc::UnboundedSender<Request>>,
@@ -43,8 +43,8 @@ pub struct GameDataHandle {
 }
 
 struct Request {
-    /// The game's folder; none for the one kept.
-    folder: Option<PathBuf>,
+    /// The game's executable; none for the one kept.
+    executable: Option<PathBuf>,
     /// Read the files even if a current catalog is kept or saved.
     again: bool,
     reply: Option<oneshot::Sender<GameData>>,
@@ -76,26 +76,26 @@ impl GameDataHandle {
         self.state.borrow().clone()
     }
 
-    /// The catalog for the game in `folder`, current: read again first if the folder differs from the one kept or a
-    /// file it was read from changed since.
-    pub async fn for_folder(&self, folder: &Path) -> GameData {
-        self.ask(Some(folder), false).await
+    /// The catalog for the game `executable` starts, current: read again first if it is not the game kept or a file it
+    /// was read from changed since.
+    pub async fn for_game(&self, executable: &Path) -> GameData {
+        self.ask(Some(executable), false).await
     }
 
-    /// Reads the files again, whatever is kept or saved (Settings' Read again): those in `folder`, else the kept
-    /// folder's.
-    pub async fn read_again(&self, folder: Option<&Path>) -> GameData {
-        self.ask(folder, true).await
+    /// Reads the files again, whatever is kept or saved (Settings' Read again): those of `executable`'s game, else the
+    /// kept game's.
+    pub async fn read_again(&self, executable: Option<&Path>) -> GameData {
+        self.ask(executable, true).await
     }
 
-    async fn ask(&self, folder: Option<&Path>, again: bool) -> GameData {
+    async fn ask(&self, executable: Option<&Path>, again: bool) -> GameData {
         let Some(requests) = &self.requests else {
             return self.current();
         };
         let stopped = || GameData::Unavailable("The game data service has stopped.".into());
         let (reply, answer) = oneshot::channel();
         let request = Request {
-            folder: folder.map(Path::to_path_buf),
+            executable: executable.map(Path::to_path_buf),
             again,
             reply: Some(reply),
         };
@@ -106,15 +106,15 @@ impl GameDataHandle {
     }
 }
 
-/// Starts the service on `tasks`. With `folder` (the installed game, when found), it reads at once; with `store`, it
+/// Starts the service on `tasks`. With `executable` (the installed game, when found), it reads at once; with `store`, it
 /// saves what it reads and loads it back on the next start. It ends with the last handle or the runtime's close, which
 /// waits for a read already under way; requests still queued are told it has stopped.
-pub fn start(folder: Option<PathBuf>, store: Option<PathBuf>, faults: Option<FaultLog>, tasks: &Tasks) -> GameDataHandle {
+pub fn start(executable: Option<PathBuf>, store: Option<PathBuf>, faults: Option<FaultLog>, tasks: &Tasks) -> GameDataHandle {
     let (publish, state) = watch::channel(GameData::NoGame);
     let (requests, incoming) = mpsc::unbounded_channel::<Request>();
-    if folder.is_some() {
+    if executable.is_some() {
         let _ = requests.send(Request {
-            folder,
+            executable,
             again: false,
             reply: None,
         });
@@ -123,7 +123,7 @@ pub fn start(folder: Option<PathBuf>, store: Option<PathBuf>, faults: Option<Fau
         store: store.map(Store::new),
         faults,
         publish,
-        folder: None,
+        executable: None,
     };
     // Refused only on a runtime already closing: with the receiver gone, every request is told it has stopped.
     let _ = tasks.spawn(answer(service, incoming, tasks.clone(), tasks.token()));
@@ -135,8 +135,8 @@ async fn answer(mut service: Service, mut incoming: mpsc::UnboundedReceiver<Requ
     let publish = service.publish.clone();
     while let Some(Some(request)) = closing.run_until_cancelled(incoming.recv()).await {
         let read = tasks.spawn_blocking(move || {
-            let state = match request.folder.or_else(|| service.folder.clone()) {
-                Some(folder) => service.serve(&folder, request.again),
+            let state = match request.executable.or_else(|| service.executable.clone()) {
+                Some(executable) => service.serve(&executable, request.again),
                 None => GameData::NoGame,
             };
             if let Some(reply) = request.reply {
@@ -162,16 +162,16 @@ struct Service {
     store: Option<Store>,
     faults: Option<FaultLog>,
     publish: watch::Sender<GameData>,
-    /// The folder the published state is for.
-    folder: Option<PathBuf>,
+    /// The game the published state is for.
+    executable: Option<PathBuf>,
 }
 
 impl Service {
-    fn serve(&mut self, folder: &Path, again: bool) -> GameData {
-        let same_folder = self.folder.as_deref().is_some_and(|kept| file_ops::paths::same_place(kept, folder));
+    fn serve(&mut self, executable: &Path, again: bool) -> GameData {
+        let same_game = self.executable.as_deref().is_some_and(|kept| file_ops::paths::same_place(kept, executable));
         let kept = self.publish.borrow().clone();
         if !again
-            && same_folder
+            && same_game
             && let GameData::Ready(catalog) = kept
             && catalog.is_current()
         {
@@ -181,10 +181,10 @@ impl Service {
             self.publish.send_replace(state.clone());
             return state;
         }
-        self.folder = Some(folder.to_path_buf());
+        self.executable = Some(executable.to_path_buf());
         self.publish.send_replace(GameData::Reading);
         let saved = match &self.store {
-            Some(store) if !again => store.load(folder).unwrap_or_else(|e| self.fault("Loading the saved game data", &e)),
+            Some(store) if !again => store.load(executable).unwrap_or_else(|e| self.fault("Loading the saved game data", &e)),
             _ => None,
         };
         let state = match saved {
@@ -192,7 +192,7 @@ impl Service {
                 catalog.checked_at = Some(jiff::Timestamp::now());
                 GameData::Ready(Arc::new(catalog))
             }
-            None => match files::read_with_ledger(folder, self.store.as_ref().map(Store::ledger).as_deref()) {
+            None => match files::read_with_ledger(executable, self.store.as_ref().map(Store::ledger).as_deref()) {
                 Ok(mut catalog) => {
                     let now = jiff::Timestamp::now();
                     catalog.checked_at = Some(now);
@@ -200,7 +200,7 @@ impl Service {
                     if let Some(problem) = catalog.ledger_problem.clone() {
                         // Not saved: the next start tries the ledger again rather than reusing a catalog without them.
                         self.fault::<()>("Reading the unique modifier IDs", &problem);
-                    } else if let Some(Err(e)) = self.store.as_ref().map(|store| store.save(folder, &catalog)) {
+                    } else if let Some(Err(e)) = self.store.as_ref().map(|store| store.save(executable, &catalog)) {
                         self.fault::<()>("Saving the game data", &e);
                     }
                     GameData::Ready(Arc::new(catalog))
@@ -253,9 +253,9 @@ impl Store {
         }
     }
 
-    /// The saved catalog for `folder`, if every file it was read from is unchanged. No index, another folder or a
-    /// changed file is a miss; a damaged save is an error (and then a miss).
-    fn load(&self, folder: &Path) -> Result<Option<FileCatalog>, String> {
+    /// The saved catalog for the game `executable` starts, if every file it was read from is unchanged. No index, another
+    /// game or a changed file is a miss; a damaged save is an error (and then a miss).
+    fn load(&self, executable: &Path) -> Result<Option<FileCatalog>, String> {
         let index = match json_file::load(&self.directory.join(INDEX_FILE), Bom::Refuse) {
             Ok(Some(index)) => index,
             Ok(None) => return Ok(None),
@@ -266,7 +266,7 @@ impl Store {
         if index["version"].as_u64() != Some(INDEX_VERSION) || index["extraction_version"].as_u64() != Some(u64::from(EXTRACTION_VERSION)) {
             return Ok(None);
         }
-        if !file_ops::paths::same_place(Path::new(&text("folder")?), folder) {
+        if !file_ops::paths::same_place(Path::new(&text("executable")?), executable) {
             return Ok(None);
         }
         let sources = index["sources"]
@@ -312,7 +312,7 @@ impl Store {
     }
 
     /// Saves the catalog, then its index; an index is never left naming a catalog that was not written.
-    fn save(&self, folder: &Path, catalog: &FileCatalog) -> Result<(), String> {
+    fn save(&self, executable: &Path, catalog: &FileCatalog) -> Result<(), String> {
         let saved = catalog.saved().map_err(|e| format!("{e:?}"))?;
         self.cache.save(&saved).map_err(|e| e.to_string())?;
         let names: serde_json::Map<String, Value> = catalog.names().iter().map(|(code, names)| (code.clone(), names.to_json())).collect();
@@ -334,7 +334,7 @@ impl Store {
         let index = json!({
             "version": INDEX_VERSION,
             "extraction_version": EXTRACTION_VERSION,
-            "folder": folder,
+            "executable": executable,
             "binary_hash": catalog.binary_hash,
             "metadata_hash": catalog.metadata_hash,
             "build": catalog.build,
@@ -349,6 +349,10 @@ impl Store {
 mod tests {
     use super::*;
 
+    fn game_in(folder: &Path) -> PathBuf {
+        folder.join("Game.exe")
+    }
+
     /// A catalog read from `folder`, whose one source file is there.
     fn catalog(folder: &Path) -> FileCatalog {
         let file = folder.join("GameAssembly.dll");
@@ -360,38 +364,38 @@ mod tests {
     fn a_saved_catalog_loads_back_while_its_files_are_unchanged() {
         let (game, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let store = Store::new(data.path().to_path_buf());
-        assert_eq!(store.load(game.path()).unwrap(), None, "nothing saved yet");
+        assert_eq!(store.load(&game_in(game.path())).unwrap(), None, "nothing saved yet");
         let read = catalog(game.path());
-        store.save(game.path(), &read).unwrap();
-        let loaded = store.load(game.path()).unwrap().expect("loads back");
+        store.save(&game_in(game.path()), &read).unwrap();
+        let loaded = store.load(&game_in(game.path())).unwrap().expect("loads back");
         assert_eq!(loaded.saved().unwrap(), read.saved().unwrap());
         assert_eq!((loaded.build.as_str(), loaded.sources()), (read.build.as_str(), read.sources()));
-        assert_eq!(store.load(data.path()).unwrap(), None, "another folder's game is not this one");
+        assert_eq!(store.load(&game_in(data.path())).unwrap(), None, "another folder's game is not this one");
         std::fs::write(game.path().join("GameAssembly.dll"), b"build two, longer").unwrap();
-        assert_eq!(store.load(game.path()).unwrap(), None, "a changed file is read again");
+        assert_eq!(store.load(&game_in(game.path())).unwrap(), None, "a changed file is read again");
         std::fs::write(data.path().join(INDEX_FILE), b"not json").unwrap();
-        assert!(store.load(game.path()).is_err(), "a damaged index is reported");
+        assert!(store.load(&game_in(game.path())).is_err(), "a damaged index is reported");
     }
 
     #[test]
-    fn the_service_loads_a_saved_catalog_and_reports_a_folder_it_cannot_read() {
+    fn the_service_loads_a_saved_catalog_and_reports_a_game_it_cannot_read() {
         let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
         let (game, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         // The folder holds no game, so a catalog that comes back was loaded, not read.
         let mut read = catalog(game.path());
         read.updated_at = Some("2026-10-21T17:15:00Z".parse().unwrap());
-        Store::new(data.path().to_path_buf()).save(game.path(), &read).unwrap();
+        Store::new(data.path().to_path_buf()).save(&game_in(game.path()), &read).unwrap();
         let owner = task_runtime::Runtime::start().unwrap();
         let service = start(None, Some(data.path().to_path_buf()), None, &owner.tasks());
         assert_eq!(service.current(), GameData::NoGame);
-        let GameData::Ready(loaded) = runtime.block_on(service.for_folder(game.path())) else {
+        let GameData::Ready(loaded) = runtime.block_on(service.for_game(&game_in(game.path()))) else {
             panic!("the saved catalog loads");
         };
         assert_eq!(loaded.saved().unwrap(), read.saved().unwrap());
         assert_eq!(service.current(), GameData::Ready(loaded.clone()), "and is published");
         assert_eq!(loaded.updated_at, read.updated_at, "cache reuse preserves when definitions were rebuilt");
         assert!(loaded.checked_at.is_some(), "loading a cache checks its source files now");
-        let GameData::Ready(checked) = runtime.block_on(service.for_folder(game.path())) else {
+        let GameData::Ready(checked) = runtime.block_on(service.for_game(&game_in(game.path()))) else {
             panic!("still current")
         };
         assert_eq!(checked.updated_at, loaded.updated_at, "an unchanged recheck is not a cache rebuild");
@@ -403,11 +407,11 @@ mod tests {
             "Read again reads the files, which hold no game, instead of loading the saved catalog"
         );
 
-        let elsewhere = data.path().join("no game here");
-        assert!(matches!(runtime.block_on(service.for_folder(&elsewhere)), GameData::Unavailable(_)));
+        let elsewhere = data.path().join("no game here.exe");
+        assert!(matches!(runtime.block_on(service.for_game(&elsewhere)), GameData::Unavailable(_)));
         assert!(matches!(service.current(), GameData::Unavailable(_)));
         assert!(!owner.shutdown());
-        let stopped = runtime.block_on(service.for_folder(game.path()));
+        let stopped = runtime.block_on(service.for_game(&game_in(game.path())));
         assert_eq!(
             stopped,
             GameData::Unavailable("The game data service has stopped.".into()),
@@ -422,21 +426,21 @@ mod tests {
         let mut read = catalog(game.path());
         read.checked_at = Some("2026-10-22T11:40:00Z".parse().unwrap());
         read.updated_at = Some("2026-10-21T17:15:00Z".parse().unwrap());
-        store.save(game.path(), &read).unwrap();
-        let loaded = store.load(game.path()).unwrap().unwrap();
+        store.save(&game_in(game.path()), &read).unwrap();
+        let loaded = store.load(&game_in(game.path())).unwrap().unwrap();
         assert_eq!(loaded.updated_at, read.updated_at);
         assert_eq!(loaded.checked_at, None, "checks describe this run, not an old session");
         let path = data.path().join(INDEX_FILE);
         let mut index: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         index.as_object_mut().unwrap().remove("updated_at");
         std::fs::write(path, serde_json::to_vec(&index).unwrap()).unwrap();
-        assert_eq!(store.load(game.path()).unwrap().unwrap().updated_at, None);
+        assert_eq!(store.load(&game_in(game.path())).unwrap().unwrap().updated_at, None);
     }
 
     #[test]
     fn a_fixed_handle_answers_with_its_state() {
         let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
         let handle = GameDataHandle::fixed(GameData::Unavailable("fixture".into()));
-        assert_eq!(runtime.block_on(handle.for_folder(Path::new("anywhere"))), GameData::Unavailable("fixture".into()));
+        assert_eq!(runtime.block_on(handle.for_game(Path::new("anywhere.exe"))), GameData::Unavailable("fixture".into()));
     }
 }

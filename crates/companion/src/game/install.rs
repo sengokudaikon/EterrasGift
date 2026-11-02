@@ -33,7 +33,7 @@ impl GameInstall {
     }
 
     fn player(&self) -> PlayerFolder {
-        PlayerFolder::new(self.directory(), self.executable.file_stem().unwrap_or_default())
+        PlayerFolder::of(&self.executable)
     }
 
     /// Unity's data folder beside the executable, named after it: "Last Epoch_Data".

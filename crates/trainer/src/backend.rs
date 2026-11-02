@@ -23,7 +23,6 @@ use std::{
     collections::BTreeMap,
     fmt,
     future::Future,
-    path::Path,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -591,7 +590,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.publish();
         }
     }
-    /// The game data for the folder `target` runs from (read again first when `again`, or when its files changed), if
+    /// The game data for the game `target` runs (read again first when `again`, or when its files changed), if
     /// it can describe the running game: none of its files written since the game started. Needs no connection, so a
     /// connect asks before anything is loaded into the game.
     async fn game_files_for(&mut self, epoch: u64, target: &ProcessIdentity, again: bool) -> Result<Arc<crate::definitions::files::FileCatalog>, BackendError> {
@@ -601,18 +600,13 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             .game_data
             .clone()
             .ok_or_else(|| not_ready("The game's files are not configured, so there is no game data.".into()))?;
-        let folder = target
-            .executable
-            .parent()
-            .map(Path::to_path_buf)
-            .ok_or_else(|| not_ready("The game's folder is unknown.".into()))?;
         let started = crate::connect::admission::process_created(target)?;
         self.state.activity = Some(Activity::ReadingGameFiles);
         self.publish_if_current(epoch)?;
         let data = if again {
-            handle.read_again(Some(&folder)).await
+            handle.read_again(Some(&target.executable)).await
         } else {
-            handle.for_folder(&folder).await
+            handle.for_game(&target.executable).await
         };
         self.superseded(epoch)?;
         self.mirror_game_data();

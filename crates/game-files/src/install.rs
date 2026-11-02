@@ -11,8 +11,6 @@ use unity_files::player::PlayerData;
 use unity_files::strings::{self, Strings};
 use unity_files::value::Value;
 
-/// The player's name, which its data folder takes: this crate reads Last Epoch, whatever its executable is called.
-const PLAYER_NAME: &str = "Last Epoch";
 const AFFIX_LIST: (&str, &str, &str) = ("LE", "", "AffixList");
 const ITEM_LIST: (&str, &str, &str) = ("LE", "", "ItemList");
 const AILMENT_LIST: (&str, &str, &str) = ("LE", "", "AilmentList");
@@ -24,12 +22,12 @@ pub struct Install {
 }
 
 impl Install {
-    /// The game folder, the one holding `Last Epoch.exe` and `Last Epoch_Data`.
-    pub fn at(folder: impl AsRef<Path>) -> Result<Install> {
-        let game = folder.as_ref();
-        let player = PlayerFolder::new(game, PLAYER_NAME);
+    /// The game `executable` starts, whose data folder takes its name: `Last Epoch.exe` beside `Last Epoch_Data`.
+    pub fn of(executable: impl AsRef<Path>) -> Result<Install> {
+        let player = PlayerFolder::of(executable.as_ref());
         if !player.data().is_dir() {
-            return Err(Error::data(format!("{} has no {PLAYER_NAME}_Data folder", game.display())));
+            let name = player.data().file_name().unwrap_or_default().display();
+            return Err(Error::data(format!("{} has no {name} folder", player.folder().display())));
         }
         Ok(Install { player })
     }
@@ -176,5 +174,20 @@ impl Install {
     /// Every string table for one locale code, as the game's settings name it.
     pub fn strings(&self, locale: &str) -> Result<Strings> {
         strings::read(&self.addressables(), locale)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_data_folder_takes_the_executables_name() {
+        let game = tempfile::tempdir().unwrap();
+        std::fs::create_dir(game.path().join("Renamed_Data")).unwrap();
+        let install = Install::of(game.path().join("Renamed.exe")).unwrap();
+        assert_eq!(install.data_folder(), game.path().join("Renamed_Data"));
+        let refused = Install::of(game.path().join("Last Epoch.exe")).err().unwrap().to_string();
+        assert!(refused.contains("Last Epoch_Data"), "{refused}");
     }
 }

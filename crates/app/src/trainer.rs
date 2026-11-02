@@ -70,7 +70,7 @@ impl Module {
     }
 
     /// The helper is in the exe; it is written under the app's local folder only when a game connects. The game data
-    /// is read from `game`'s folder (the installed game, when found) at once, and saved in the module's folder.
+    /// is read from beside `game` (the installed game's executable, when found) at once, and saved in the module's folder.
     fn launch(&self, settings: &SettingsService, game: Option<&Path>, no_connect: bool, faults: &FaultLog, tasks: &Tasks) -> Result<Trainer, Box<dyn Error>> {
         let helper = helper()?;
         let module = settings.module(trainer_settings::ID);
@@ -82,7 +82,7 @@ impl Module {
             profiles: ProfileBook::from_settings(saved.as_ref()),
             save_profiles: Some(profile_saver(module)),
             game_data: Some(eg_trainer::definitions::service::start(
-                game.and_then(Path::parent).map(Path::to_path_buf),
+                game.map(Path::to_path_buf),
                 Some(self.game_data.clone()),
                 Some(faults.clone()),
                 tasks,

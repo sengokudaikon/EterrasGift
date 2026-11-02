@@ -207,14 +207,14 @@ fn hash(path: &Path) -> Result<String, String> {
     file_ops::hashes::of_file(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Reads and builds the catalog for the game in `folder` (the one holding `Last Epoch.exe`).
-pub fn read(folder: &Path) -> Result<FileCatalog, String> {
-    read_with_ledger(folder, None)
+/// Reads and builds the catalog for the game `executable` starts.
+pub fn read(executable: &Path) -> Result<FileCatalog, String> {
+    read_with_ledger(executable, None)
 }
 
 /// As [`read`], with the uniques' modifiers as affixes under the IDs of the ledger at `ledger`.
-pub fn read_with_ledger(folder: &Path, ledger: Option<&Path>) -> Result<FileCatalog, String> {
-    let install = eg_game_files::Install::at(folder).map_err(|e| e.to_string())?;
+pub fn read_with_ledger(executable: &Path, ledger: Option<&Path>) -> Result<FileCatalog, String> {
+    let install = eg_game_files::Install::of(executable).map_err(|e| e.to_string())?;
     let binary = install.game_assembly();
     let metadata = install.metadata();
     // Taken first, so a file that changes while it is read reads as changed afterwards. The hashed binaries are among

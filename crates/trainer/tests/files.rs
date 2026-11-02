@@ -9,7 +9,7 @@ use std::time::Instant;
 fn builds_the_catalog_from_the_install() {
     let folder = std::env::var_os("EG_LAST_EPOCH").expect("set EG_LAST_EPOCH to the game folder");
     let started = Instant::now();
-    let files = eg_trainer::definitions::files::read(std::path::Path::new(&folder)).unwrap();
+    let files = eg_trainer::definitions::files::read(&std::path::Path::new(&folder).join("Last Epoch.exe")).unwrap();
     let catalog = files
         .catalog(GameLocale {
             language: "en".into(),
@@ -63,7 +63,7 @@ fn uniques_become_affixes_with_permanent_ids() {
         let catalog = files.catalog(locale.clone()).unwrap();
         catalog.affixes.into_values().filter(|a| unique_mods::is_added(a.id)).collect::<Vec<_>>()
     };
-    let first = files::read_with_ledger(&folder, Some(&ledger)).unwrap();
+    let first = files::read_with_ledger(&folder.join("Last Epoch.exe"), Some(&ledger)).unwrap();
     assert_eq!(first.ledger_problem, None);
     let affixes = added(&first);
     let wires: Vec<_> = affixes.iter().filter_map(unique_mods::new_affix).collect();
@@ -119,7 +119,7 @@ fn uniques_become_affixes_with_permanent_ids() {
         .find(|a| a.source.as_ref().is_some_and(|s| shipped.uniques[&s.unique].item_type == 12))
         .expect("a two-handed axe's modifier");
     assert_eq!(two_handed.standard_effect, 2.2);
-    let again = files::read_with_ledger(&folder, Some(&ledger)).unwrap();
+    let again = files::read_with_ledger(&folder.join("Last Epoch.exe"), Some(&ledger)).unwrap();
     assert_eq!(added(&again), affixes, "a second reading gives each the same ID");
 }
 
@@ -135,7 +135,7 @@ fn a_second_start_loads_the_saved_catalog_instead_of_reading_the_files() {
     for start in ["first start, reads the files", "second start, loads the saved catalog"] {
         let started = Instant::now();
         let service = service::start(None, Some(store.path().to_path_buf()), None, &owner.tasks());
-        let GameData::Ready(catalog) = runtime.block_on(service.for_folder(&folder)) else {
+        let GameData::Ready(catalog) = runtime.block_on(service.for_game(&folder.join("Last Epoch.exe"))) else {
             panic!("{start}: {:?}", service.current());
         };
         println!("{start}: {:.2?}", started.elapsed());
@@ -201,7 +201,7 @@ fn stat_lines_read_as_the_game_writes_them() {
     use eg_trainer::definitions::stat_text::{StatKey, StatTexts};
     use std::collections::{BTreeMap, BTreeSet};
     let folder = std::env::var_os("EG_LAST_EPOCH").expect("set EG_LAST_EPOCH to the game folder");
-    let install = eg_game_files::Install::at(folder).unwrap();
+    let install = eg_game_files::Install::of(std::path::Path::new(&folder).join("Last Epoch.exe")).unwrap();
     let (player, definitions) = (install.player_definitions().unwrap(), install.definitions().unwrap());
     let strings = install.strings("en").unwrap();
     let texts = StatTexts::new(&strings, &player, &definitions);
