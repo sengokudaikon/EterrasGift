@@ -14,25 +14,36 @@ pub struct InstanceLock {
 }
 
 /// The lock beside `file`. `None` when another process holds it for all of `wait` (a restart can hand over
-/// within it); an error when the folder can't hold the lock at all.
+/// within it); an error when the folder can't hold the lock at all, or the lock file refuses everyone.
 pub fn acquire(file: &Path, wait: Duration) -> io::Result<Option<InstanceLock>> {
     let path = lock_path(file);
     if let Some(folder) = path.parent() {
         std::fs::create_dir_all(folder)?;
     }
     let until = Instant::now() + wait;
+    // Only a file another process holds open says it runs. Access denied is also what a holder that is closing the
+    // file answers, but a lock file that denies it for the whole wait (read-only, or an ACL) is no running app.
+    let mut seen_holder = false;
     loop {
         match open(&path) {
             Ok(file) => return Ok(Some(InstanceLock { _file: file })),
             Err(error) if held(&error) => {
+                seen_holder |= in_use(&error);
+                if !seen_holder && read_only(&path) {
+                    return Err(error);
+                }
                 if Instant::now() >= until {
-                    return Ok(None);
+                    return if seen_holder { Ok(None) } else { Err(error) };
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
             Err(error) => return Err(error),
         }
     }
+}
+
+fn read_only(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|metadata| metadata.permissions().readonly())
 }
 
 fn lock_path(file: &Path) -> PathBuf {
@@ -51,6 +62,10 @@ fn held(error: &io::Error) -> bool {
     // ERROR_SHARING_VIOLATION, and ERROR_ACCESS_DENIED while the holder is closing it.
     matches!(error.raw_os_error(), Some(32 | 5))
 }
+#[cfg(windows)]
+fn in_use(error: &io::Error) -> bool {
+    error.raw_os_error() == Some(32)
+}
 
 #[cfg(not(windows))]
 fn open(path: &Path) -> io::Result<File> {
@@ -58,6 +73,10 @@ fn open(path: &Path) -> io::Result<File> {
 }
 #[cfg(not(windows))]
 fn held(_error: &io::Error) -> bool {
+    false
+}
+#[cfg(not(windows))]
+fn in_use(_error: &io::Error) -> bool {
     false
 }
 
@@ -83,5 +102,22 @@ mod tests {
         });
         assert!(acquire(&settings, Duration::from_secs(5)).unwrap().is_some());
         handover.join().unwrap();
+    }
+
+    #[test]
+    fn a_read_only_lock_file_is_no_running_app() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = temp.path().join("settings.json");
+        let lock = temp.path().join("settings.json.lock");
+        std::fs::write(&lock, b"").unwrap();
+        let mut permissions = std::fs::metadata(&lock).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&lock, permissions.clone()).unwrap();
+        let started = Instant::now();
+        assert!(acquire(&settings, Duration::from_secs(5)).is_err(), "startup goes on without the lock");
+        assert!(started.elapsed() < Duration::from_secs(1), "and without waiting out the handover");
+        #[expect(clippy::permissions_set_readonly_false, reason = "Windows: clears the read-only attribute so the folder can be removed")]
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&lock, permissions).unwrap();
     }
 }

@@ -152,7 +152,8 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.finish_write(result, failure, target)
     }
     /// What every write checks again right before it is sent: the gate, a fresh status from the helper, and the
-    /// same character manager its plan was made for.
+    /// same character manager its plan was made for. Another manager means an area load came between the plan and the
+    /// write: nothing was sent, so the session stays and the plan is refused, as the helper refuses a stale one.
     pub(super) async fn recheck_before_write(&mut self, epoch: u64, target: &ProcessIdentity, manager: u64) -> Result<(), BackendError> {
         let status = match self.call(epoch, target, async |connection| connection.refresh().await).await? {
             Ok(status) => status,
@@ -163,7 +164,10 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         };
         self.check_status(status)?;
         if status.manager != manager {
-            return Err(BackendError::blocked(ErrorKind::Identity, "character manager changed before write"));
+            let error = invalid_edit("Character changed; read again");
+            self.state.error = Some(error.clone());
+            self.publish();
+            return Err(error);
         }
         self.admit(target)
     }

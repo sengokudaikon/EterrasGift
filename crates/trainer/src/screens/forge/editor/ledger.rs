@@ -242,9 +242,10 @@ impl ForgeEditor {
         self.affixes.iter().any(AffixRow::can_undo) || self.uniques.iter().chain(self.implicits.iter()).any(RollRow::can_undo) || self.all_fields().any(FieldDraft::can_undo)
     }
 
-    /// With no draft change left to step back, Undo writes the values from before the last Apply back to the game.
+    /// With no draft change left to step back, Undo writes the values from before the last Apply back to the game, while
+    /// the worker still holds them: it drops them when the item it observes no longer matches.
     pub fn undo_writes_to_game(&self) -> bool {
-        self.can_change_draft() && !self.has_draft_steps() && self.applied.is_some()
+        self.can_change_draft() && !self.has_draft_steps() && self.applied.is_some() && self.game.undo_depth() > 0
     }
 
     pub fn can_undo(&self) -> bool {

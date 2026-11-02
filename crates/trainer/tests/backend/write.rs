@@ -422,17 +422,20 @@ fn stale_full_observation_and_generation_are_refused_before_write_or_status_io()
     });
 }
 #[test]
-fn manager_changed_during_fresh_status_revokes_session_before_submission() {
+fn manager_changed_during_fresh_status_refuses_the_plan_and_keeps_the_session() {
     run(async {
+        // An area load between the plan and the write: nothing is sent, and the session reads the new character.
         let shared = writable();
         let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         shared.status.lock().unwrap().manager = 0x5678;
-        assert_eq!(command(&handle, Command::Write(plan.into())).await.unwrap_err().kind, ErrorKind::Identity);
+        assert_eq!(command(&handle, Command::Write(plan.into())).await.unwrap_err().kind, ErrorKind::InvalidEdit);
         assert_eq!(shared.count("write"), 0);
-        assert_eq!(handle.snapshot().phase, Phase::Blocked);
-        assert_eq!(handle.snapshot().forge, ForgeState::Unobserved);
+        assert_eq!(handle.snapshot().phase, Phase::Ready);
+        assert_eq!(handle.snapshot().runtime_status.map(|status| status.manager), Some(0x5678));
+        command(&handle, Command::ReadForge).await.unwrap();
+        assert!(handle.snapshot().level_requirement_plan(17).is_ok(), "a plan for the new character can be made");
         shutdown(&handle, worker).await;
     });
 }

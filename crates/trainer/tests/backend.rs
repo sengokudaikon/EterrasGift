@@ -1315,6 +1315,53 @@ fn in_game_travel_clears_live_editor_data_but_retains_connection_and_resumes_fre
 }
 
 #[test]
+fn a_session_connected_between_areas_reads_its_catalog_once_the_character_arrives() {
+    run(async {
+        let shared = Shared::new();
+        shared
+            .read_errors
+            .lock()
+            .unwrap()
+            .push_back(BackendError::waiting(ErrorKind::CharacterLoading, "area transition"));
+        let (handle, worker) = start(&shared, options());
+        command(&handle, Command::Enable).await.unwrap();
+        assert_eq!(command(&handle, Command::Connect).await.unwrap_err().kind, ErrorKind::CharacterLoading);
+        assert_eq!(handle.snapshot().catalog, CatalogState::Missing);
+        command(&handle, Command::ReadForge).await.unwrap();
+        let state = handle.snapshot();
+        assert_eq!(state.phase, Phase::Ready);
+        assert!(matches!(state.catalog, CatalogState::Current { generation, .. } if generation == state.generation));
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn a_catalog_from_an_earlier_session_is_checked_against_the_build_before_it_is_used_again() {
+    run(async {
+        let shared = Shared::new();
+        let (handle, worker) = start(&shared, options());
+        connected(&handle).await;
+        // The character leaves play: the catalog is kept, but only as stale.
+        shared.status.lock().unwrap().manager = 0;
+        assert_eq!(command(&handle, Command::ReadForge).await.unwrap_err().kind, ErrorKind::Gate);
+        assert!(matches!(handle.snapshot().catalog, CatalogState::Stale(_)));
+        // The next session starts between areas, in a game whose build the files no longer describe.
+        shared.status.lock().unwrap().manager = 0x1234;
+        shared
+            .read_errors
+            .lock()
+            .unwrap()
+            .push_back(BackendError::waiting(ErrorKind::CharacterLoading, "area transition"));
+        assert_eq!(command(&handle, Command::Connect).await.unwrap_err().kind, ErrorKind::CharacterLoading);
+        *shared.hashes.lock().unwrap() = ("C".repeat(64), "B".repeat(64));
+        let error = command(&handle, Command::ReadForge).await.unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Identity, "{error:?}");
+        assert!(!matches!(handle.snapshot().catalog, CatalogState::Current { .. }));
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
 fn confirmed_game_exit_clears_a_stuck_generation_and_its_restart_advice() {
     run(async {
         let shared = Shared::new();

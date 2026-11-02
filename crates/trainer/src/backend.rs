@@ -1006,14 +1006,12 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             if check_locale {
                 self.next_locale_check = tokio::time::Instant::now() + self.options.locale_interval;
             }
-            let data = if reload || locale_changed {
-                Arc::new(self.catalog_for(epoch, &target, catalog == CatalogRead::ReadFilesAgain).await?)
-            } else {
-                self.state
-                    .catalog
-                    .data()
-                    .cloned()
-                    .ok_or_else(|| BackendError::blocked(ErrorKind::Protocol, "current catalog missing"))?
+            // Only this connection's own catalog is kept. A session that connected while the character was between
+            // areas never read one, and a catalog left from an earlier process may describe another build: either is
+            // read again, through the same build check as a connect.
+            let data = match &self.state.catalog {
+                CatalogState::Current { generation, data } if !reload && !locale_changed && *generation == self.state.generation => data.clone(),
+                _ => Arc::new(self.catalog_for(epoch, &target, catalog == CatalogRead::ReadFilesAgain).await?),
             };
             let forge = self.call(epoch, &target, async |connection| connection.read_forge().await).await??;
             self.register_in_play(epoch, &target, &data, forge.as_ref()).await?;
@@ -1116,7 +1114,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.state.phase = Phase::WaitingForCharacter;
             self.state.runtime_status = None;
             self.state.forge = ForgeState::Unobserved;
+            // An area load ends Undo: the history goes with the published step, or a refused write would bring it back.
             self.state.undo_forge = None;
+            self.forge_history.clear();
             self.state.activity = None;
             self.state.error = Some(error.clone());
             self.publish();
