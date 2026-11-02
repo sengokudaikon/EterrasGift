@@ -8,6 +8,8 @@ use windows_sys::Win32::System::{
 };
 
 pub(super) const PAGE: usize = 4096;
+/// The data page's first 128 bytes hold gateway state; unwind metadata starts after that region.
+pub(super) const STATE_END: usize = 128;
 
 /// Two fresh read-write pages; `operation` names the failure.
 pub(super) fn allocate(operation: &'static str) -> Result<*mut u8, HookError> {
@@ -17,22 +19,23 @@ pub(super) fn allocate(operation: &'static str) -> Result<*mut u8, HookError> {
 }
 
 /// The unwind entry for `length` bytes of code whose four-byte prologue is `sub rsp, frame` (one UWOP_ALLOC_SMALL),
-/// kept in the data page: the entry at 64, its unwind info at 80. No module frame or state is on the unwind path.
+/// kept after the data page's state region: the entry at STATE_END, its unwind info 16 bytes later.
+/// No module frame or state is on the unwind path.
 /// # Safety
-/// `allocation` is from `allocate`, not yet published, and its data page keeps bytes 64..88 for this.
+/// `allocation` is from `allocate`, not yet published, and its data page keeps bytes STATE_END..STATE_END+24 for this.
 pub(super) unsafe fn unwind(allocation: *mut u8, length: usize, frame: u8) -> *mut IMAGE_RUNTIME_FUNCTION_ENTRY {
     // SAFETY: the caller's unpublished private pages; the entry is written whole before its union is set.
     unsafe {
-        let table = allocation.add(PAGE + 64).cast::<IMAGE_RUNTIME_FUNCTION_ENTRY>();
+        let table = allocation.add(PAGE + STATE_END).cast::<IMAGE_RUNTIME_FUNCTION_ENTRY>();
         table.write(IMAGE_RUNTIME_FUNCTION_ENTRY {
             BeginAddress: 0,
             EndAddress: length as u32,
             Anonymous: std::mem::zeroed(),
         });
-        (*table).Anonymous.UnwindData = (PAGE + 80) as u32;
+        (*table).Anonymous.UnwindData = (PAGE + STATE_END + 16) as u32;
         // Version 1, prologue 4, one code: UWOP_ALLOC_SMALL at offset 4.
         let allocation_code = ((frame - 8) / 8) << 4 | 2;
-        std::ptr::copy_nonoverlapping([1u8, 4, 1, 0, 4, allocation_code, 0, 0].as_ptr(), allocation.add(PAGE + 80), 8);
+        std::ptr::copy_nonoverlapping([1u8, 4, 1, 0, 4, allocation_code, 0, 0].as_ptr(), allocation.add(PAGE + STATE_END + 16), 8);
         table
     }
 }

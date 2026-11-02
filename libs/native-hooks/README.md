@@ -16,6 +16,10 @@ loads the payload into XMM4/XMM5 only when its version stayed even and unchanged
 reader makes one attempt: a paused or concurrent writer skips the effect instead of making a caller spin. This storage,
 like the gateway itself, survives the module that prepared it.
 
+Generated unwind entries occupy a separate region after the data page's first 128 bytes. Compile-time layout checks
+keep each gateway's mutable state out of that region, including both words of wide settings. Settings publication
+must never change the registered function entry or its unwind program.
+
 ## Retained detours
 
 `RetainedHook` leaks each `RawDetour` immediately; callers retain module lifetime through entry restoration and callback drain.

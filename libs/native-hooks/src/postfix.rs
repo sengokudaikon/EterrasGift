@@ -13,6 +13,7 @@ struct Data {
     slots: [AtomicU64; 2],
     wide: super::settings::Wide,
 }
+const _: () = assert!(std::mem::size_of::<Data>() <= page::STATE_END);
 
 /// Byte displacements from RAX for the feature's post-call code.
 pub struct Frame {

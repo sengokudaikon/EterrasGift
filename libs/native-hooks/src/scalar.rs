@@ -18,6 +18,7 @@ struct State {
 }
 
 const _: () = assert!(std::mem::offset_of!(State, desired) == 32 && std::mem::offset_of!(State, baseline) == 36);
+const _: () = assert!(std::mem::size_of::<State>() <= 48 && 48 + std::mem::size_of::<AtomicU64>() <= page::STATE_END);
 
 pub struct ScalarGate {
     entry: usize,

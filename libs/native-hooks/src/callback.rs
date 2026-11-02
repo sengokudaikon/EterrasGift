@@ -18,6 +18,7 @@ struct Data {
     original: AtomicPtr<()>,
 }
 const _: () = assert!(std::mem::offset_of!(Data, active) == 8 && std::mem::offset_of!(Data, original) == 16);
+const _: () = assert!(std::mem::size_of::<Data>() <= page::STATE_END);
 
 /// Intentionally process-owned executable/data pages and unwind table. No Drop
 /// path may reclaim them: a delayed original call can return here after unload.

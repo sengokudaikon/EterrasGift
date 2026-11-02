@@ -1,6 +1,31 @@
 use super::*;
 use crate::emit::Code;
 
+#[test]
+fn wide_settings_never_overwrite_the_registered_unwind_metadata() {
+    extern "C-unwind" fn original(a: usize, b: usize) {
+        assert_eq!((a, b), (0x1234, 0x5678));
+        panic!("original exception");
+    }
+    let effect = PostfixEffect {
+        before: vec![],
+        code: vec![],
+        slots: [0; 2],
+        positions: 2,
+    };
+    // SAFETY: matching two-position void ABI, no effect code or external storage.
+    let gate = unsafe { PostfixGate::prepare(&effect, None).unwrap() };
+    // SAFETY: matching original installed before calling the gateway.
+    unsafe { gate.set_original(original as *const ()) };
+    let payload = u128::MAX;
+    gate.set_wide(payload);
+    assert_eq!(gate.wide(), payload);
+    // SAFETY: declared two-position Windows x64 ABI, with normal caller home space.
+    let call: extern "C-unwind" fn(usize, usize) = unsafe { std::mem::transmute(gate.entry()) };
+    assert!(std::panic::catch_unwind(|| call(0x1234, 0x5678)).is_err());
+    assert_eq!(gate.wide(), payload);
+}
+
 extern "C-unwind" fn checked(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, i: u64, j: u64, k: u64, l: u64) -> u64 {
     assert_eq!([a, b, c, d, e, f, g, h, i, j, k, l], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     0x1122334455667788
