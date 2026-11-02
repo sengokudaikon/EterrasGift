@@ -324,7 +324,7 @@ impl BackendConnection for Connection {
                 field.value = *value;
             }
         }
-        if actual.set != eg_trainer_wire::field_edits::FieldSet::Currency {
+        if actual.set.held_items() {
             actual.fields.retain(|field| field.value != 0);
         }
         Ok(if self.shared.counts_kept.load(Ordering::SeqCst) {

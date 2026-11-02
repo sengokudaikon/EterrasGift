@@ -238,10 +238,10 @@ unsafe fn count_fields(manager: u64, set: eg_trainer_wire::field_edits::FieldSet
     unsafe {
         runtime_operation(|runtime, access, attached| {
             if let Some(edit) = edit {
-                access.apply_counts(attached, runtime.invocation, edit).map_err(write_failure)?;
+                access.apply_field_set(attached, runtime.writes, runtime.invocation, edit).map_err(write_failure)?;
                 done(Vec::new())
             } else {
-                let snapshot = access.read_counts(attached, runtime.invocation, manager, set).map_err(write_failure)?;
+                let snapshot = access.read_field_set(attached, runtime.invocation, manager, set).map_err(write_failure)?;
                 encoded(snapshot.encode())
             }
         })
@@ -393,6 +393,11 @@ fn after_original(state: &Shared) {
                     0
                 };
                 gameplay_hooks::observe(manager)?;
+                // SAFETY: the same admitted main-thread offline graph span; replacement maintenance is separate
+                // from independent hook readback and uses the ordinary close/restore/publish lifecycle.
+                if manager != 0 {
+                    gameplay_hooks::refresh_bindings(runtime, &attached, manager)?;
+                }
                 Ok::<_, String>(presence)
             })()
         }

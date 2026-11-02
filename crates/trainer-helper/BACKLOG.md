@@ -27,8 +27,8 @@ only; feature IDs/profile settings and the original gameplay behavior remain ind
 | Status | Support | Current scope / next consumer |
 |---|---|---|
 | Todo | Scoped context | Projectiles and echo cycling. Duplicate uses its checked direct caller and needs no retained mark. Movement uses its checked, single native call site and needs no retained mark. |
-| Todo | Temporary asset mutation/restoration | Prophecy rewards/max LP, then density and pack size/rarity; settle threading and native-unwind behavior with those consumers. |
-| Todo | Additional ABI/caller adapters | Validate auto-aim hidden result storage and the placement configuration struct when their features arrive. |
+| Todo | Temporary asset mutation/restoration | Prophecy rewards/max LP need their asset records and threading contract over retained unwind cleanup. |
+| Todo | Additional ABI/caller adapters | Validate auto-aim hidden result storage when its feature arrives. |
 
 ## Hooks to build
 
@@ -71,32 +71,8 @@ Behavior reference: [factions.h](../../../EterrasGift/native/hooks/factions.h).
 
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
-| Todo | `prophecy-max-lp` — `ProphecySlotReward.SpawnRewardForPlayer` | Temporarily raise generic reward minimum LP to at least four, call original, restore the previous asset value even on native unwind. Share handler with reward multiplier; prove the eight-byte Nullable lens ABI. | Shared target; scoped restoration mechanism established with this family. | Shared asset remains pristine after normal/throwing calls; existing LP above four preserved; absent generic item. |
+| Todo | `prophecy-max-lp` — `ProphecySlotReward.SpawnRewardForPlayer` | Temporarily raise generic reward minimum LP to at least four, call original, restore the previous asset value even on native unwind. Share handler with reward multiplier; prove the eight-byte Nullable lens ABI. | Shared target; reuse retained native unwind cleanup with feature-specific asset records. | Shared asset remains pristine after normal/throwing calls; existing LP above four preserved; absent generic item. |
 | Todo | `prophecy-reward-multiplier` — same `SpawnRewardForPlayer` | Temporarily scale `itemsDropped`, rounded and clamped to 0..1000, then restore. Preserve downstream lucky-lens doubling and composition with max LP. Shared reward assets must not retain repeated multiplication. | Same target and restoration record as max LP; settings. | Repeated calls do not compound; both features together; nested/concurrent calls require an explicit target-threading contract. |
-
-### World
-
-Behavior reference: [world.h](../../../EterrasGift/native/hooks/world.h).
-
-| Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
-|---|---|---|---|---|
-| Todo | `camera-distance` — `CameraManager.ApplyZoom` | Write configured distance before original. Keep the game's distance per camera, adopt external distance changes as the new baseline, and restore only if current value still equals our last write. Apply immediately on toggle through the main thread where available. | Lifecycle cleanup entry point; conditional restoration idea from existing writes. Keep camera state/refresh local. | Camera replacement, user changing game setting while on, off after foreign change, menu departure and cleanup before dispatcher removal. |
-| Todo | `pack-count` — `SpawnerPlacementRoom.rollSpawners` | Temporarily set density modifier to `(1 + old) * multiplier - 1`, invoke original, restore even on unwind. Validate the small by-value two-bool configuration struct. Retain the game's placement limit. | Scoped restoration after the prophecy family proves it; scalar settings. | Original modifier restored, not compounded; exception, nested call and configuration bytes; multiplier does not bypass room cap. |
-| Todo | `pack-size` — `Spawner.GenerateEntitiesInternal` | Temporarily multiply `numberToSpawn` only when its original value exceeds one; preserve single boss/named spawns. Restore after original including unwind. Share with monster rarity. | Shared spawner target and restoration record. | One remains one; multi-pack scales; repeated/throwing calls do not retain modified count. |
-| Todo | `monster-rarity` — same `GenerateEntitiesInternal` | Temporarily multiply common/magic/rare weightings by three coherent settings, call original, restore all weights. Compose with pack size in one handler. | Same target/restoration record; the existing coherent settings snapshot. | Each weighting, both features together, zero weights, repeated calls and foreign unwind restoration. |
-
-## Direct field editors
-
-The remaining editors use main-thread requests, fresh expected observations, conditional writes and independent
-readback. Keep read/apply primitives generic and operation semantics local.
-Attack rate and leech use their persistent hooks in `features/fixed_attack_rate.rs` and `features/fixed_leech_rate.rs`;
-they do not need direct editors.
-
-| Status | Field set | Remaining feature work and useful reuse |
-|---|---|---|
-| Todo | `points-earned` | Read/write passive and Weaver tree points through their getters/setters; validate UInt16 range and allocated-point floor. Reuse conditional field-write transport. Values are recalculated by progression and load. |
-| Todo | `monolith-run` | Current/saved run lookup, corruption/Gaze of Orobyss/options-rerolled mutation, corruption recalculation, save and optional matching-panel refresh. Share write certainty, not the hook registry. |
-| Todo | `faction-standing` | Rank/favor/reputation validation, joined-faction rules and required save/sync calls. Keep separate from GainFavor/GainReputation detours. |
 
 The Forge item editor follows its own planner/private-preview path; its remaining work is in [PORT.md](../../PORT.md).
 
@@ -105,18 +81,16 @@ The Forge item editor follows its own planner/private-preview path; its remainin
 These groups identify the next useful extraction points; they do not
 require building a universal handler/ABI/object framework first.
 
-- **Settings and numeric transforms:** monster settings reuse the existing bounded settings snapshot and matching arithmetic,
-  publication and owner lookup from implemented gains. Preserve each feature's original-call placement.
 - **Further argument forwarding:** auto-aim needs its exact Vector3 hidden-result ABI. Existing argument hooks
   preserve their opaque aggregate inputs in place; they do not adapt hidden result storage.
 - **Scoped context:** projectiles establish nesting/unwind behavior, while echo context spans calls.
   Keep each feature's cleanup policy explicit; the movement hook uses caller selection instead of a mark.
-- **Temporary shared assets:** prophecy reward count/max LP, then density and pack size/rarity need explicit target
-  serialization and restoration on native unwind. Cooldown/ailment throw behavior must be decided
+- **Temporary shared assets:** prophecy reward count/max LP need their own asset records and explicit target
+  serialization, using retained unwind cleanup. Cooldown/ailment throw behavior must be decided
   against the original's normal-return-only restoration rather than silently promising universal rollback.
 - **Echo cycling:** still needs its dynamic completion table, scoped web/tier context and shared echo-type target,
   composing feature-specific behavior with the existing entry/patch lifecycle.
-- **Feature-specific cleanup:** specialization-slot recount and camera distance restoration require main-thread work before the
+- **Feature-specific cleanup:** specialization-slot recount requires main-thread work before the
   dispatcher leaves. Persistent inventory/run changes and temporary overrides have different off semantics.
 
 ## Rules for a new hook

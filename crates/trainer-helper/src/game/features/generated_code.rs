@@ -15,12 +15,12 @@ use super::{
     encounter_counts::{self, Counts},
     eternity_cache_anywhere, experimental_uniques,
     gains::{experience_multiplier, faction_gains, rank_up_per_gain},
-    morditas_timer, new_item_rarity,
+    morditas_timer, new_item_rarity, pack_count,
     player_only::{Receiver, fixed_area, refill_mana, several_primordials},
     prophecy_any_distance, prophecy_uses,
     registry::{GameplayHook, Targets, definition},
     results::{ability_speed, boss_loot_chance, max_bonus_stability, max_random_rolls, movement_speed, no_mana_cost, one_echo_type, tier_7_affixes},
-    reveal_map, reveal_objective, runes_glyphs_to_99, shards_to_99, skip_quest_echoes,
+    reveal_map, reveal_objective, runes_glyphs_to_99, shards_to_99, skip_quest_echoes, spawner_group,
 };
 use native_hooks::{
     callback::CallbackGate,
@@ -109,6 +109,11 @@ impl Recorded {
         self.add(name, hooks, gate.entry(), shared.map(ScalarGate::entry));
         gate
     }
+    fn scoped(&mut self, name: &str, hooks: &[GameplayHook], effect: native_hooks::postfix::scope::ScopedEffect) {
+        // SAFETY: prepared and recorded, never published or called; no fixture address is dereferenced.
+        let gate = unsafe { PostfixGate::prepare_scoped(&effect, None) }.unwrap();
+        self.add(name, hooks, gate.entry(), None);
+    }
 }
 
 fn record() -> Recorded {
@@ -150,6 +155,20 @@ fn record() -> Recorded {
     r.scalar("fixed_attack_rate.main_hand", attack, 0x2c4, true, Some(&first));
     r.scalar("fixed_attack_rate.off_hand", attack, 0x2c4, false, Some(&first));
     r.scalar("fixed_leech_rate", &[FixedLeechRate], 0x1d0, false, None);
+    // SAFETY: recorded only, with fixed placeholder storage that is never accessed.
+    let camera = unsafe { ScalarGate::prepare_before(RECEIVER, 0x44, ONLINE, (-17.5f32).to_bits()) }.unwrap();
+    r.add("camera_distance", &[CameraDistance], camera.entry(), None);
+    r.scoped("pack_count", &[PackCount], pack_count::effect(online, 0x74));
+    r.scoped(
+        "spawner_group",
+        &[PackSize, MonsterRarity],
+        spawner_group::Layout {
+            online,
+            count: 0x38,
+            weights: [0x40, 0x44, 0x48],
+        }
+        .effect(),
+    );
 
     r.leaf(
         "any_waypoint",

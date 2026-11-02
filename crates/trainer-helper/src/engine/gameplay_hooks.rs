@@ -16,6 +16,8 @@ mod effect;
 mod hunts;
 #[cfg(test)]
 mod progress;
+#[cfg(test)]
+mod world;
 use effect::{Effect, FeatureBinding};
 use native_hooks::entry::{self, Entry};
 
@@ -116,6 +118,43 @@ pub(super) fn count() -> u32 {
         .count() as u32
 }
 
+/// Keep receiver-bound features on their current object. This runs during the already admitted main-thread
+/// watchdog, independently of ReadGameplayHook. Settings survive replacement, with old storage restored before
+/// its pin is released. Feature resolution owns the graph; the coordinator keeps the same entry transaction.
+/// # Safety
+/// Attached admitted main thread, live offline manager and exclusive synchronous game graph span.
+pub(super) unsafe fn refresh_bindings(runtime: &Runtime, attached: &il2cpp_runtime::AttachedThread<'_>, manager: u64) -> Result<(), String> {
+    let access = &runtime.access;
+    let mut replacements = Vec::new();
+    {
+        let hooks = HOOKS.lock().unwrap_or_else(|p| p.into_inner());
+        if hooks.closing || manager == 0 || hooks.manager != manager {
+            return Ok(());
+        }
+        for (index, group) in hooks.slots.iter().enumerate().filter_map(|(index, group)| group.as_ref().map(|group| (index, group))) {
+            // SAFETY: caller grants the attached main-thread graph span; this only reads the current identity.
+            if unsafe { group.effect.needs_rebind(access, attached) }.map_err(|e| String::from_utf8_lossy(&e.payload).into_owned())? {
+                let hook = FEATURES[index].controls[0];
+                replacements.push((hook, group.effect.observation(hook, PatchState::Patched).value));
+            }
+        }
+    }
+    for (hook, value) in replacements {
+        // SAFETY: admitted main thread, rooted receiver acquisition and complete method contracts before publication.
+        unsafe {
+            let binding = FeatureBinding::resolve(access, attached, runtime.ownership, manager, hook, true).map_err(|e| String::from_utf8_lossy(&e.payload).into_owned())?;
+            change(hook, true, value, binding, || {
+                let module = module().map_err(|e| server::failure(ResponseCode::Refused, e))?;
+                let size = image_size(module).map_err(|e| server::failure(ResponseCode::Refused, e))?;
+                definition(hook).targets(access, module, size).map_err(game_failure)
+            })
+            .map_err(|e| String::from_utf8_lossy(&e.payload).into_owned())?;
+            definition(hook).behavior.refresh(access, attached, runtime.invocation);
+        }
+    }
+    Ok(())
+}
+
 /// Caller resolves metadata on the main thread. The mutex fences publication against control-thread clear/unload;
 /// it is never acquired by a gameplay call. A prepared group is retained before any entry transaction can publish it.
 unsafe fn change(
@@ -132,7 +171,20 @@ unsafe fn change(
     if hooks.closing || state().stop.load(SeqCst) {
         return Err(server::failure(ResponseCode::NotReady, "Helper stopping; nothing ran"));
     }
-    let slot = &mut hooks.slots[slot_of(hook)];
+    // SAFETY: admission and serialized ownership checked above; target/binding contracts belong to this caller.
+    unsafe { change_slot(&mut hooks.slots[slot_of(hook)], hook, on, value, binding, targets) }
+}
+
+/// The admitted owner's transition, also exercised with local fixture owners. No global state or gameplay call
+/// enters here; bindings are retired only after their old entries and fields are successfully restored.
+unsafe fn change_slot(
+    slot: &mut Option<Group>,
+    hook: GameplayHook,
+    on: bool,
+    value: eg_trainer_wire::hooks::HookValue,
+    binding: FeatureBinding,
+    targets: impl FnOnce() -> Result<Vec<GameplayHookTarget>, Response>,
+) -> Result<(), Response> {
     if let Some(group) = slot.as_ref()
         && !binding.matches(&group.effect)
     {
@@ -202,6 +254,7 @@ pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Op
                     let size = image_size(module).map_err(|e| server::failure(ResponseCode::Refused, e))?;
                     definition(hook).targets(&access, module, size).map_err(game_failure)
                 })?;
+                definition(hook).behavior.refresh(&access, attached, runtime.invocation);
                 done(Vec::new())
             } else {
                 let mut hooks = HOOKS.lock().unwrap_or_else(|p| p.into_inner());

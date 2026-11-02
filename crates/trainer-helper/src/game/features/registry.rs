@@ -5,7 +5,10 @@ pub(crate) use eg_trainer_wire::hooks::GameplayHook;
 pub(crate) use il2cpp_runtime::metadata::MethodSpec;
 use native_hooks::leaf::LeafEffect;
 use native_hooks::postfix::PostfixEffect;
+use native_hooks::postfix::scope::ScopedEffect;
+mod binding;
 mod shared;
+pub(crate) use binding::ScalarBinding;
 pub(crate) use shared::{ControlSetting, OFF, SharedSettings};
 
 #[derive(Clone, Copy)]
@@ -15,7 +18,20 @@ pub(crate) enum Behavior {
     SharedLeaf(&'static SharedSettings),
     SharedPostfix(&'static SharedSettings),
     Scalar(&'static StatFeature),
+    Camera,
     Patch,
+}
+impl Behavior {
+    /// Optional main-thread refresh after a settings change or receiver replacement, outside the coordinator's
+    /// lock. It is a presentation nicety; a game exception here does not undo or retry the confirmed field change.
+    /// # Safety
+    /// Admitted attached main thread and retained runtime invocation API.
+    pub(crate) unsafe fn refresh(self, access: &RuntimeAccess, attached: &il2cpp_runtime::AttachedThread<'_>, api: raw::InvocationApi) {
+        if matches!(self, Self::Camera) {
+            // SAFETY: caller admits the rooted main-thread camera operation; the feature validates the exact method.
+            let _ = unsafe { access.refresh_camera(attached, api) };
+        }
+    }
 }
 
 type ResolveTargets = unsafe fn(&RuntimeAccess, NonNull<u8>, usize) -> Result<Vec<GameplayHookTarget>, GameError>;
@@ -112,6 +128,9 @@ pub(crate) const FEATURES: &[&HookFeature] = &[
     &super::prophecy_uses::FEATURE,
     &super::skip_quest_echoes::FEATURE,
     &super::morditas_timer::FEATURE,
+    &super::camera_distance::FEATURE,
+    &super::pack_count::FEATURE,
+    &super::spawner_group::FEATURE,
 ];
 
 /// Each control's group, checked when the crate builds: every control belongs to exactly one feature.
@@ -174,6 +193,12 @@ impl ResolvedMethod {
             effect: TargetEffect::Postfix(effect),
         }
     }
+    pub(crate) fn scoped(self, effect: ScopedEffect) -> GameplayHookTarget {
+        GameplayHookTarget {
+            method: self,
+            effect: TargetEffect::Scoped(effect),
+        }
+    }
 }
 
 pub(crate) enum TargetEffect {
@@ -186,6 +211,7 @@ pub(crate) enum TargetEffect {
         stack_argument: bool,
     },
     Postfix(PostfixEffect),
+    Scoped(ScopedEffect),
     Patch(CodeChange),
 }
 pub(crate) struct CodeChange {

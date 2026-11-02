@@ -116,7 +116,7 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
             affix_change: true,
             affix_list: true,
             gameplay_hooks: [true; GameplayHook::COUNT],
-            fields: [true; 3],
+            fields: [true; eg_trainer_wire::field_edits::FieldSet::COUNT],
         }
     }
     async fn write(&mut self, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {

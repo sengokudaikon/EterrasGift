@@ -63,6 +63,10 @@ pub enum GameplayHook {
     ProphecyUses = 53,
     SkipQuestEchoes = 54,
     MorditasTimer = 55,
+    CameraDistance = 56,
+    PackCount = 57,
+    PackSize = 58,
+    MonsterRarity = 59,
 }
 
 /// What a hook's value is: how the desktop's number for it is sent, which values the helper takes, and the one it
@@ -303,11 +307,15 @@ pub const SPECS: [HookSpec; GameplayHook::COUNT] = {
         switch(ProphecyUses, "prophecy-uses"),
         switch(SkipQuestEchoes, "skip-quest-echoes"),
         spec(MorditasTimer, "morditas-timer", ValueKind::Reals(&[(1.0, 10.0, 1.0), (0.0, 1.0, 1.0), (1.0, 10.0, 1.0)])),
+        real(CameraDistance, "camera-distance", -100.0, 0.0, -17.5),
+        real(PackCount, "pack-count", 0.0, 100.0, 1.0),
+        real(PackSize, "pack-size", 0.0, 10.0, 1.0),
+        spec(MonsterRarity, "monster-rarity", ValueKind::Reals(&[(0.0, 20.0, 1.0), (0.0, 20.0, 1.0), (0.0, 20.0, 1.0)])),
     ]
 };
 
 impl GameplayHook {
-    pub const COUNT: usize = 56;
+    pub const COUNT: usize = 60;
     /// Every hook by its number on the pipe, checked against [`SPECS`] when the crate builds.
     pub const ALL: [Self; Self::COUNT] = {
         let mut all = [Self::MysteriousRift; Self::COUNT];

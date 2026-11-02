@@ -42,9 +42,9 @@ pub(crate) use features::death_drops;
 #[cfg(test)]
 pub(crate) use features::{
     any_waypoint, encounter_counts, gains, morditas_timer, player_only, prophecy_uses, results, results::no_mana_cost, reveal_objective, runes_glyphs_to_99, shards_to_99,
-    skip_quest_echoes,
+    skip_quest_echoes, spawner_group,
 };
-pub(crate) use features::{registry, registry::GameplayHookTarget, stat::StatBinding};
+pub(crate) use features::{registry, registry::GameplayHookTarget, registry::ScalarBinding};
 
 /// A strong GC root on a managed object, held for one call.
 pub(crate) type Root<'a, 'r> = StrongRoot<'a, 'r>;

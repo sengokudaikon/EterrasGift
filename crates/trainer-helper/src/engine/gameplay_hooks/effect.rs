@@ -2,7 +2,7 @@
 //! to close, restore, publish and observe operations. Gameplay calls execute only retained generated code.
 use super::*;
 use crate::game::{
-    RuntimeAccess, StatBinding,
+    RuntimeAccess, ScalarBinding,
     registry::{Behavior, HookFeature, TargetEffect},
 };
 use il2cpp_runtime::{AttachedThread, raw};
@@ -10,7 +10,7 @@ use native_hooks::{gate::Gate, leaf::LeafGate, postfix::PostfixGate, scalar::Sca
 
 pub(super) struct FeatureBinding {
     feature: &'static HookFeature,
-    stat: Option<StatBinding>,
+    binding: Option<ScalarBinding>,
 }
 impl FeatureBinding {
     /// # Safety
@@ -18,7 +18,10 @@ impl FeatureBinding {
     /// must remain owned until every prepared gateway closes, drains and restores its receiver.
     pub(super) unsafe fn resolve(access: &RuntimeAccess, attached: &AttachedThread<'_>, ownership: raw::Api, manager: u64, hook: GameplayHook, on: bool) -> Result<Self, Response> {
         let feature = definition(hook);
-        let stat = if let Behavior::Scalar(stat) = feature.behavior
+        let binding = if matches!(feature.behavior, Behavior::Camera) && on {
+            // SAFETY: caller admits this synchronous camera graph read and retains the returned pin.
+            Some(unsafe { access.bind_camera(attached, ownership) }.map_err(game_failure)?)
+        } else if let Behavior::Scalar(stat) = feature.behavior
             && on
         {
             // SAFETY: caller holds the synchronous player graph and attachment contract.
@@ -26,17 +29,24 @@ impl FeatureBinding {
         } else {
             None
         };
-        Ok(Self { feature, stat })
+        Ok(Self { feature, binding })
     }
     #[cfg(any(test, feature = "fixture"))]
     pub(super) fn fixture(hook: GameplayHook) -> Self {
         Self {
             feature: definition(hook),
-            stat: None,
+            binding: None,
+        }
+    }
+    #[cfg(test)]
+    pub(super) fn fixture_bound(hook: GameplayHook, binding: ScalarBinding) -> Self {
+        Self {
+            feature: definition(hook),
+            binding: Some(binding),
         }
     }
     pub(super) fn matches(&self, effect: &Effect) -> bool {
-        match (&self.stat, &effect.binding) {
+        match (&self.binding, &effect.binding) {
             (Some(current), Some(previous)) => current.receiver == previous.receiver,
             _ => true,
         }
@@ -65,12 +75,25 @@ impl FeatureBinding {
                         LeafGate::prepare_shared(effect.clone(), *receiver_class, *linked_offset, shared).map(Gate::Leaf)
                     }
                     (Behavior::Scalar(_), TargetEffect::Scalar { stack_argument }) => {
-                        let binding = self.stat.as_ref().ok_or_else(|| server::failure(ResponseCode::Refused, "Scalar receiver is not bound"))?;
+                        let binding = self
+                            .binding
+                            .as_ref()
+                            .ok_or_else(|| server::failure(ResponseCode::Refused, "Scalar receiver is not bound"))?;
                         let shared = gates.first().map(Gate::scalar);
                         ScalarGate::prepare(binding.receiver, binding.offset, binding.online, binding.baseline, *stack_argument, shared).map(Gate::Scalar)
                     }
+                    (Behavior::Camera, TargetEffect::Scalar { .. }) => {
+                        let binding = self
+                            .binding
+                            .as_ref()
+                            .ok_or_else(|| server::failure(ResponseCode::Refused, "Camera receiver is not bound"))?;
+                        ScalarGate::prepare_before(binding.receiver, binding.offset, binding.online, binding.baseline).map(Gate::Scalar)
+                    }
                     (Behavior::Postfix | Behavior::SharedPostfix(_), TargetEffect::Postfix(effect)) => {
                         PostfixGate::prepare(effect, gates.first().map(Gate::postfix)).map(Gate::Postfix)
+                    }
+                    (Behavior::Postfix | Behavior::SharedPostfix(_), TargetEffect::Scoped(effect)) => {
+                        PostfixGate::prepare_scoped(effect, gates.first().map(Gate::postfix)).map(Gate::Postfix)
                     }
                     (Behavior::Leaf | Behavior::Patch, TargetEffect::Patch(_)) => Ok(Gate::Patch(AtomicBool::new(false))),
                     _ => return Err(server::failure(ResponseCode::Refused, "Hook target and behavior disagree")),
@@ -81,7 +104,7 @@ impl FeatureBinding {
         Ok(Effect {
             gates,
             behavior: self.feature.behavior,
-            binding: self.stat,
+            binding: self.binding,
         })
     }
 }
@@ -90,7 +113,7 @@ pub(super) struct Effect {
     gates: Vec<Gate>,
     behavior: Behavior,
     // Last to drop, after all gateways are closed/drained/restored by the owner. No pin is released on a failure.
-    binding: Option<StatBinding>,
+    binding: Option<ScalarBinding>,
 }
 impl Effect {
     #[cfg(test)]
@@ -121,7 +144,7 @@ impl Effect {
     }
     /// Receiver-bound effects are released after successful disable, so the next admission binds the current object.
     pub(super) fn keep_when_off(&self) -> bool {
-        !matches!(self.behavior, Behavior::Scalar(_))
+        !matches!(self.behavior, Behavior::Scalar(_) | Behavior::Camera)
     }
     pub(super) fn target_on(&self, hook: GameplayHook, on: bool) -> bool {
         match self.behavior {
@@ -134,7 +157,7 @@ impl Effect {
     /// Serialized main-thread owner, after close/restore and successful entry transaction. The group retains storage.
     pub(super) unsafe fn publish(&self, hook: GameplayHook, on: bool, value: eg_trainer_wire::hooks::HookValue, target_on: bool) -> Result<(), Response> {
         match self.behavior {
-            Behavior::Scalar(_) if on => {
+            Behavior::Scalar(_) | Behavior::Camera if on => {
                 let gate = self.gates[0].scalar();
                 // SAFETY: caller owns the pinned scalar and excludes recalculation over this synchronous span.
                 unsafe { gate.enable(value as u64) };
@@ -143,7 +166,7 @@ impl Effect {
                     return Err(server::failure(ResponseCode::Failed, "Scalar readback differs"));
                 }
             }
-            Behavior::Scalar(_) => {}
+            Behavior::Scalar(_) | Behavior::Camera => {}
             Behavior::Postfix | Behavior::SharedPostfix(_) => {
                 for gate in &self.gates {
                     let gate = gate.postfix();
@@ -201,12 +224,17 @@ impl Effect {
         if !agrees {
             patch = PatchState::Unknown;
         }
-        if let Gate::Scalar(gate) = first {
+        if let Gate::Scalar(gate) = first
+            && !matches!(self.behavior, Behavior::Camera)
+        {
             // SAFETY: the installed owner retains storage until close/drain/restore.
             if enabled && !unsafe { gate.matches() } {
                 patch = PatchState::Unknown;
             }
         }
+        // Camera settings can legitimately change zoomDefault without calling ApplyZoom. Until the next zoom,
+        // that foreign field value is allowed: the hook remains installed with its independently read setting,
+        // and off must preserve the foreign value. Initial publication still verifies its immediate field write.
         let has_other = match self.behavior {
             Behavior::SharedLeaf(settings) => settings.has_other(first.leaf(), hook),
             Behavior::SharedPostfix(settings) => settings.has_other(first.postfix(), hook),
@@ -216,6 +244,18 @@ impl Effect {
             patch = PatchState::Shared;
         }
         HookObservation { patch, enabled, value }
+    }
+    /// Main-thread maintenance only. Camera replacement preserves the requested value; it never makes a readback
+    /// request reinstall a hook. A brief scene gap retains the old pin until a replacement or manager departure.
+    /// # Safety
+    /// Admitted attached main thread and synchronous game graph span.
+    pub(super) unsafe fn needs_rebind(&self, access: &RuntimeAccess, attached: &AttachedThread<'_>) -> Result<bool, Response> {
+        if matches!(self.behavior, Behavior::Camera) && self.gates[0].enabled() {
+            // SAFETY: rooted current camera identity, independently of the retained previous pin.
+            let current = unsafe { access.current_camera(attached) }.map_err(game_failure)?;
+            return Ok(current != 0 && self.binding.as_ref().is_some_and(|binding| binding.receiver != current));
+        }
+        Ok(false)
     }
     /// Independently read a receiver-bound effect through the current player's accessor. False means the receiver
     /// changed; the coordinator must disable the old group before the worker can bind a new one.

@@ -1,4 +1,4 @@
-//! Bounded read/apply snapshots for count editors. Tokens are equality evidence only, never dereference authority.
+//! Bounded read/apply snapshots for numeric editors. Tokens are equality evidence only, never dereference authority.
 use crate::protocol::{ProtocolError, Reader};
 
 pub const MAX_FIELDS: usize = 4096;
@@ -10,14 +10,21 @@ pub enum FieldSet {
     Currency = 0,
     Keys = 1,
     WovenEchoes = 2,
+    PointsEarned = 3,
+    MonolithRun = 4,
+    FactionStanding = 5,
 }
 impl FieldSet {
-    pub const ALL: [Self; 3] = [Self::Currency, Self::Keys, Self::WovenEchoes];
+    pub const COUNT: usize = 6;
+    pub const ALL: [Self; Self::COUNT] = [Self::Currency, Self::Keys, Self::WovenEchoes, Self::PointsEarned, Self::MonolithRun, Self::FactionStanding];
     pub const fn id(self) -> &'static str {
         match self {
             Self::Currency => "currency",
             Self::Keys => "keys",
             Self::WovenEchoes => "woven-echoes",
+            Self::PointsEarned => "points-earned",
+            Self::MonolithRun => "monolith-run",
+            Self::FactionStanding => "faction-standing",
         }
     }
     pub fn from_id(id: &str) -> Option<Self> {
@@ -25,6 +32,27 @@ impl FieldSet {
     }
     pub(crate) fn decode(value: u8) -> Result<Self, ProtocolError> {
         Self::ALL.get(value as usize).copied().ok_or(ProtocolError::InvalidData)
+    }
+    pub const fn held_items(self) -> bool {
+        matches!(self, Self::Keys | Self::WovenEchoes)
+    }
+    pub const fn field_count(self) -> Option<usize> {
+        match self {
+            Self::Currency | Self::MonolithRun => Some(3),
+            Self::PointsEarned => Some(2),
+            Self::FactionStanding => Some(12),
+            _ => None,
+        }
+    }
+    pub fn takes(self, index: usize, value: i32) -> bool {
+        let maximum = match self {
+            Self::PointsEarned => i32::from(u16::MAX),
+            Self::MonolithRun if index == 1 => 10_000,
+            Self::MonolithRun if index == 2 => 1,
+            Self::FactionStanding if index % 3 == 1 => 999_999,
+            _ => i32::MAX,
+        };
+        value >= 0 && value <= maximum && self.field_count().is_none_or(|count| index < count)
     }
 }
 
@@ -63,7 +91,7 @@ impl Snapshot {
                 .all(|(a, b)| (a.key, a.identity, a.item_type, a.sub_type, a.value) == (b.key, b.identity, b.item_type, b.sub_type, b.value))
     }
     pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
-        if self.manager == 0 || self.container == 0 || self.fields.len() > MAX_FIELDS || (self.set == FieldSet::Currency && self.fields.len() != 3) {
+        if self.manager == 0 || self.container == 0 || self.fields.len() > MAX_FIELDS || self.set.field_count().is_some_and(|count| self.fields.len() != count) {
             return Err(ProtocolError::InvalidData);
         }
         let mut bytes = vec![self.set as u8];
@@ -137,7 +165,7 @@ impl Snapshot {
                 field.value = *value;
             }
         }
-        if self.set != FieldSet::Currency {
+        if self.set.held_items() {
             wanted.retain(|field| field.value != 0);
         }
         self.same_values(&Self {
@@ -149,7 +177,13 @@ impl Snapshot {
 impl Edit {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         self.expected.encode()?;
-        if self.values.len() != self.expected.fields.len() || self.values.iter().flatten().any(|value| *value < 0) {
+        if self.values.len() != self.expected.fields.len()
+            || self
+                .values
+                .iter()
+                .enumerate()
+                .any(|(index, value)| value.is_some_and(|value| !self.expected.set.takes(index, value)))
+        {
             return Err(ProtocolError::InvalidData);
         }
         Ok(())
@@ -233,5 +267,51 @@ mod tests {
         after.fields[0].identity -= 1;
         after.container += 1;
         assert!(!after.keeps(&before, &[Some(0), Some(40)]));
+    }
+    #[test]
+    fn fixed_numeric_sets_keep_zero_rows_and_validate_each_requested_field_range() {
+        for set in [FieldSet::PointsEarned, FieldSet::MonolithRun, FieldSet::FactionStanding] {
+            let count = set.field_count().unwrap();
+            let expected = Snapshot {
+                set,
+                manager: 1,
+                container: 2,
+                fields: (0..count)
+                    .map(|index| Field {
+                        key: index as u64,
+                        identity: 10 + index as u64,
+                        item_type: 0,
+                        sub_type: 0,
+                        label: String::new(),
+                        value: 1,
+                    })
+                    .collect(),
+            };
+            assert_eq!(Snapshot::decode(&expected.encode().unwrap()).unwrap(), expected);
+            let edit = Edit {
+                expected: expected.clone(),
+                values: vec![Some(0); count],
+            };
+            assert!(edit.validate().is_ok());
+            let mut actual = expected.clone();
+            for field in &mut actual.fields {
+                field.value = 0;
+            }
+            assert!(actual.keeps(&expected, &edit.values));
+            actual.fields.pop();
+            assert!(!actual.keeps(&expected, &edit.values));
+            assert!(actual.encode().is_err());
+            let (index, bad) = match set {
+                FieldSet::PointsEarned => (0, 65536),
+                FieldSet::MonolithRun => (2, 2),
+                _ => (1, 1_000_000),
+            };
+            let mut invalid = edit;
+            invalid.values[index] = Some(bad);
+            assert!(invalid.validate().is_err());
+        }
+        assert!(FieldSet::MonolithRun.takes(1, 10_000));
+        assert!(!FieldSet::MonolithRun.takes(1, 10_001));
+        assert!(FieldSet::FactionStanding.takes(1, 999_999));
     }
 }

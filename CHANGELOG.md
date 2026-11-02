@@ -5,6 +5,13 @@ code and its tests, and what is still to build in [the helper's backlog](crates/
 
 ## 2026-11-02
 
+- World: set camera distance persistently, preserving game-setting changes and restoring each camera's baseline on off.
+- World: multiply pack count through the game's room density without bypassing its placement cap.
+- World: multiply pack size while leaving bosses and other lone monsters alone.
+- World: independently scale Normal, Magic and Rare pack weights, sharing one restored spawner call with pack size.
+- Character: read and apply earned passive and Weaver points, with UInt16 limits and an allocated-point floor.
+- Monolith: edit the character's current or last selected saved run, recalculate corruption, save and refresh a matching open panel.
+- Factions: edit joined factions' rank, favor and reputation with the game's rank rules and save/sync methods.
 - World: tune Morditas hunt starting time, countdown speed and time per kill through one persistent control.
 - Trainer: keep wide hook settings separate from Windows unwind metadata, and publish every target's settings before reopening a shared group.
 - Factions: successful prophecy rewards keep completed charges without changing the game's reported consumption.

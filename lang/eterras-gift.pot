@@ -1970,7 +1970,7 @@ msgid "Sealed"
 msgstr ""
 
 #: crates/trainer/src/screens/backend_session.rs
-msgid "A count must be a whole number from 0 to 2147483647"
+msgid "A value must be a whole number from 0 to 2147483647"
 msgstr ""
 
 #: crates/trainer/src/screens/backend_session.rs

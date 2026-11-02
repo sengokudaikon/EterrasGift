@@ -1,47 +1,30 @@
 //! Currency changes use the game's delta methods so its limits, UI updates and saves still run.
 use super::*;
-use eg_trainer_wire::field_edits::Field;
 use il2cpp_runtime::Argument;
 
 impl RuntimeAccess {
-    pub(super) unsafe fn currency_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>, api: raw::InvocationApi, manager: Root<'a, 'r>) -> Result<Counts<'a, 'r>, WriteError> {
+    pub(super) unsafe fn currency_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>, api: raw::InvocationApi, manager: Root<'a, 'r>) -> Result<FieldGraph<'a, 'r>, WriteError> {
         // SAFETY: the current manager and all returned components stay rooted throughout their metadata reads/getter.
         unsafe {
-            let actor = self.count_child(attached, &manager, c"actor")?;
-            let gold = self.count_child(attached, &actor, c"goldTracker")?;
-            let dungeon = self.count_child(attached, &actor, c"dungeonRunManager")?;
-            let bones = self.count_child(attached, &actor, c"ancientBonesTracker")?;
+            let actor = self.field_child(attached, &manager, c"actor")?;
+            let gold = self.field_child(attached, &actor, c"goldTracker")?;
+            let dungeon = self.field_child(attached, &actor, c"dungeonRunManager")?;
+            let bones = self.field_child(attached, &actor, c"ancientBonesTracker")?;
             let context = InvocationContext::new(attached, api);
-            let get = self.count_call(&context, api, &dungeon, c"GetSoulEmbers", 0)?;
+            let get = self.field_call(&context, api, &dungeon, c"GetSoulEmbers", 0)?;
             let embers = match returned(get.invoke(Some(&dungeon), &mut []))? {
                 ReturnValue::Scalar { value: Scalar::I32(value), .. } => value,
                 _ => return Err(WriteError::Refused("Unexpected soul embers result".into())),
             };
             let entries = vec![gold, dungeon, bones];
             let values = [self.primitive::<i32>(&entries[0], c"value")?, embers, self.primitive::<i32>(&entries[2], c"value")?];
-            let fields = entries
+            let values = entries
                 .iter()
                 .zip(values)
-                .enumerate()
-                .map(|(index, (root, value))| {
-                    Ok(Field {
-                        key: index as u64,
-                        identity: target(root)?.as_ptr() as u64,
-                        item_type: 0,
-                        sub_type: 0,
-                        label: String::new(),
-                        value,
-                    })
-                })
+                .map(|(root, value)| Ok((target(root)?.as_ptr() as u64, value)))
                 .collect::<Result<Vec<_>, WriteError>>()?;
-            let snapshot = Snapshot {
-                set: FieldSet::Currency,
-                manager: target(&manager)?.as_ptr() as u64,
-                container: target(&actor)?.as_ptr() as u64,
-                fields,
-            };
-            snapshot.encode().map_err(|e| WriteError::Refused(e.to_string()))?;
-            Ok(Counts {
+            let snapshot = fixed_snapshot(FieldSet::Currency, &manager, &actor, values)?;
+            Ok(FieldGraph {
                 _manager: manager,
                 container: actor,
                 entries,
@@ -53,7 +36,7 @@ impl RuntimeAccess {
         &self,
         attached: &AttachedThread<'_>,
         api: raw::InvocationApi,
-        graph: &Counts<'_, '_>,
+        graph: &FieldGraph<'_, '_>,
         values: &[Option<i32>],
     ) -> Result<Snapshot, WriteError> {
         // SAFETY: all exact method signatures are bound before the first mutation; each target stays rooted.
@@ -65,9 +48,9 @@ impl RuntimeAccess {
                 .iter()
                 .zip(names)
                 .enumerate()
-                .map(|(index, (root, name))| self.count_call(&context, api, root, name, if index == 1 { 2 } else { 1 }))
+                .map(|(index, (root, name))| self.field_call(&context, api, root, name, if index == 1 { 2 } else { 1 }))
                 .collect::<Result<Vec<_>, _>>()?;
-            self.count_gate(attached, graph.snapshot.manager)?;
+            self.field_gate(attached, graph.snapshot.manager)?;
             stored(
                 || {
                     for (index, ((method, root), value)) in methods.iter().zip(&graph.entries).zip(values).enumerate() {
@@ -90,11 +73,11 @@ impl RuntimeAccess {
                         } else if !boolean(result)? {
                             return Err(WriteError::Refused("The game refused that currency change".into()));
                         }
-                        self.count_gate(attached, graph.snapshot.manager)?;
+                        self.field_gate(attached, graph.snapshot.manager)?;
                     }
                     Ok(())
                 },
-                || self.read_counts(attached, api, graph.snapshot.manager, graph.snapshot.set),
+                || self.read_field_set(attached, api, graph.snapshot.manager, graph.snapshot.set),
             )
         }
     }

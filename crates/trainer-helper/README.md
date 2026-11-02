@@ -90,6 +90,18 @@ transactions and cleanup ordering: Clear closes all effects, restores receiver s
 receiver-bound groups, and every failure retains the affected owners and pins. Generated gameplay code stays outside
 the DLL; the existing dispatcher drain controls helper unload.
 
+Pack count changes a room's density modifier only for its original placement call, retaining the game's cap.
+Pack size and three coherent rarity weights share one spawner target, preserving a count of one. Their four-byte
+fields use `native-hooks`' retained stack snapshots and unwind cleanup, not helper callbacks. The supported game
+serializes placement/generation per receiver; recursion has its own record and simultaneous different receivers
+share no snapshot state. Repeated calls restore the asset values rather than retaining multiplied fields.
+
+Camera distance uses the same pinned scalar ownership as stat overrides, with a before-original gateway that
+adopts foreign zoom-setting changes as the new baseline. The main-thread watchdog rebinds a replacement camera
+without changing the wanted setting; it keeps the previous pin across a brief camera gap. Hook reads remain
+independent observations. Toggle-time ApplyZoom is best effort on the main thread; shutdown conditionally restores
+only the pinned managed field before dispatcher removal, and invokes no Unity method from the control thread.
+
 Mixed leaf/patch features use the same group and independent byte readback. Their gateways stay closed while the
 detour transaction runs, then the interior-patch transaction; a later failure restores the previous detour states.
 These are compensating transactions, not one simultaneous write: interior patches can briefly take effect before
@@ -129,11 +141,20 @@ elapsed time; secondary hunts with unchanged length are not multiplied again. Ex
 resumes from current progress. All target settings publish before the shared switch opens, and readback compares
 every target's settings. The game retains its original kill-popup and bar-update timing.
 
-Count editors use `field_edits` snapshots with full container/entry/data/type identities and quantities. Main-thread
-Apply prevalidates every destination and compares the whole current observation before invoking any setter/removal
-or currency-delta method. Once a method is entered, any failure is uncertain. The desktop submits no automatic retry
+Numeric editors use `field_edits` snapshots with subject identities and values. Fixed sets keep zero-valued rows;
+only held-item sets remove a zeroed stack. Main-thread Apply compares the whole current observation and prevalidates
+every destination before invoking a setter, removal, recalculation or save. Once a store/method is entered, any failure
+is uncertain. The desktop submits no automatic retry
 and requires a separate readback. Names are presentation: a surviving entry keeps its displayed label until Read,
 even when removing a duplicate-name neighbour changes the game's disambiguation.
+
+Each numeric feature owns its graph and rules under `game/features/field_edits`. Earned points use UInt16 setters and
+fresh allocated-point floors. Monolith run lookup checks that the current/last-requested run is the character's saved
+timeline run, then changes corruption/Gaze/reroll state and saves; only an already open matching panel is refreshed.
+Faction standing validates membership, maximum rank and the proposed rank's reputation requirement for all changed
+factions before calling SetRank(false), SetFavorAndReputation and SaveAndSync(false). Lookup queries use one narrow
+adapter for Bool + final out reference: the rooted source must already own the returned object. This does not enable
+general ref/out reference invocation or newly allocated out objects in the runtime library.
 
 Loot Lizards and Rune Wardens share one original-first gateway and keep independent settings. Two words in each
 call's incoming home area capture its context and done/enable flags before the original; these survive original

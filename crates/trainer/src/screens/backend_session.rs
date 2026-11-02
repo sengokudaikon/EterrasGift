@@ -1,5 +1,5 @@
 //! Trainer pages on the worker's owned snapshots. Independent hook controls use the shared profile/change/readback
-//! path. Count editors share typed read/apply receipts; remaining editors advertise no operation support.
+//! path. Numeric editors share typed read/apply receipts and independent readback.
 
 use super::profiles::Profile;
 use super::session::{FieldError, FieldRequest, FieldWrite, GameField, HookState, NotAvailable, Settling, TrainerSession};
@@ -14,7 +14,7 @@ use std::rc::Rc;
 phrases! {
     ReadFieldsFirst: "Read these fields before applying changes"
     FieldsChanged: "The field observation changed; read again"
-    FieldRange: "A count must be a whole number from 0 to 2147483647"
+    FieldRange: "A value must be a whole number from 0 to 2147483647"
     FieldsGone: "The field observation is no longer available; read again"
     WorkerStopped: "The trainer worker stopped."
     WorkerBusy: "Wait for the current trainer operation to finish."
@@ -39,8 +39,8 @@ struct Changes {
     last: u64,
 }
 
-struct CountPending(Rc<RefCell<Changes>>);
-impl Drop for CountPending {
+struct FieldsPending(Rc<RefCell<Changes>>);
+impl Drop for FieldsPending {
     fn drop(&mut self) {
         self.0.borrow_mut().changing -= 1;
     }
@@ -61,7 +61,7 @@ impl BackendSession {
             settling: RefCell::default(),
         }
     }
-    fn count_request(&self, set: eg_trainer_wire::field_edits::FieldSet, command: Command) -> FieldRequest {
+    fn field_request(&self, set: eg_trainer_wire::field_edits::FieldSet, command: Command) -> FieldRequest {
         let receipt = match self.backend.try_submit(command) {
             Ok(receipt) => receipt,
             Err(error) => {
@@ -74,7 +74,7 @@ impl BackendSession {
         let backend = self.backend.clone();
         let changes = self.changes.clone();
         changes.borrow_mut().changing += 1;
-        let pending = CountPending(changes);
+        let pending = FieldsPending(changes);
         FieldRequest::Pending(Box::pin(async move {
             let _pending = pending;
             let result = receipt.wait().await;
@@ -264,7 +264,7 @@ impl TrainerSession for BackendSession {
         let Some(set) = eg_trainer_wire::field_edits::FieldSet::from_id(id) else {
             return refused(NotAvailable.get());
         };
-        self.count_request(set, Command::ReadFields(set))
+        self.field_request(set, Command::ReadFields(set))
     }
     fn write_fields(&self, id: &str, fields: &[FieldWrite]) -> FieldRequest {
         let Some(set) = eg_trainer_wire::field_edits::FieldSet::from_id(id) else {
@@ -277,7 +277,7 @@ impl TrainerSession for BackendSession {
             || fields
                 .iter()
                 .zip(&expected.snapshot.fields)
-                .any(|(write, read)| write.read != f64::from(read.value) || (set != eg_trainer_wire::field_edits::FieldSet::Currency && write.label != read.label))
+                .any(|(write, read)| write.read != f64::from(read.value) || (set.held_items() && write.label != read.label))
         {
             return refused(FieldsChanged.get());
         }
@@ -288,7 +288,7 @@ impl TrainerSession for BackendSession {
             }
             values.push(field.changes().then_some(field.wanted as i32));
         }
-        self.count_request(
+        self.field_request(
             set,
             Command::WriteFields {
                 expected: Box::new(expected),

@@ -67,3 +67,49 @@ fn count_edits_require_independent_subject_and_quantity_readback_and_never_retry
         assert_eq!(wire.requests().len(), before + 1);
     }
 }
+
+#[test]
+fn fixed_editors_confirm_zero_values_with_all_rows_and_reject_a_different_container_readback() {
+    for set in [FieldSet::PointsEarned, FieldSet::MonolithRun, FieldSet::FactionStanding] {
+        let fixture = Fixture::rehashing();
+        let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
+        let mut session = fixture.session(&wire);
+        session.enable();
+        run(session.connect()).unwrap();
+        let expected = Snapshot {
+            set,
+            manager: 0x1234,
+            container: 10,
+            fields: (0..set.field_count().unwrap())
+                .map(|index| Field {
+                    key: index as u64,
+                    identity: 100 + index as u64,
+                    item_type: 0,
+                    sub_type: 0,
+                    label: String::new(),
+                    value: 1,
+                })
+                .collect(),
+        };
+        wire.push(done(expected.encode().unwrap()));
+        assert_eq!(run(session.read_fields(set)).unwrap(), expected);
+        let edit = Edit {
+            values: vec![Some(0); expected.fields.len()],
+            expected: expected.clone(),
+        };
+        let mut observed = expected;
+        for field in &mut observed.fields {
+            field.value = 0;
+        }
+        wire.push(done(vec![]));
+        wire.push(done(observed.encode().unwrap()));
+        assert_eq!(run(session.apply_fields(&edit, &mut Allowed)).unwrap(), WriteOutcome::Confirmed(observed.clone()));
+        let sent = wire.requests();
+        assert!(matches!(sent[sent.len() - 2], Request::WriteFields { .. }));
+        assert!(matches!(sent[sent.len()-1], Request::ReadFields { set: actual, .. } if actual == set));
+        observed.container += 1;
+        wire.push(done(vec![]));
+        wire.push(done(observed.encode().unwrap()));
+        assert!(matches!(run(session.apply_fields(&edit, &mut Allowed)).unwrap(), WriteOutcome::NotKept(_)));
+    }
+}

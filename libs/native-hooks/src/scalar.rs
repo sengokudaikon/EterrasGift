@@ -1,4 +1,4 @@
-//! A retained, original-first gateway for void instance methods. After the game recalculates a scalar, remember
+//! Retained scalar gateways for void instance methods. Original-first: after the game recalculates a scalar, remember
 //! that result and apply the selected bits. No generated path enters this DLL. The owner pins the receiver until
 //! closing and draining the shared state, then conditionally restores the latest game value before releasing it.
 use super::{HookError, page};
@@ -34,6 +34,18 @@ impl ScalarGate {
     /// nonmoving, and its aligned four-byte field stays readable/writable until close/drain/restore. `online`
     /// is a process-lifetime byte. The supported game serializes recalculation of this receiver on its main thread.
     pub unsafe fn prepare(receiver: usize, offset: u32, online: usize, baseline: u32, stack_argument: bool, shared: Option<&Self>) -> Result<Self, HookError> {
+        // SAFETY: caller supplies the pinned field and exact original-first ABI.
+        unsafe { Self::build(receiver, offset, online, baseline, stack_argument, shared, false) }
+    }
+    /// A before-original scalar: preserve a foreign field change as the new baseline, then write the override.
+    /// # Safety
+    /// As `prepare`; the original is void(instance, MethodInfo), serialized on the main thread. It reads rather
+    /// than recalculates this field. The owner closes/drains/restores before releasing the pinned receiver.
+    pub unsafe fn prepare_before(receiver: usize, offset: u32, online: usize, baseline: u32) -> Result<Self, HookError> {
+        // SAFETY: caller supplies this before-original ABI and pinned storage.
+        unsafe { Self::build(receiver, offset, online, baseline, false, None, true) }
+    }
+    unsafe fn build(receiver: usize, offset: u32, online: usize, baseline: u32, stack_argument: bool, shared: Option<&Self>, before: bool) -> Result<Self, HookError> {
         // SAFETY: private pages, initialized before publication; state/pages survive until process exit.
         unsafe {
             let allocation = page::allocate("allocate scalar gateway")?;
@@ -62,7 +74,9 @@ impl ScalarGate {
             }
             code.extend([0x48, 0xb8]);
             code.extend((original as u64).to_le_bytes());
-            code.extend([0xff, 0x10]);
+            if !before {
+                code.extend([0xff, 0x10]);
+            }
             code.extend([0x48, 0x8b, 0x4c, 0x24, 0x28, 0x48, 0xb8]);
             code.extend((state as *const State as u64).to_le_bytes());
             code.extend([0xf0, 0x48, 0xff, 0x40, 0x08]); // active++ before checking admission
@@ -73,15 +87,30 @@ impl ScalarGate {
             skips.push(code.len() - 1); // exact pinned receiver
             code.extend([0x4c, 0x8b, 0x58, 0x18, 0x41, 0x80, 0x3b, 0, 0x75, 0]);
             skips.push(code.len() - 1);
-            code.extend([0x8b, 0x91]);
-            code.extend(offset.to_le_bytes()); // calculated bits
-            code.extend([0x89, 0x50, 0x24, 0x8b, 0x50, 0x20]); // baseline = calculated; desired -> edx
-            code.extend([0x89, 0x91]);
-            code.extend(offset.to_le_bytes());
+            if before {
+                // RDX is the original MethodInfo: use R10/R11, preserving both incoming argument registers.
+                code.extend([0x44, 0x8b, 0x91]);
+                code.extend(offset.to_le_bytes());
+                code.extend([0x44, 0x3b, 0x50, 0x20, 0x74, 4, 0x44, 0x89, 0x50, 0x24]);
+                code.extend([0x44, 0x8b, 0x50, 0x20, 0x44, 0x89, 0x91]);
+                code.extend(offset.to_le_bytes());
+            } else {
+                code.extend([0x8b, 0x91]);
+                code.extend(offset.to_le_bytes()); // calculated bits
+                code.extend([0x89, 0x50, 0x24, 0x8b, 0x50, 0x20]); // baseline = calculated; desired -> edx
+                code.extend([0x89, 0x91]);
+                code.extend(offset.to_le_bytes());
+            }
             for skip in skips {
                 code[skip] = (code.len() - skip - 1) as u8;
             }
-            code.extend([0xf0, 0x48, 0xff, 0x48, 0x08, 0x48, 0x83, 0xc4, 0x38, 0xc3]);
+            code.extend([0xf0, 0x48, 0xff, 0x48, 0x08]);
+            if before {
+                code.extend([0x48, 0xb8]);
+                code.extend((original as u64).to_le_bytes());
+                code.extend([0xff, 0x10]);
+            }
+            code.extend([0x48, 0x83, 0xc4, 0x38, 0xc3]);
             std::ptr::copy_nonoverlapping(code.as_ptr(), allocation, code.len());
             let table = page::unwind(allocation, code.len(), 0x38);
             page::publish(allocation, Some(table), "publish scalar gateway")?;
@@ -156,6 +185,63 @@ mod tests {
         Arc,
         atomic::{AtomicBool, AtomicU8},
     };
+    #[test]
+    fn before_original_tracks_foreign_changes_keeps_method_info_and_restores_each_bound_camera() {
+        #[repr(C)]
+        struct Camera {
+            distance: AtomicU32,
+            seen: AtomicU32,
+        }
+        unsafe extern "C-unwind" fn zoom(camera: *const Camera, method: usize) {
+            assert_eq!(method, 0x12345678);
+            // SAFETY: the fixture retains aligned camera storage through the call.
+            let camera = unsafe { &*camera };
+            camera.seen.store(camera.distance.load(SeqCst), SeqCst);
+        }
+        let online = AtomicU8::new(0);
+        let camera = Camera {
+            distance: AtomicU32::new((-17.5f32).to_bits()),
+            seen: AtomicU32::new(0),
+        };
+        let other = Camera {
+            distance: AtomicU32::new((-20f32).to_bits()),
+            seen: AtomicU32::new(0),
+        };
+        // SAFETY: live aligned pinned test storage, exact void(receiver, MethodInfo) ABI, serialized calls.
+        unsafe {
+            let gate = ScalarGate::prepare_before(&camera as *const _ as usize, 0, &online as *const _ as usize, (-17.5f32).to_bits()).unwrap();
+            gate.set_original(zoom as *const ());
+            gate.enable((-30f64).to_bits());
+            let call: unsafe extern "C-unwind" fn(*const Camera, usize) = std::mem::transmute(gate.entry());
+            call(&camera, 0x12345678);
+            assert_eq!(f32::from_bits(camera.seen.load(SeqCst)), -30.0);
+            call(&other, 0x12345678);
+            assert_eq!(f32::from_bits(other.seen.load(SeqCst)), -20.0);
+            camera.distance.store((-22f32).to_bits(), SeqCst);
+            call(&camera, 0x12345678);
+            assert_eq!(f32::from_bits(camera.seen.load(SeqCst)), -30.0);
+            gate.close();
+            gate.drain().unwrap();
+            gate.restore();
+            assert_eq!(f32::from_bits(camera.distance.load(SeqCst)), -22.0);
+            gate.enable((-40f64).to_bits());
+            camera.distance.store((-24f32).to_bits(), SeqCst);
+            gate.close();
+            gate.drain().unwrap();
+            gate.restore();
+            assert_eq!(f32::from_bits(camera.distance.load(SeqCst)), -24.0);
+            let replacement = ScalarGate::prepare_before(&other as *const _ as usize, 0, &online as *const _ as usize, (-20f32).to_bits()).unwrap();
+            replacement.set_original(zoom as *const ());
+            replacement.enable((-30f64).to_bits());
+            let call: unsafe extern "C-unwind" fn(*const Camera, usize) = std::mem::transmute(replacement.entry());
+            call(&other, 0x12345678);
+            assert_eq!(f32::from_bits(other.seen.load(SeqCst)), -30.0);
+            replacement.close();
+            replacement.drain().unwrap();
+            replacement.restore();
+            assert_eq!(f32::from_bits(other.distance.load(SeqCst)), -20.0);
+        }
+    }
     #[repr(C)]
     struct Stats {
         attack: AtomicU32,

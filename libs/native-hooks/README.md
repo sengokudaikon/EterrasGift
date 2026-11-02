@@ -20,6 +20,19 @@ Generated unwind entries occupy a separate region after the data page's first 12
 keep each gateway's mutable state out of that region, including both words of wide settings. Settings publication
 must never change the registered function entry or its unwind program.
 
+`postfix::scope` adds invocation-local restoration for up to four four-byte receiver fields and four argument
+positions. The effect saves after admission and before mutation; the gateway restores on return and its retained
+Windows unwind handler restores during exception unwind, never first-pass search. Original results and opaque
+register arguments survive. The receiver must remain live and serialized through the original call; recursive
+calls get distinct stack records. Same-receiver concurrent field mutation is outside that contract. Cleanup,
+snapshots and unwind metadata remain valid after closing the gate and releasing its Rust owner.
+
+`scalar::prepare_before` writes a pinned field before the original reads it. A field value different from the
+last override becomes the new baseline. Closing/draining precedes conditional restoration and pin release;
+a newer foreign write wins. Unlike the original-first scalar, it never treats an unchanged override as a new
+game baseline. Its active span covers only its managed-field accesses, so an exception from the original does
+not leave the scalar busy.
+
 ## Retained detours
 
 `RetainedHook` leaks each `RawDetour` immediately; callers retain module lifetime through entry restoration and callback drain.

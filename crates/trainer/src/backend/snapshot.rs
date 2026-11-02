@@ -129,7 +129,7 @@ pub enum Activity {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Capabilities {
-    pub fields: [bool; 3],
+    pub fields: [bool; eg_trainer_wire::field_edits::FieldSet::COUNT],
     /// In GameplayHook order; availability comes from this connection, not saved intent.
     pub gameplay_hooks: [bool; eg_trainer_wire::hooks::GameplayHook::COUNT],
     pub read_forge: bool,
@@ -149,7 +149,7 @@ pub struct Capabilities {
 impl Default for Capabilities {
     fn default() -> Self {
         Self {
-            fields: [false; 3],
+            fields: [false; eg_trainer_wire::field_edits::FieldSet::COUNT],
             gameplay_hooks: [false; eg_trainer_wire::hooks::GameplayHook::COUNT],
             read_forge: false,
             level_requirement: false,

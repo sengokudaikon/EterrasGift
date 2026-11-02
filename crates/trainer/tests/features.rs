@@ -61,7 +61,18 @@ fn every_gameplay_hook_runs_exactly_one_hook_feature() {
         .count();
     assert_eq!(supported, GameplayHook::ALL.len());
     for set in eg_trainer_wire::field_edits::FieldSet::ALL {
-        assert_eq!(FeatureKey::parse(set.id()).unwrap().descriptor().native_support(), NativeSupport::FieldEditor(set));
+        let descriptor = FeatureKey::parse(set.id()).unwrap().descriptor();
+        assert_eq!(descriptor.native_support(), NativeSupport::FieldEditor(set));
+        if let Some(count) = set.field_count() {
+            assert_eq!(descriptor.fields.len(), count, "{}", set.id());
+            for (index, field) in descriptor.fields.iter().enumerate() {
+                assert!(set.takes(index, field.minimum as i32));
+                assert!(set.takes(index, field.maximum as i32));
+                if field.maximum < f64::from(i32::MAX) {
+                    assert!(!set.takes(index, field.maximum as i32 + 1));
+                }
+            }
+        }
     }
 }
 

@@ -3,6 +3,7 @@
 use super::{HookError, page};
 use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
 use windows_sys::Win32::System::Memory::{MEM_RELEASE, VirtualFree};
+pub mod scope;
 
 #[repr(C)]
 struct Data {

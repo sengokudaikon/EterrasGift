@@ -11,11 +11,11 @@ async fn answer(request: FieldRequest) -> FieldResult {
     }
 }
 #[test]
-fn stash_editors_share_the_serialized_worker_and_reject_stale_scope_before_submission() {
+fn numeric_editors_share_the_serialized_worker_and_reject_stale_scope_before_submission() {
     run(async {
         let shared = Shared::new();
         for set in FieldSet::ALL {
-            let count = if set == FieldSet::Currency { 3 } else { 2 };
+            let count = set.field_count().unwrap_or(2) as u64;
             shared.counts.lock().unwrap().insert(
                 set,
                 Snapshot {
@@ -28,8 +28,8 @@ fn stash_editors_share_the_serialized_worker_and_reject_stale_scope_before_submi
                             identity: 300 + index,
                             item_type: if set == FieldSet::Keys { 104 } else { 107 },
                             sub_type: index as u16,
-                            label: format!("Item #{index}"),
-                            value: 20,
+                            label: if set.held_items() { format!("Item #{index}") } else { String::new() },
+                            value: if set == FieldSet::MonolithRun && index == 2 { 1 } else { 20 },
                         })
                         .collect(),
                 },
@@ -63,8 +63,8 @@ fn stash_editors_share_the_serialized_worker_and_reject_stale_scope_before_submi
                 .enumerate()
                 .map(|(index, field)| FieldWrite {
                     read: field.value,
-                    wanted: if index == 0 { 0.0 } else { 40.0 },
-                    label: field.label.clone(),
+                    wanted: if index == 0 || (set == FieldSet::MonolithRun && index == 2) { 0.0 } else { 40.0 },
+                    label: if set.held_items() { field.label.clone() } else { "Translated field label".into() },
                 })
                 .collect();
             writes[0].read = 99.0;
@@ -73,8 +73,11 @@ fn stash_editors_share_the_serialized_worker_and_reject_stale_scope_before_submi
             writes[0].read = 20.0;
             let actual = answer(session.write_fields(set.id(), &writes)).await.unwrap();
             assert_eq!(shared.count("fields-write"), before + 1);
-            assert_eq!(actual.len(), if set == FieldSet::Currency { 3 } else { 1 });
-            assert_eq!(actual.last().unwrap().value, 40.0);
+            assert_eq!(actual.len(), if set.held_items() { 1 } else { read.len() });
+            assert_eq!(actual.last().unwrap().value, if set == FieldSet::MonolithRun { 0.0 } else { 40.0 });
+            if !set.held_items() {
+                assert_eq!(actual[0].value, 0.0, "numeric zero keeps its field");
+            }
             assert_eq!(handle.snapshot().phase, Phase::Ready);
         }
         assert!(!session.is_busy());

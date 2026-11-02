@@ -11,18 +11,18 @@ impl RuntimeAccess {
         api: raw::InvocationApi,
         manager: Root<'a, 'r>,
         set: FieldSet,
-    ) -> Result<Counts<'a, 'r>, WriteError> {
+    ) -> Result<FieldGraph<'a, 'r>, WriteError> {
         // SAFETY: current rooted manager, inherited holder getter and exact current tab; all returned objects stay rooted.
         unsafe {
             let context = InvocationContext::new(attached, api);
-            let holder = self.count_child(attached, &manager, c"stash")?;
-            let active = self.count_call(&context, api, &holder, c"get_ActiveContainer", 0)?;
+            let holder = self.field_child(attached, &manager, c"stash")?;
+            let active = self.field_call(&context, api, &holder, c"get_ActiveContainer", 0)?;
             let stash = reference(returned(active.invoke(Some(&holder), &mut []))?)?;
             let getter = if set == FieldSet::Keys { c"get_Keys" } else { c"get_WovenEchoes" };
-            let tab = reference(returned(self.count_call(&context, api, &stash, getter, 0)?.invoke(Some(&stash), &mut []))?)?;
+            let tab = reference(returned(self.field_call(&context, api, &stash, getter, 0)?.invoke(Some(&stash), &mut []))?)?;
             let images = self.images()?;
             let entry_class = self.class(&images, c"", c"ItemContainerEntry")?;
-            let method = self.count_method((self.object_class)(target(&tab)?.as_ptr()), c"GetContent", 0)?;
+            let method = self.field_method((self.object_class)(target(&tab)?.as_ptr()), c"GetContent", 0)?;
             let list_class = (self.type_class)((self.method_return)(method.as_ptr()));
             self.list_class(list_class)?;
             self.array_class(self.field_class(self.field(list_class, c"_items")?, "stash entries")?, entry_class)?;
@@ -35,9 +35,9 @@ impl RuntimeAccess {
             let list = reference(returned(content.invoke(Some(&tab), &mut []))?)?;
             let entries = self.list(attached, &list, entry_class, MAX_FIELDS as u32)?;
             let item_list = self.class(&images, c"", c"ItemList")?;
-            let get_items = context.bind(self.count_method(item_list, c"get", 0)?).map_err(|e| WriteError::Refused(e.to_string()))?;
+            let get_items = context.bind(self.field_method(item_list, c"get", 0)?).map_err(|e| WriteError::Refused(e.to_string()))?;
             let items = reference(returned(get_items.invoke(None, &mut []))?)?;
-            let display = self.count_call(&context, api, &items, c"GetItemDisplayName", 2)?;
+            let display = self.field_call(&context, api, &items, c"GetItemDisplayName", 2)?;
             let string = self.system_class(c"String")?;
             let mut rows = Vec::new();
             for entry in entries {
@@ -87,7 +87,7 @@ impl RuntimeAccess {
                 fields,
             };
             snapshot.encode().map_err(|e| WriteError::Refused(e.to_string()))?;
-            Ok(Counts {
+            Ok(FieldGraph {
                 _manager: manager,
                 container: tab,
                 entries,
@@ -99,7 +99,7 @@ impl RuntimeAccess {
         &self,
         attached: &AttachedThread<'_>,
         api: raw::InvocationApi,
-        graph: &Counts<'_, '_>,
+        graph: &FieldGraph<'_, '_>,
         values: &[Option<i32>],
     ) -> Result<Snapshot, WriteError> {
         // SAFETY: retained entries and tab; every setter/removal signature and permission is checked before stores.
@@ -108,17 +108,17 @@ impl RuntimeAccess {
             let setters = graph
                 .entries
                 .iter()
-                .map(|entry| self.count_call(&context, api, entry, c"set_Quantity", 1))
+                .map(|entry| self.field_call(&context, api, entry, c"set_Quantity", 1))
                 .collect::<Result<Vec<_>, _>>()?;
             let removing = values.contains(&Some(0));
             let remove = if removing {
                 if !boolean(returned(
-                    self.count_call(&context, api, &graph.container, c"get_PlayerCanRemove", 0)?
+                    self.field_call(&context, api, &graph.container, c"get_PlayerCanRemove", 0)?
                         .invoke(Some(&graph.container), &mut []),
                 )?)? {
                     return Err(WriteError::Refused("The game would not take anything out of this stash tab".into()));
                 }
-                let method = self.count_method((self.object_class)(target(&graph.container)?.as_ptr()), c"TryRemoveItem", 3)?;
+                let method = self.field_method((self.object_class)(target(&graph.container)?.as_ptr()), c"TryRemoveItem", 3)?;
                 let class = NonNull::new((self.type_class)((self.method_param)(method.as_ptr(), 2))).ok_or_else(|| WriteError::Refused("Missing removal context".into()))?;
                 let method = context
                     .bind_with_value_types(method, &[ValueTypeContract::I32Enum { class }])
@@ -127,7 +127,7 @@ impl RuntimeAccess {
             } else {
                 None
             };
-            self.count_gate(attached, graph.snapshot.manager)?;
+            self.field_gate(attached, graph.snapshot.manager)?;
             stored(
                 || {
                     for (index, (entry, value)) in graph.entries.iter().zip(values).enumerate() {
@@ -156,11 +156,11 @@ impl RuntimeAccess {
                         ) {
                             return Err(WriteError::Refused("Unexpected quantity setter result".into()));
                         }
-                        self.count_gate(attached, graph.snapshot.manager)?;
+                        self.field_gate(attached, graph.snapshot.manager)?;
                     }
                     Ok(())
                 },
-                || self.read_counts(attached, api, graph.snapshot.manager, graph.snapshot.set),
+                || self.read_field_set(attached, api, graph.snapshot.manager, graph.snapshot.set),
             )
         }
     }

@@ -3,6 +3,7 @@
 
 mod any_offhand;
 pub(crate) mod any_waypoint;
+pub(crate) mod camera_distance;
 pub(crate) mod champions;
 pub mod damage;
 pub(crate) mod death_drops;
@@ -24,6 +25,7 @@ pub(crate) mod morditas_timer;
 mod mysterious_rift;
 mod new_affixes;
 pub(crate) mod new_item_rarity;
+pub(crate) mod pack_count;
 mod patches;
 pub(crate) mod player_only;
 #[cfg(test)]
@@ -37,5 +39,6 @@ pub(crate) mod reveal_objective;
 pub(crate) mod runes_glyphs_to_99;
 pub(crate) mod shards_to_99;
 pub(crate) mod skip_quest_echoes;
+pub(crate) mod spawner_group;
 pub(crate) mod stat;
 mod unique;

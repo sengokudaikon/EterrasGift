@@ -1,6 +1,7 @@
 //! One scalar feature selects one accessor, read over the rooted current player. Pinning retains only its managed
 //! storage; the hook lifecycle closes/drains and restores it before releasing the pin, including when the character
 //! leaves play.
+use super::registry::ScalarBinding;
 use crate::game::{
     GameError, RuntimeAccess, WriteError,
     accessors::{
@@ -10,7 +11,7 @@ use crate::game::{
     instance_offset, target, unsupported,
 };
 use il2cpp_runtime::{AttachedThread, raw};
-use std::{ffi::c_void, ptr::NonNull};
+use std::ffi::c_void;
 #[cfg(test)]
 mod tests;
 pub(crate) struct StatFeature {
@@ -40,24 +41,6 @@ impl RuntimeAccess {
     }
 }
 
-pub struct StatBinding {
-    pub receiver: usize,
-    pub offset: u32,
-    pub baseline: u32,
-    pub online: usize,
-    handle: NonNull<c_void>,
-    free: raw::GcHandleFree,
-}
-// SAFETY: nonmoving pinned managed storage; ownership is serialized by the hook lifecycle. Release is on an attached thread.
-unsafe impl Send for StatBinding {}
-// SAFETY: shared handles are read-only; all writes and final release are serialized by the lifecycle owner.
-unsafe impl Sync for StatBinding {}
-impl Drop for StatBinding {
-    fn drop(&mut self) {
-        // SAFETY: lifecycle closes/drains every gateway and restores storage before dropping its last binding.
-        unsafe { (self.free)(self.handle.as_ptr()) };
-    }
-}
 impl RuntimeAccess {
     /// # Safety
     /// Same attached main-thread graph/lifetime contract as `selected_stat`.
@@ -69,7 +52,7 @@ impl RuntimeAccess {
     /// # Safety
     /// Attached main thread, initialized game statics and exclusive player read span as `player`. The caller keeps
     /// this binding until all gateways using it close and drain, and drops it on an attached runtime thread.
-    pub(crate) unsafe fn bind_stat(&self, attached: &AttachedThread<'_>, ownership: raw::Api, manager: u64, feature: &StatFeature) -> Result<StatBinding, WriteError> {
+    pub(crate) unsafe fn bind_stat(&self, attached: &AttachedThread<'_>, ownership: raw::Api, manager: u64, feature: &StatFeature) -> Result<ScalarBinding, WriteError> {
         // SAFETY: the selected accessor alone is resolved over a rooted, checked current player.
         unsafe {
             let SelectedStat { player, stat, bits: baseline } = self.selected_stat(attached, manager, feature)?;
@@ -84,15 +67,7 @@ impl RuntimeAccess {
             }
             let online = self.hook_online_storage(&self.images()?)?.as_ptr() as usize;
             self.player_unchanged(&player)?;
-            let handle = NonNull::new((ownership.gchandle_new)(object.as_ptr(), true)).ok_or_else(|| unsupported("pin scalar receiver"))?;
-            Ok(StatBinding {
-                receiver: object.as_ptr() as usize,
-                offset: offset as u32,
-                online,
-                baseline,
-                handle,
-                free: ownership.gchandle_free,
-            })
+            Ok(ScalarBinding::pin(ownership, object.as_ptr() as usize, offset as u32, baseline, online)?)
         }
     }
 }
