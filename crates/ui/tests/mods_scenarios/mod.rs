@@ -278,7 +278,8 @@ fn mods_sources(session: &Session) {
     session.click(650.0, 289.0);
     wait_for("fake source build and install", || ui.global::<ModsState>().get_installed_count() == 2);
     assert_eq!(runner.builds.load(std::sync::atomic::Ordering::Relaxed), 1);
-    assert_eq!(ui.global::<ModsState>().get_sources().row_count(), 0);
+    // The sources are read again after the library is: their list follows in a later answer.
+    wait_for("the installed source leaving the list", || ui.global::<ModsState>().get_sources().row_count() == 0);
     assert!(
         !fixture.root.join("Mods/NearbyMarkers.dll").exists(),
         "source builds enter the library and wait for preparation"

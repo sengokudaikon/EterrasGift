@@ -18,8 +18,10 @@ task-runtime.workspace = true
 eg-ui.workspace = true
 eg-trainer.workspace = true
 # The trainer helper DLL, embedded in the exe and built for its explicit target. A path, not `workspace = true`:
-# inheriting drops `artifact` and `target`. Without the pinned `target`, the helper's `il2cpp` feature leaks into the
-# app; a `--workspace` build unifies features anyway, so only `-p eterras-gift` gives a clean app
+# inheriting drops `artifact` and `target`. Only the DLL is taken, never the helper's library, so the IL2CPP and hook
+# code it links stays out of the app; no other app crate depends on them. The pinned `target` keeps the DLL's features
+# its own under `cargo build`. Under `cargo test --workspace` it is built with the helper's test features, so the app's
+# tests embed a test build of it, not what ships.
 eg-trainer-helper = { path = "../trainer-helper", artifact = "cdylib", target = "x86_64-pc-windows-msvc" }
 tokio.workspace = true
 slint.workspace = true
