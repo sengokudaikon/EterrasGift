@@ -117,6 +117,18 @@ Drop rates and extra rare share a before-original death-drop gateway. Component 
 Duplicate on drop selects the local manager's checked direct call from AttemptItemDropInWorld; unrelated drops are
 unchanged and there is no retained scope to clean up on exceptions.
 
+Prophecy uses snapshots the slot's completed charges in invocation-local home words and restores only a decrease
+after a successful normal return. The original Boolean and actual chargesConsumed output remain unchanged; original
+exceptions skip restoration, matching the C# trainer. Skip quest echoes raises the run before SetRunInfo, validating
+its difficulty against both the list count and backing array length. Progress and stability already above the floor
+stay intact, and disabling does not rewind the saved run. Both use the existing entry/settings/readback lifecycle.
+
+Morditas timer owns its start, tick and kill targets as one group. Each call snapshots its prior time, calls the
+original once, then applies its matching lane from the coherent three-float settings. An ending tick keeps the game's
+elapsed time; secondary hunts with unchanged length are not multiplied again. Exceptions skip adjustments, and off
+resumes from current progress. All target settings publish before the shared switch opens, and readback compares
+every target's settings. The game retains its original kill-popup and bar-update timing.
+
 Count editors use `field_edits` snapshots with full container/entry/data/type identities and quantities. Main-thread
 Apply prevalidates every destination and compares the whole current observation before invoking any setter/removal
 or currency-delta method. Once a method is entered, any failure is uncertain. The desktop submits no automatic retry

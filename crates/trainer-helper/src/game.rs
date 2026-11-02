@@ -40,7 +40,10 @@ pub(crate) use features::damage;
 #[cfg(test)]
 pub(crate) use features::death_drops;
 #[cfg(test)]
-pub(crate) use features::{any_waypoint, encounter_counts, gains, player_only, results, results::no_mana_cost, reveal_objective, runes_glyphs_to_99, shards_to_99};
+pub(crate) use features::{
+    any_waypoint, encounter_counts, gains, morditas_timer, player_only, prophecy_uses, results, results::no_mana_cost, reveal_objective, runes_glyphs_to_99, shards_to_99,
+    skip_quest_echoes,
+};
 pub(crate) use features::{registry, registry::GameplayHookTarget, stat::StatBinding};
 
 /// A strong GC root on a managed object, held for one call.

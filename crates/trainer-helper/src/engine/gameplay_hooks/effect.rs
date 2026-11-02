@@ -151,7 +151,10 @@ impl Effect {
                         Behavior::SharedPostfix(settings) => settings.set(gate, hook, on, value),
                         _ => gate.set_value(value as u64),
                     }
-                    gate.set_enabled(target_on);
+                }
+                // Every target shares the first switch. Publish all settings before any caller can use them.
+                for gate in &self.gates {
+                    gate.postfix().set_enabled(target_on);
                 }
             }
             Behavior::Patch => {
@@ -164,13 +167,17 @@ impl Effect {
             Behavior::Leaf | Behavior::SharedLeaf(_) => {
                 for gate in &self.gates {
                     match gate {
-                        Gate::Leaf(gate) => {
-                            match self.behavior {
-                                Behavior::SharedLeaf(settings) => settings.set(gate, hook, on, value),
-                                _ => gate.set_value(value as u64),
-                            }
-                            gate.set_enabled(target_on);
-                        }
+                        Gate::Leaf(gate) => match self.behavior {
+                            Behavior::SharedLeaf(settings) => settings.set(gate, hook, on, value),
+                            _ => gate.set_value(value as u64),
+                        },
+                        Gate::Patch(_) => {}
+                        _ => unreachable!("leaf or interior patch"),
+                    }
+                }
+                for gate in &self.gates {
+                    match gate {
+                        Gate::Leaf(gate) => gate.set_enabled(target_on),
                         Gate::Patch(enabled) => enabled.store(target_on, SeqCst),
                         _ => unreachable!("leaf or interior patch"),
                     }
@@ -186,6 +193,14 @@ impl Effect {
             Behavior::SharedPostfix(settings) => settings.setting(first.postfix(), hook),
             _ => (self.gates.iter().all(Gate::enabled), first.value().into()),
         };
+        let agrees = match self.behavior {
+            Behavior::SharedLeaf(settings) => self.gates.iter().all(|gate| settings.setting(gate.leaf(), hook) == (enabled, value)),
+            Behavior::SharedPostfix(settings) => self.gates.iter().all(|gate| settings.setting(gate.postfix(), hook) == (enabled, value)),
+            _ => true,
+        };
+        if !agrees {
+            patch = PatchState::Unknown;
+        }
         if let Gate::Scalar(gate) = first {
             // SAFETY: the installed owner retains storage until close/drain/restore.
             if enabled && !unsafe { gate.matches() } {
@@ -220,5 +235,31 @@ impl Effect {
             }
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::morditas_timer;
+    use std::sync::atomic::AtomicU8;
+
+    #[test]
+    fn settings_readback_checks_every_target_in_a_shared_group() {
+        let online = AtomicU8::new(0);
+        let mut gates = Vec::new();
+        for stage in morditas_timer::STAGES {
+            // SAFETY: prepared settings/readback fixture; these entries are never published or called.
+            let gate = unsafe { PostfixGate::prepare(&morditas_timer::tests::layout(&online).effect(stage), gates.first().map(Gate::postfix)) }.unwrap();
+            gates.push(Gate::Postfix(gate));
+        }
+        let effect = Effect::from_gates(Behavior::SharedPostfix(&morditas_timer::SETTINGS), gates);
+        let value = morditas_timer::tests::value([2.0, 0.5, 3.0]);
+        // SAFETY: serialized owner over retained settings; no code entry is published in this fixture.
+        unsafe { effect.publish(GameplayHook::MorditasTimer, true, value, true) }.unwrap();
+        assert!(effect.observation(GameplayHook::MorditasTimer, PatchState::Patched).confirmed(true));
+        effect.gates[2].postfix().set_wide(morditas_timer::tests::value([2.0, 0.5, 4.0]));
+        assert_eq!(effect.observation(GameplayHook::MorditasTimer, PatchState::Patched).patch, PatchState::Unknown);
+        effect.close();
     }
 }

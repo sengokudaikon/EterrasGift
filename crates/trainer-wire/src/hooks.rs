@@ -60,6 +60,9 @@ pub enum GameplayHook {
     DropRates = 50,
     ExtraRare = 51,
     DuplicateOnDrop = 52,
+    ProphecyUses = 53,
+    SkipQuestEchoes = 54,
+    MorditasTimer = 55,
 }
 
 /// What a hook's value is: how the desktop's number for it is sent, which values the helper takes, and the one it
@@ -297,11 +300,14 @@ pub const SPECS: [HookSpec; GameplayHook::COUNT] = {
         ),
         switch(ExtraRare, "extra-rare"),
         real(DuplicateOnDrop, "duplicate-on-drop", 1.0, 20.0, 2.0),
+        switch(ProphecyUses, "prophecy-uses"),
+        switch(SkipQuestEchoes, "skip-quest-echoes"),
+        spec(MorditasTimer, "morditas-timer", ValueKind::Reals(&[(1.0, 10.0, 1.0), (0.0, 1.0, 1.0), (1.0, 10.0, 1.0)])),
     ]
 };
 
 impl GameplayHook {
-    pub const COUNT: usize = 53;
+    pub const COUNT: usize = 56;
     /// Every hook by its number on the pipe, checked against [`SPECS`] when the crate builds.
     pub const ALL: [Self; Self::COUNT] = {
         let mut all = [Self::MysteriousRift; Self::COUNT];

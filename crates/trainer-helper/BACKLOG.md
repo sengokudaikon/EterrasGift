@@ -63,7 +63,6 @@ Behavior reference: [monolith.h](../../../EterrasGift/native/hooks/monolith.h).
 
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
-| Todo | `skip-quest-echoes` — `MonolithTimelinePanelManager.SetRunInfo` | Raise run quest completion to at least two and stability to at least the selected difficulty's maximum before original. Validate difficulty indexing. Preserve the original trigger on showing run info; changes belong to the saved run and are not undone on off. | Object/list reads and field stores. | Lower values raised, higher values preserved, invalid difficulty safe fallback, opening the panel triggers original once. |
 | Todo | `cycle-echo-types` — `getIslandTypeForNewIsland`, `CalculateModAndZoneForIsland`, `CanHaveSubsequentConnectionsRevealed`, `OnIslandCompleted` table | Cycle the seven original type values; pass tier at least 19 for the related generation calls using per-thread web/tier context; permit subsequent connections; redirect normal/arena completion table entries to Super Beacon. Share type target with echo-type. Restore the table on off. | Shared/multiple target ownership, scoped context, atomic cycle index and checked data patching. Keep the cycle and table decoding specific. | Sequence/wrap, unrelated web, explicit-type precedence, normal/arena reveal behavior, table restoration and partial installation failure. |
 
 ### Factions
@@ -72,7 +71,6 @@ Behavior reference: [factions.h](../../../EterrasGift/native/hooks/factions.h).
 
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
-| Todo | `prophecy-uses` — `LE.Factions.ProphecySlot.TryTriggerReward` | Save completed charges; call original with the actual out parameter; after a successful trigger restore only charges that decreased. Keep original return and `chargesConsumed` output. | Small snapshot mechanics if they match another feature. Success-dependent restoration remains specific. | Failed trigger, increased charges, multiple consumed charges, exact out value; explicitly decide the original-throw case. |
 | Todo | `prophecy-max-lp` — `ProphecySlotReward.SpawnRewardForPlayer` | Temporarily raise generic reward minimum LP to at least four, call original, restore the previous asset value even on native unwind. Share handler with reward multiplier; prove the eight-byte Nullable lens ABI. | Shared target; scoped restoration mechanism established with this family. | Shared asset remains pristine after normal/throwing calls; existing LP above four preserved; absent generic item. |
 | Todo | `prophecy-reward-multiplier` — same `SpawnRewardForPlayer` | Temporarily scale `itemsDropped`, rounded and clamped to 0..1000, then restore. Preserve downstream lucky-lens doubling and composition with max LP. Shared reward assets must not retain repeated multiplication. | Same target and restoration record as max LP; settings. | Repeated calls do not compound; both features together; nested/concurrent calls require an explicit target-threading contract. |
 
@@ -82,7 +80,6 @@ Behavior reference: [world.h](../../../EterrasGift/native/hooks/world.h).
 
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
-| Todo | `morditas-timer` — `RageOfMorditasLogic.OnEnter_HuntState`, `FixedUpdate_Hunt`, `OnActorDiedDuringHunt` | Snapshot times, call original, scale only that call's changed initial duration, positive elapsed delta while still hunting, or positive kill bonus. Do not revive a hunt ended by original. Three settings and targets compose. | The existing coherent settings snapshot and multi-target ownership; field descriptors. | Secondary hunt with unchanged length, ending tick, zero/negative deltas, kill popup timing and off mid-hunt without rewinding elapsed time. |
 | Todo | `camera-distance` — `CameraManager.ApplyZoom` | Write configured distance before original. Keep the game's distance per camera, adopt external distance changes as the new baseline, and restore only if current value still equals our last write. Apply immediately on toggle through the main thread where available. | Lifecycle cleanup entry point; conditional restoration idea from existing writes. Keep camera state/refresh local. | Camera replacement, user changing game setting while on, off after foreign change, menu departure and cleanup before dispatcher removal. |
 | Todo | `pack-count` — `SpawnerPlacementRoom.rollSpawners` | Temporarily set density modifier to `(1 + old) * multiplier - 1`, invoke original, restore even on unwind. Validate the small by-value two-bool configuration struct. Retain the game's placement limit. | Scoped restoration after the prophecy family proves it; scalar settings. | Original modifier restored, not compounded; exception, nested call and configuration bytes; multiplier does not bypass room cap. |
 | Todo | `pack-size` — `Spawner.GenerateEntitiesInternal` | Temporarily multiply `numberToSpawn` only when its original value exceeds one; preserve single boss/named spawns. Restore after original including unwind. Share with monster rarity. | Shared spawner target and restoration record. | One remains one; multi-pack scales; repeated/throwing calls do not retain modified count. |
@@ -108,16 +105,14 @@ The Forge item editor follows its own planner/private-preview path; its remainin
 These groups identify the next useful extraction points; they do not
 require building a universal handler/ABI/object framework first.
 
-- **Existing gateway consumers:** prophecy uses fits the original-first gateway's invocation-local snapshot words;
-  skip quest echoes uses before-original field adjustments. Neither needs scoped-context work.
-- **Settings and numeric transforms:** Morditas/monster settings reuse the existing bounded settings snapshot and matching arithmetic,
+- **Settings and numeric transforms:** monster settings reuse the existing bounded settings snapshot and matching arithmetic,
   publication and owner lookup from implemented gains. Preserve each feature's original-call placement.
 - **Further argument forwarding:** auto-aim needs its exact Vector3 hidden-result ABI. Existing argument hooks
   preserve their opaque aggregate inputs in place; they do not adapt hidden result storage.
 - **Scoped context:** projectiles establish nesting/unwind behavior, while echo context spans calls.
   Keep each feature's cleanup policy explicit; the movement hook uses caller selection instead of a mark.
 - **Temporary shared assets:** prophecy reward count/max LP, then density and pack size/rarity need explicit target
-  serialization and restoration on native unwind. Cooldown/ailment/prophecy-charge throw behavior must be decided
+  serialization and restoration on native unwind. Cooldown/ailment throw behavior must be decided
   against the original's normal-return-only restoration rather than silently promising universal rollback.
 - **Echo cycling:** still needs its dynamic completion table, scoped web/tier context and shared echo-type target,
   composing feature-specific behavior with the existing entry/patch lifecycle.

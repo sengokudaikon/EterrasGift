@@ -109,6 +109,9 @@ pub(crate) const FEATURES: &[&HookFeature] = &[
     &super::new_item_rarity::FEATURE,
     &super::death_drops::FEATURE,
     &super::duplicate_on_drop::FEATURE,
+    &super::prophecy_uses::FEATURE,
+    &super::skip_quest_echoes::FEATURE,
+    &super::morditas_timer::FEATURE,
 ];
 
 /// Each control's group, checked when the crate builds: every control belongs to exactly one feature.

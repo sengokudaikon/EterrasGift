@@ -5,6 +5,10 @@ code and its tests, and what is still to build in [the helper's backlog](crates/
 
 ## 2026-11-02
 
+- World: tune Morditas hunt starting time, countdown speed and time per kill through one persistent control.
+- Trainer: keep wide hook settings separate from Windows unwind metadata, and publish every target's settings before reopening a shared group.
+- Factions: successful prophecy rewards keep completed charges without changing the game's reported consumption.
+- Monolith: skip quest echoes when opening a timeline, raising quest progress and stability without lowering either.
 - Trainer: item and gold drop chances and multipliers apply together to new enemy deaths.
 - Trainer: an extra rare item per enemy uses its own control on the shared death-drop hook.
 - Stash: edit gold, soul embers and ancient bones through the game's currency methods.

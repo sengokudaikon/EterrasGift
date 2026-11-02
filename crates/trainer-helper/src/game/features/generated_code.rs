@@ -15,12 +15,12 @@ use super::{
     encounter_counts::{self, Counts},
     eternity_cache_anywhere, experimental_uniques,
     gains::{experience_multiplier, faction_gains, rank_up_per_gain},
-    new_item_rarity,
+    morditas_timer, new_item_rarity,
     player_only::{Receiver, fixed_area, refill_mana, several_primordials},
-    prophecy_any_distance,
+    prophecy_any_distance, prophecy_uses,
     registry::{GameplayHook, Targets, definition},
     results::{ability_speed, boss_loot_chance, max_bonus_stability, max_random_rolls, movement_speed, no_mana_cost, one_echo_type, tier_7_affixes},
-    reveal_map, reveal_objective, runes_glyphs_to_99, shards_to_99,
+    reveal_map, reveal_objective, runes_glyphs_to_99, shards_to_99, skip_quest_echoes,
 };
 use native_hooks::{
     callback::CallbackGate,
@@ -95,9 +95,13 @@ impl Recorded {
         gate
     }
     fn postfix(&mut self, name: &str, hooks: &[GameplayHook], effect: PostfixEffect) {
+        self.postfix_in(name, hooks, effect, None);
+    }
+    fn postfix_in(&mut self, name: &str, hooks: &[GameplayHook], effect: PostfixEffect, shared: Option<&PostfixGate>) -> PostfixGate {
         // SAFETY: prepared and read, never published or called.
-        let gate = unsafe { PostfixGate::prepare(&effect, None) }.unwrap();
-        self.add(name, hooks, gate.entry(), None);
+        let gate = unsafe { PostfixGate::prepare(&effect, shared) }.unwrap();
+        self.add(name, hooks, gate.entry(), shared.map(PostfixGate::entry));
+        gate
     }
     fn scalar(&mut self, name: &str, hooks: &[GameplayHook], offset: u32, stack_argument: bool, shared: Option<&ScalarGate>) -> ScalarGate {
         // SAFETY: prepared and read, never published or called, so the receiver and online byte are never reached.
@@ -163,6 +167,33 @@ fn record() -> Recorded {
     r.leaf("eternity_cache_anywhere", &[EternityCacheAnywhere], eternity_cache_anywhere::effect(actor_component(None)));
     r.leaf("new_item_rarity", &[NewItemRarity], new_item_rarity::effect(online));
     r.leaf("prophecy_any_distance", &[ProphecyAnyDistance], prophecy_any_distance::effect(online));
+    r.postfix("prophecy_uses", &[ProphecyUses], prophecy_uses::effect(online, 0x24));
+    let layout = morditas_timer::Layout {
+        online,
+        elapsed: 0x90,
+        length: 0x94,
+        state: 0x18,
+        hunt: 1,
+    };
+    let first = r.postfix_in("morditas_timer.start", &[MorditasTimer], layout.effect(morditas_timer::Stage::Start), None);
+    r.postfix_in("morditas_timer.tick", &[MorditasTimer], layout.effect(morditas_timer::Stage::Tick), Some(&first));
+    r.postfix_in("morditas_timer.kill", &[MorditasTimer], layout.effect(morditas_timer::Stage::Kill), Some(&first));
+    r.leaf(
+        "skip_quest_echoes",
+        &[SkipQuestEchoes],
+        skip_quest_echoes::Layout {
+            online,
+            quests: 0x20,
+            stability: 0x24,
+            index: 0x28,
+            timeline: 0x30,
+            difficulties: 0x40,
+            items: 0x10,
+            size: 0x18,
+            maximum: 0x1c,
+        }
+        .effect(),
+    );
     r.leaf("reveal_map", &[RevealMap], reveal_map::effect(online));
     r.leaf("reveal_objective", &[RevealObjective], reveal_objective::effect(online, 0x13c));
     r.leaf(

@@ -12,6 +12,10 @@ mod arguments;
 #[cfg(test)]
 mod drops;
 mod effect;
+#[cfg(test)]
+mod hunts;
+#[cfg(test)]
+mod progress;
 use effect::{Effect, FeatureBinding};
 use native_hooks::entry::{self, Entry};
 
