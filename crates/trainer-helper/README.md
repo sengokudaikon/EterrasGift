@@ -126,7 +126,7 @@ reaching the backend; owner death stops the helper and restores the dispatcher. 
 restoration error retains the DLL rather than handing off an unconfirmed entry.
 The protocol has no nonce or authentication against code in the same process.
 
-Admission and request waits observe shutdown/process death. A five-second main-thread deadline or
+Admission and request waits observe shutdown/process death. A twelve-second main-thread deadline or
 disconnect cancels pending work when possible. Once started, the request retains its dispatcher
 slot and failures report uncertain execution. Nothing is replayed automatically. Malformed requests
 never reach discovery or dispatch. Slow clients have a separate bounded read/write deadline.

@@ -25,7 +25,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
-const LIMIT: Duration = Duration::from_secs(12);
+/// The app's own limit on a whole exchange (`PipeClient`), so a request can reach the helper's main-thread deadline.
+const LIMIT: Duration = Duration::from_secs(15);
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]

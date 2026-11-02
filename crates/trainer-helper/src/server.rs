@@ -23,6 +23,10 @@ use win_platform::{
 };
 use windows_sys::Win32::System::Pipes::GetNamedPipeClientProcessId;
 
+/// How long a request waits for the game's main thread, which stops for seconds at a time while the game loads. Under the
+/// app's 15 s limit on a whole exchange (`PipeClient`), so the app still hears how the request ended.
+const MAIN_THREAD_WAIT: Duration = Duration::from_secs(12);
+
 pub struct Shared {
     pub stop: AtomicBool,
     pub owner: std::sync::OnceLock<(u32, u64)>,
@@ -270,7 +274,7 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
                                         let mut extra = [0u8; 1];
                                         tokio::select! { outcome=complete => Ok(outcome), _=pipe.read(&mut extra) => Err(()) }
                                     };
-                                    match wait(completion, shared, owner.as_ref(), Duration::from_secs(5)).await {
+                                    match wait(completion, shared, owner.as_ref(), MAIN_THREAD_WAIT).await {
                                         Ok(Ok(Outcome::Completed(response))) => response,
                                         Ok(Ok(Outcome::Abandoned)) => failure(ResponseCode::Failed, "Main-thread request unwound; outcome uncertain"),
                                         interrupted @ (Ok(Err(())) | Err(_)) => match pending.cancel() {
@@ -421,6 +425,69 @@ mod tests {
             timeout(Duration::from_secs(3), async {
                 // Its dispatcher methods panic: a clear that touched them would fail the run.
                 let mut backend = RefusingBackend;
+                let (exit, ()) = tokio::join!(run(pid, &mut backend, &shared), client);
+                assert!(exit.served.is_ok());
+                exit.departure().unwrap();
+            })
+            .await
+            .unwrap();
+        });
+    }
+
+    /// A main thread that gets to a request only after `freeze`, as the game's does while it loads.
+    struct FrozenBackend {
+        dispatcher: crate::dispatch::Dispatcher<Request, Response>,
+        freeze: Duration,
+    }
+    impl Backend for FrozenBackend {
+        fn discover(&mut self) -> Result<Discovery, Response> {
+            panic!("the test's owner is already known")
+        }
+        fn ensure_dispatcher(&mut self, _: &DispatcherSpec) -> Result<(), Response> {
+            Ok(())
+        }
+        fn submit(&mut self, request: Request) -> Result<Pending<Request, Response>, Response> {
+            let pending = self.dispatcher.submit(request).map_err(|_| failure(ResponseCode::NotReady, "busy"))?;
+            let (dispatcher, freeze) = (self.dispatcher.clone(), self.freeze);
+            std::thread::spawn(move || {
+                std::thread::sleep(freeze);
+                dispatcher.execute_one(|_| Response {
+                    code: ResponseCode::Done,
+                    payload: Vec::new(),
+                });
+            });
+            Ok(pending)
+        }
+        fn clear_hooks(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+        fn restore(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    /// The game was seen to stop for 6.0 s just after its first scene loads, right when a connection begins.
+    #[test]
+    fn a_request_outlasts_a_freeze_while_the_game_loads() {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+            let shared = owned();
+            let pid = pipe_pid(4);
+            let client = async {
+                let mut pipe = owner_pipe(pid).await;
+                let status = Request::Status {
+                    dispatcher: DispatcherSpec { rva: 4096, bytes: [0x90; 16] },
+                };
+                pipe.write_all(&status.encode()).await.unwrap();
+                let mut header = [0; 12];
+                pipe.read_exact(&mut header).await.unwrap();
+                assert_eq!(Response::decode_header(&header).unwrap().0, ResponseCode::Done);
+                shared.stop.store(true, SeqCst);
+            };
+            timeout(Duration::from_secs(15), async {
+                let mut backend = FrozenBackend {
+                    dispatcher: Default::default(),
+                    freeze: Duration::from_secs(6),
+                };
                 let (exit, ()) = tokio::join!(run(pid, &mut backend, &shared), client);
                 assert!(exit.served.is_ok());
                 exit.departure().unwrap();

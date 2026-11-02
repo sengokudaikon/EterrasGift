@@ -5,6 +5,7 @@ code and its tests, and what is still to build in [the helper's backlog](crates/
 
 ## 2026-11-02
 
+- Trainer: connecting while the game freezes for a few seconds during a load waits it out, instead of stopping at Blocked.
 - Mods: once the mod library has stopped, the page is read-only, a change that never reached it is shown undone, and the app can close and restart.
 
 ## 2026-11-01
