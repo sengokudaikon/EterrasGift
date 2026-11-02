@@ -2,6 +2,7 @@
 //! incomplete loading and failed Unity support leave individual mods' loading status unknown.
 
 use crate::assembly::LoaderVersion;
+use file_ops::case;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
@@ -48,7 +49,7 @@ fn tag(name: &str) -> impl Iterator<Item = char> + '_ {
 struct Mentions {
     /// The name as MelonLoader quotes it.
     quoted: String,
-    /// The DLL's file name, lower-cased.
+    /// The DLL's file name, as a [`case::key`].
     file: String,
 }
 
@@ -56,7 +57,7 @@ impl Mentions {
     fn new(name: &str, file: &str) -> Self {
         Self {
             quoted: format!("'{name}'"),
-            file: file.to_lowercase(),
+            file: case::key(file),
         }
     }
 
@@ -129,7 +130,7 @@ impl MelonLog {
                 log.found.push(file.trim_end_matches('\'').rsplit(['/', '\\']).next().unwrap_or_default().to_owned());
             } else if let Some(hash) = line.text.strip_prefix(HASH) {
                 if let Some(file) = log.found.last() {
-                    log.hashes.insert(file.to_lowercase(), hash.trim_end_matches('\'').to_uppercase());
+                    log.hashes.insert(case::key(file), hash.trim_end_matches('\'').to_uppercase());
                 }
             } else if line.text.starts_with(ASSEMBLY) {
                 if let Some(banner) = banner(&log.lines) {
@@ -147,11 +148,11 @@ impl MelonLog {
     }
 
     pub fn hash_of(&self, file: &str) -> Option<&str> {
-        self.hashes.get(&file.to_lowercase()).map(String::as_str)
+        self.hashes.get(&case::key(file)).map(String::as_str)
     }
 
     pub fn banner_for(&self, file: &str) -> Option<&MelonBanner> {
-        self.registered.iter().find(|banner| same_file(&banner.file, file))
+        self.registered.iter().find(|banner| case::same(&banner.file, file))
     }
 
     pub fn lines_for(&self, name: &str, file: &str) -> Vec<MelonLogLine> {
@@ -186,7 +187,7 @@ impl MelonLog {
             .iter()
             .find(|line| mentions.in_line(line) && !line.text.starts_with(ASSEMBLY_LOADED) && !line.text.starts_with(HASH_LABEL));
         Some(reason.map(|line| LogProblem::Logged(line.text.clone())).unwrap_or_else(|| {
-            if self.found.iter().any(|found| same_file(found, file)) {
+            if self.found.iter().any(|found| case::same(found, file)) {
                 LogProblem::NoReason
             } else {
                 LogProblem::NotFound
@@ -212,35 +213,27 @@ pub fn runs(lines: impl IntoIterator<Item = MelonLogLine>) -> Vec<ModLogRun> {
     runs
 }
 
-/// File names compare without case, as Windows compares them.
-fn same_file(first: &str, second: &str) -> bool {
-    first.chars().flat_map(char::to_lowercase).eq(second.chars().flat_map(char::to_lowercase))
-}
-
-/// Whether `text` names `file` (lower-cased) as a whole name, whatever the case it is written in there.
+/// Whether `text` names `file` (a [`case::key`]) as a whole name, whatever the case it is written in there.
 fn names_file(text: &str, file: &str) -> bool {
     let name_part = |character: char| character.is_alphanumeric() || matches!(character, '_' | '-' | '.');
     text.char_indices().any(|(at, _)| {
-        lowercase_prefix(&text[at..], file).is_some_and(|length| {
+        length_of_prefix(&text[at..], file).is_some_and(|length| {
             text[..at].chars().next_back().is_none_or(|character| !name_part(character)) && text[at + length..].chars().next().is_none_or(|character| !name_part(character))
         })
     })
 }
 
-/// How long the start of `text` is that reads as `lower` once lower-cased; None when it does not start so.
-fn lowercase_prefix(text: &str, lower: &str) -> Option<usize> {
-    let mut wanted = lower.chars();
+/// How long the start of `text` is that reads as `key`; None when it does not start so.
+fn length_of_prefix(text: &str, key: &str) -> Option<usize> {
+    let mut wanted = key.chars();
     for (at, character) in text.char_indices() {
-        if wanted.as_str().is_empty() {
-            return Some(at);
-        }
-        for lowered in character.to_lowercase() {
-            if wanted.next() != Some(lowered) {
-                return None;
-            }
+        match wanted.next() {
+            None => return Some(at),
+            Some(next) if next == case::fold(character) => {}
+            Some(_) => return None,
         }
     }
-    wanted.as_str().is_empty().then_some(text.len())
+    wanted.next().is_none().then_some(text.len())
 }
 
 fn timed(raw: &str) -> Option<MelonLogLine> {
@@ -347,6 +340,26 @@ mod tests {
         assert!(reason.contains("Bad IL format.\nat MelonLoader"));
         assert_eq!(log.problem_for("Ken", "Ken.dll"), Some(LogProblem::NotFound));
         assert!(log.lines_for("Dreams", "Dreams.dll").is_empty());
+    }
+
+    #[test]
+    fn a_file_is_named_as_the_file_system_names_it() {
+        let log = MelonLog::parse(
+            "[19:40:03.616] Melon Assembly loaded: '.\\Mods\\ÉTUDE.dll'\n\
+             [19:40:03.616] SHA256 Hash: 'abc'\n\
+             [19:40:03.620] [ERROR] Failed to load étude.DLL at all",
+        );
+        assert_eq!(log.hash_of("étude.dll"), Some("ABC"));
+        assert_eq!(log.lines_for("Étude", "Étude.dll").len(), 2, "the lines that name it, each in its own case");
+        // The same letters to Unicode's lower case, but two files on the disk.
+        let log = MelonLog::parse(
+            "[19:40:03.616] Melon Assembly loaded: '.\\Mods\\Maß.dll'\n\
+             [19:40:03.616] SHA256 Hash: 'abc'\n\
+             [19:40:03.620] [ERROR] Failed to load Maß.dll at all",
+        );
+        assert_eq!(log.hash_of("Maß.dll"), Some("ABC"));
+        assert_eq!(log.hash_of("Maẞ.dll"), None);
+        assert!(log.lines_for("Other", "Maẞ.dll").is_empty());
     }
 
     #[test]

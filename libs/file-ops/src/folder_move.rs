@@ -1,7 +1,7 @@
 //! Moving a folder to a new place by copying it, resumably: the old folder stays in use, and as it was, until the move
 //! is done, and a move that fails partway is taken up again later without overwriting anything that is not its own.
 
-use crate::{atomic, hashes, paths};
+use crate::{atomic, case, hashes, paths};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
@@ -15,7 +15,7 @@ const MOVE_RECORD: &str = ".folder-move.json";
 
 /// Copies a folder's files into its new place, leaving the old ones as they are.
 pub fn migrate(source: &Path, destination: &Path) -> io::Result<()> {
-    if paths::same_folder(source, destination) {
+    if paths::same_place(source, destination) {
         return Ok(());
     }
     fs::create_dir_all(destination)?;
@@ -97,11 +97,11 @@ fn migration_copies(source: &Path, destination: &Path) -> io::Result<Vec<(PathBu
     if source.is_dir() {
         collect_files(source, &mut files)?;
     }
-    let inside = format!("{}{}", destination.to_string_lossy().to_uppercase(), std::path::MAIN_SEPARATOR);
+    let inside = format!("{}{}", case::key(&destination.to_string_lossy()), std::path::MAIN_SEPARATOR);
     let record = source.join(MOVE_RECORD);
     Ok(files
         .into_iter()
-        .filter(|file| !file.to_string_lossy().to_uppercase().starts_with(&inside) && *file != record)
+        .filter(|file| !case::key(&file.to_string_lossy()).starts_with(&inside) && *file != record)
         .map(|file| {
             let target = destination.join(file.strip_prefix(source).unwrap_or(&file));
             (file, target)

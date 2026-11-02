@@ -22,6 +22,20 @@ fn adopt(temp: &std::path::Path) -> (ModLibrary, std::path::PathBuf) {
 }
 
 #[test]
+fn a_mod_renamed_only_in_case_stays_the_same_mod_in_any_alphabet() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("game");
+    fs::create_dir_all(root.join("Mods")).unwrap();
+    fs::write(root.join("Mods/Étude.dll"), b"first").unwrap();
+    let library = ModLibrary::new(temp.path().join("library"));
+    assert_eq!(library.reconcile(&root).unwrap().adopted, ["Étude.dll"]);
+    fs::rename(root.join("Mods/Étude.dll"), root.join("Mods/étude.DLL")).unwrap();
+    let changes = library.reconcile(&root).unwrap();
+    assert_eq!((changes.adopted.len(), changes.removed.len()), (0, 0));
+    assert_eq!(library.profile().unwrap().mods.len(), 1);
+}
+
+#[test]
 fn turning_off_removing_and_undoing_are_durable_drafts_until_preparation() {
     let temp = tempfile::tempdir().unwrap();
     let (library, root) = adopt(temp.path());

@@ -102,7 +102,7 @@ impl ModLoaderSwitch {
     pub fn check_restore(&self) -> Result<ModLoaderState, SwitchError> {
         match self.state() {
             ModLoaderState::Conflict => Err(SwitchError::Conflict),
-            ModLoaderState::NotInstalled if file_ops::paths::same_folder(&self.loader_root, &self.game_directory) => Err(SwitchError::NoLoader),
+            ModLoaderState::NotInstalled if file_ops::paths::same_place(&self.loader_root, &self.game_directory) => Err(SwitchError::NoLoader),
             ModLoaderState::NotInstalled => Err(SwitchError::NoLoaderInFolder),
             state => Ok(state),
         }

@@ -21,6 +21,11 @@ impl PlayerFolder {
         Self { folder, data }
     }
 
+    /// The player that `executable` starts.
+    pub fn of(executable: &Path) -> Self {
+        Self::new(executable.parent().unwrap_or(Path::new("")), executable.file_stem().unwrap_or_default())
+    }
+
     pub fn folder(&self) -> &Path {
         &self.folder
     }
@@ -66,5 +71,6 @@ mod tests {
         assert_eq!(player.metadata(), data.join("il2cpp_data").join("Metadata").join("global-metadata.dat"));
         assert_eq!(player.resources(), data.join("resources.assets"));
         assert_eq!(player.managers(), data.join("globalgamemanagers.assets"));
+        assert_eq!(PlayerFolder::of(&games.join("Tower Run.exe")), player);
     }
 }

@@ -1,5 +1,6 @@
 //! Paths as Windows treats them: a stored form, and comparison without case.
 
+use crate::case;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -19,14 +20,9 @@ pub fn trim_end_separator(path: &Path) -> PathBuf {
     }
 }
 
-/// Two folders are the same place, however their ends and case are spelled.
-pub fn same_folder(first: &Path, second: &Path) -> bool {
-    same_text(&normalized(first).to_string_lossy(), &normalized(second).to_string_lossy())
-}
-
-/// Windows compares paths without case.
-pub fn same_text(first: &str, second: &str) -> bool {
-    first == second || first.chars().flat_map(char::to_uppercase).eq(second.chars().flat_map(char::to_uppercase))
+/// Two paths are the same place, however their ends and case are spelled.
+pub fn same_place(first: &Path, second: &Path) -> bool {
+    case::same(&normalized(first).to_string_lossy(), &normalized(second).to_string_lossy())
 }
 
 /// A real folder, not a link to one: `metadata` as read without following links (`fs::symlink_metadata`, or a
@@ -55,6 +51,6 @@ mod tests {
         assert_eq!(normalized(Path::new(r"C:\Games\Some Game\")), PathBuf::from(r"C:\Games\Some Game"));
         assert_eq!(normalized(Path::new(r"C:\Games\.\Some Game")), PathBuf::from(r"C:\Games\Some Game"));
         assert_eq!(normalized(Path::new(r"C:\")), PathBuf::from(r"C:\"));
-        assert!(same_folder(Path::new(r"C:\Games\"), Path::new(r"c:\games")));
+        assert!(same_place(Path::new(r"C:\Games\"), Path::new(r"c:\games")));
     }
 }

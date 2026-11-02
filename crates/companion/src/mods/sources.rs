@@ -1,6 +1,7 @@
 //! Local mod projects, evaluated by MSBuild rather than guessed from XML. Builds never deploy to the game:
 //! their output is offered to the library, which places it on the next modded start.
 
+use file_ops::case;
 use melon_loader::assembly::{LoaderVersion, MelonAssembly};
 use melon_loader::project::{Evaluation, Stamp, changed_since, compiler_errors, dotnet, evaluation_arguments, path_key, project_files, read_evaluation};
 use std::collections::{BTreeMap, BTreeSet};
@@ -91,7 +92,7 @@ impl ModBuild {
 
 #[derive(Clone, Debug, Default)]
 pub struct SourceSnapshot {
-    /// Case-insensitive DLL identities are stored in lower case.
+    /// By the DLL's name, as a [`file_ops::case::key`].
     pub builds: BTreeMap<String, ModBuild>,
     pub not_installed: Vec<ModProject>,
 }
@@ -384,14 +385,14 @@ impl ModSources {
     }
 
     pub fn read(self: &Arc<Self>, folder: Option<&Path>, sdk: Option<&Path>, installed: &[String], cancel: &CancellationToken) -> Result<SourceSnapshot, SourceError> {
-        let have: BTreeSet<_> = installed.iter().map(|file| file.to_lowercase()).collect();
+        let have: BTreeSet<_> = installed.iter().map(|file| case::key(file)).collect();
         let projects = self.find(folder, sdk, cancel)?;
         let mut snapshot = SourceSnapshot::default();
-        for project in latest(projects.iter().filter(|project| have.contains(&project.file().to_lowercase()))) {
+        for project in latest(projects.iter().filter(|project| have.contains(&case::key(&project.file())))) {
             cancelled(cancel)?;
-            snapshot.builds.insert(project.file().to_lowercase(), self.built(project, folder)?);
+            snapshot.builds.insert(case::key(&project.file()), self.built(project, folder)?);
         }
-        snapshot.not_installed = latest(projects.iter().filter(|project| project.is_mod && !have.contains(&project.file().to_lowercase())))
+        snapshot.not_installed = latest(projects.iter().filter(|project| project.is_mod && !have.contains(&case::key(&project.file()))))
             .into_iter()
             .cloned()
             .collect();
@@ -473,7 +474,7 @@ fn modified(path: &Path) -> Option<SystemTime> {
 fn latest<'a>(projects: impl Iterator<Item = &'a ModProject>) -> Vec<&'a ModProject> {
     let mut by_file: BTreeMap<String, &'a ModProject> = BTreeMap::new();
     for project in projects {
-        let key = project.file().to_lowercase();
+        let key = case::key(&project.file());
         if by_file.get(&key).is_none_or(|previous| modified(&project.target_path) > modified(&previous.target_path)) {
             by_file.insert(key, project);
         }

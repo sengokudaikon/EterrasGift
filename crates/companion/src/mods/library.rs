@@ -6,7 +6,7 @@
 use super::description::SETTINGS_RESOURCE;
 use super::invalid;
 use crate::launch::loader::melon_paths;
-use file_ops::{atomic, hashes, json};
+use file_ops::{atomic, case, hashes, json};
 use melon_loader::assembly::{AssemblyFacts, MelonAssembly, read_facts};
 use melon_loader::preferences::{MelonPreferences, PreferenceChange, PreferenceValue};
 use serde_json::{Value, json};
@@ -59,7 +59,7 @@ pub struct PlacedMods {
 
 impl PlacedMods {
     pub fn hash_of(&self, file: &str) -> Option<&str> {
-        self.files.iter().find(|(name, _)| name.eq_ignore_ascii_case(file)).map(|(_, hash)| hash.as_str())
+        self.files.iter().find(|(name, _)| case::same(name, file)).map(|(_, hash)| hash.as_str())
     }
 
     /// Records `file` as placed with `hash`, in place of any spelling of it recorded before.
@@ -70,7 +70,7 @@ impl PlacedMods {
 
     /// Forgets `file`, however its name was spelled when it was recorded.
     fn forget(&mut self, file: &str) {
-        self.files.retain(|name, _| !same(name, file));
+        self.files.retain(|name, _| !case::same(name, file));
     }
 }
 
@@ -157,7 +157,7 @@ impl ModLibrary {
         let _gate = self.gate.lock().unwrap();
         let mut profile = self.load_profile()?;
         self.store(source, &installed)?;
-        if let Some(index) = profile.mods.iter().position(|old| same(&old.file, &installed.file)) {
+        if let Some(index) = profile.mods.iter().position(|old| case::same(&old.file, &installed.file)) {
             if keep_on_off {
                 installed.enabled = profile.mods[index].enabled;
             }
@@ -170,7 +170,7 @@ impl ModLibrary {
     }
     pub fn set_enabled(&self, file: &str, enabled: bool) -> io::Result<()> {
         self.change(|profile| {
-            if let Some(item) = profile.mods.iter_mut().find(|item| same(&item.file, file)) {
+            if let Some(item) = profile.mods.iter_mut().find(|item| case::same(&item.file, file)) {
                 item.enabled = enabled;
             }
             Ok(())
@@ -189,7 +189,7 @@ impl ModLibrary {
     pub fn remove(&self, file: &str) -> io::Result<Option<(InstalledMod, usize)>> {
         let mut removed = None;
         self.change(|profile| {
-            if let Some(index) = profile.mods.iter().position(|item| same(&item.file, file)) {
+            if let Some(index) = profile.mods.iter().position(|item| case::same(&item.file, file)) {
                 removed = Some((profile.mods.remove(index), index));
             }
             Ok(())
@@ -198,7 +198,7 @@ impl ModLibrary {
     }
     pub fn restore(&self, installed: &InstalledMod, index: usize) -> io::Result<()> {
         self.change(|profile| {
-            if profile.mods.iter().any(|item| same(&item.file, &installed.file)) {
+            if profile.mods.iter().any(|item| case::same(&item.file, &installed.file)) {
                 return Ok(());
             }
             if !self.holds(installed) {
@@ -235,7 +235,7 @@ impl ModLibrary {
         let mut present = BTreeSet::new();
         for path in files {
             let file = path.file_name().unwrap().to_string_lossy().into_owned();
-            present.insert(file.to_lowercase());
+            present.insert(case::key(&file));
             let hash = hash_file(&path)?;
             if placed.hash_of(&file) == Some(&hash) {
                 continue;
@@ -246,7 +246,7 @@ impl ModLibrary {
                 enabled: true,
             };
             self.store(&path, &installed)?;
-            if let Some(old) = profile.mods.iter_mut().find(|old| same(&old.file, &file)) {
+            if let Some(old) = profile.mods.iter_mut().find(|old| case::same(&old.file, &file)) {
                 *old = installed;
             } else {
                 profile.mods.push(installed);
@@ -255,10 +255,10 @@ impl ModLibrary {
             changes.adopted.push(file);
         }
         placed.files.retain(|file, _| {
-            if present.contains(&file.to_lowercase()) {
+            if present.contains(&case::key(file)) {
                 return true;
             }
-            if let Some(index) = profile.mods.iter().position(|item| same(&item.file, file)) {
+            if let Some(index) = profile.mods.iter().position(|item| case::same(&item.file, file)) {
                 changes.removed.push(profile.mods.remove(index).file);
             }
             false
@@ -295,7 +295,7 @@ impl ModLibrary {
             let removed: Vec<_> = placed
                 .files
                 .keys()
-                .filter(|file| !profile.mods.iter().any(|item| same(&item.file, file)))
+                .filter(|file| !profile.mods.iter().any(|item| case::same(&item.file, file)))
                 .cloned()
                 .collect();
             for file in removed {
@@ -412,7 +412,7 @@ impl ModLibrary {
                     .map_err(|_| invalid("placed.json is damaged: its last launch is not a date."))?,
             );
         }
-        if !file_ops::paths::same_text(&root.to_string_lossy(), saved_root) {
+        if !case::same(&root.to_string_lossy(), saved_root) {
             return Ok(empty());
         }
         Ok(placed)
@@ -441,11 +441,7 @@ impl ModLibrary {
         let Ok(boundary) = library.canonicalize() else {
             return;
         };
-        let kept: BTreeSet<_> = profile
-            .mods
-            .iter()
-            .map(|item| self.path_of(item).parent().unwrap().to_string_lossy().to_lowercase())
-            .collect();
+        let kept: BTreeSet<_> = profile.mods.iter().map(|item| case::key(&self.path_of(item).parent().unwrap().to_string_lossy())).collect();
         let Ok(mods) = fs::read_dir(&library) else {
             return;
         };
@@ -461,7 +457,7 @@ impl ModLibrary {
                 if !plain_directory(&copy) {
                     continue;
                 }
-                if kept.contains(&copy.to_string_lossy().to_lowercase()) {
+                if kept.contains(&case::key(&copy.to_string_lossy())) {
                     continue;
                 }
                 // Never follow a linked directory outside our own library during housekeeping.
@@ -488,9 +484,6 @@ fn copy_verified(source: &Path, target: &Path, expected: &str) -> io::Result<()>
         atomic::CopyVerifiedError::Io(error) => error,
     })
 }
-fn same(a: &str, b: &str) -> bool {
-    a.eq_ignore_ascii_case(b)
-}
 fn field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
     json::find(value.as_object()?, key)
 }
@@ -512,7 +505,7 @@ fn validate_entry(record: &str, file: &str, hash: &str, seen: &mut BTreeSet<Stri
     if !is_dll(file) || !hashes::is_sha256(hash) {
         return Err(invalid(format!("{record} is damaged: its entry for \"{file}\" can't be used.")));
     }
-    if !seen.insert(file.to_lowercase()) {
+    if !seen.insert(case::key(file)) {
         return Err(invalid(format!("{record} is damaged: it lists \"{file}\" more than once.")));
     }
     Ok(())

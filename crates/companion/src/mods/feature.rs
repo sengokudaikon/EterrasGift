@@ -676,7 +676,7 @@ fn take_observation(state: &mut State, effects: &mut Effects<Effect>, revision: 
         }
     }
     state.selection = selected
-        .and_then(|file| inventory.mods.iter().position(|item| item.installed.file.eq_ignore_ascii_case(&file)))
+        .and_then(|file| inventory.mods.iter().position(|item| file_ops::case::same(&item.installed.file, &file)))
         .unwrap_or(0);
     let adopted = std::mem::take(&mut state.adopted);
     let deleted = std::mem::take(&mut state.deleted);
@@ -726,7 +726,7 @@ fn build(state: &mut State, effects: &mut Effects<Effect>, index: i32, source: b
             state
                 .sources
                 .builds
-                .get(&item.installed.file.to_lowercase())
+                .get(&file_ops::case::key(&item.installed.file))
                 .map(|build| (item.name.clone(), build.project.clone()))
         })
     };
@@ -1267,7 +1267,7 @@ impl State {
                 project: breakable_path(&project.project_file.display().to_string()),
                 version: project.version.clone().unwrap_or_default(),
                 folder: self.folder.as_deref().map(|folder| project.source_folder(folder)).unwrap_or_default(),
-                busy: self.building.as_ref().is_some_and(|file| file.eq_ignore_ascii_case(&project.file())),
+                busy: self.building.as_ref().is_some_and(|file| file_ops::case::same(file, &project.file())),
             })
             .collect()
     }
@@ -1281,7 +1281,7 @@ impl State {
                 ..SelectedView::default()
             };
         };
-        let build = self.sources.builds.get(&item.installed.file.to_lowercase());
+        let build = self.sources.builds.get(&file_ops::case::key(&item.installed.file));
         // Its project now has a newer <Version> than the installed DLL was built with: Update builds and installs it.
         let update = build.is_some_and(|build| build.project.update_available(item.project_version.as_deref()));
         SelectedView {
@@ -1309,7 +1309,7 @@ impl State {
             state: item.state_text(),
             enabled: item.installed.enabled,
             previous_build: item.log_from_other_build,
-            rebuild_text: if self.building.as_ref().is_some_and(|file| file.eq_ignore_ascii_case(&item.installed.file)) {
+            rebuild_text: if self.building.as_ref().is_some_and(|file| file_ops::case::same(file, &item.installed.file)) {
                 Building.get()
             } else if update {
                 Update.get()

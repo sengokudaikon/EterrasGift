@@ -245,7 +245,7 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
         let Some(first) = claims.first().copied() else {
             continue;
         };
-        let squeeze = |name: &str| name.replace(' ', "").to_uppercase();
+        let squeeze = |name: &str| file_ops::case::key(&name.replace(' ', ""));
         let owner = claims
             .into_iter()
             .find(|index| squeeze(&inventory.mods[*index].name) == squeeze(&category.name))

@@ -168,7 +168,7 @@ struct Service {
 
 impl Service {
     fn serve(&mut self, folder: &Path, again: bool) -> GameData {
-        let same_folder = self.folder.as_deref().is_some_and(|kept| file_ops::paths::same_folder(kept, folder));
+        let same_folder = self.folder.as_deref().is_some_and(|kept| file_ops::paths::same_place(kept, folder));
         let kept = self.publish.borrow().clone();
         if !again
             && same_folder
@@ -266,7 +266,7 @@ impl Store {
         if index["version"].as_u64() != Some(INDEX_VERSION) || index["extraction_version"].as_u64() != Some(u64::from(EXTRACTION_VERSION)) {
             return Ok(None);
         }
-        if !file_ops::paths::same_folder(Path::new(&text("folder")?), folder) {
+        if !file_ops::paths::same_place(Path::new(&text("folder")?), folder) {
             return Ok(None);
         }
         let sources = index["sources"]

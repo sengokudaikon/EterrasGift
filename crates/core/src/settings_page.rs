@@ -463,7 +463,7 @@ impl State {
         self.boxes
             .iter()
             .zip(location_text(self.snapshot.store.saved()))
-            .any(|(typed, saved)| !file_ops::paths::same_text(typed.trim(), &saved))
+            .any(|(typed, saved)| !file_ops::case::same(typed.trim(), &saved))
     }
     pub fn can_save_locations(&self) -> bool {
         self.has_unsaved_locations() || self.snapshot.store.unreadable()
@@ -488,7 +488,7 @@ impl State {
         let saved = store.saved();
         let differs = |active: Option<&Path>, saved: &Option<PathBuf>| match (active, saved) {
             (None, None) => false,
-            (Some(active), Some(saved)) => !file_ops::paths::same_text(&active.to_string_lossy(), &saved.to_string_lossy()),
+            (Some(active), Some(saved)) => !file_ops::case::same(&active.to_string_lossy(), &saved.to_string_lossy()),
             _ => true,
         };
         let moved = saved.migration_source.is_some()

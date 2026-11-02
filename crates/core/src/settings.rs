@@ -386,10 +386,10 @@ impl SettingsStore {
         let directory = normalize(&locations.user_data_directory, UserDataFolder)?;
         let library = keep_or(&self.desired().mod_library_directory, &locations.mod_library_directory, ModLibraryFolder)?;
         let destination = self.paths.with(directory.as_deref(), library.as_deref());
-        let changed = !file_ops::paths::same_folder(&self.paths.user_data_directory, &destination.user_data_directory);
+        let changed = !file_ops::paths::same_place(&self.paths.user_data_directory, &destination.user_data_directory);
         // The library's default folder is in the user data, so it follows a user-data move; a folder of its own moves alone.
         let library_destination = self.paths.with(Some(&self.paths.user_data_directory), library.as_deref());
-        let library_moves = !file_ops::paths::same_folder(&self.paths.mod_library_directory, &library_destination.mod_library_directory);
+        let library_moves = !file_ops::paths::same_place(&self.paths.mod_library_directory, &library_destination.mod_library_directory);
         if changed && library_moves {
             return Err(OneAtATime.get().into());
         }

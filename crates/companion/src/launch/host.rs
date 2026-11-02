@@ -124,7 +124,7 @@ impl FileGameHost {
 
     /// MelonLoader runs from a folder of its own, outside the game.
     fn staged(&self, install: &GameInstall) -> bool {
-        !file_ops::paths::same_folder(&self.loader_root(install), install.directory())
+        !file_ops::paths::same_place(&self.loader_root(install), install.directory())
     }
 
     /// How the game is started: through Steam online; else its executable with --offline, and for a game with mods whose

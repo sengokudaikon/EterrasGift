@@ -94,7 +94,7 @@ fn text<'a>(owner: &'a Value, name: &str) -> Option<&'a str> {
 
 /// One spelling for one path, whatever its case or form.
 pub fn path_key(path: &Path) -> String {
-    file_ops::paths::normalized(path).to_string_lossy().to_lowercase()
+    file_ops::case::key(&file_ops::paths::normalized(path).to_string_lossy())
 }
 
 /// The files an evaluation depends on, as they are now. A project below `folder` evaluates afresh when this differs.
@@ -182,7 +182,7 @@ pub fn compiler_errors(output: &str, folder: &Path) -> String {
         } else {
             line
         };
-        let line = if line.get(..prefix.len()).is_some_and(|start| start.eq_ignore_ascii_case(&prefix)) {
+        let line = if line.get(..prefix.len()).is_some_and(|start| file_ops::case::same(start, &prefix)) {
             &line[prefix.len()..]
         } else {
             line

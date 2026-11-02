@@ -112,7 +112,7 @@ fn discovery_uses_evaluated_targets_limits_depth_and_ignores_outputs_and_tools()
     assert_eq!(found.len(), 4);
     assert_eq!(runner.started.load(Ordering::Relaxed), 4);
     let snapshot = sources.read(Some(temp.path()), None, &["tItHe.DLL".into()], &cancel).unwrap();
-    assert!(!snapshot.builds["tithe.dll"].is_built());
+    assert!(!snapshot.builds[&file_ops::case::key("Tithe.dll")].is_built());
     assert_eq!(
         snapshot.not_installed.iter().map(|project| project.name.as_str()).collect::<Vec<_>>(),
         ["DepthThree", "Loom"]

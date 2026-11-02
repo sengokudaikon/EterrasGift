@@ -20,7 +20,7 @@ fn canonical(path: &Path) -> Result<PathBuf> {
 
 /// Whether two canonical paths name one file, compared without case, as Windows names files.
 pub fn same_path(a: &Path, b: &Path) -> bool {
-    a.as_os_str().to_string_lossy().eq_ignore_ascii_case(&b.as_os_str().to_string_lossy())
+    file_ops::case::same(&a.to_string_lossy(), &b.to_string_lossy())
 }
 
 /// A canonical, hash-checked module file with a Windows write/delete-denying lease.
@@ -150,7 +150,7 @@ pub fn find_module<'a>(modules: &'a [Module], identity: &ModuleIdentity) -> Resu
                 identity
                     .path
                     .file_name()
-                    .is_some_and(|expected| name.to_string_lossy().eq_ignore_ascii_case(&expected.to_string_lossy()))
+                    .is_some_and(|expected| file_ops::case::same(&name.to_string_lossy(), &expected.to_string_lossy()))
             })
         })
         .count()
