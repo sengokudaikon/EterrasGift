@@ -191,8 +191,8 @@ impl Trainer {
     }
 }
 
-/// Unexpected worker panics have the same fatal policy as Mods/Settings. Expected
-/// connection and write failures are typed results and never enter this path.
+/// An unexpected worker panic closes the app, and with it the helper in the game. Expected connection and write failures
+/// are typed results and never enter this path. Mods differ: a panic there stops only the library.
 fn run_worker(work: impl FnOnce(), faults: &FaultLog, shutdown: impl FnOnce()) -> bool {
     let previous = WORKER_CATCHES_PANIC.replace(true);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work));

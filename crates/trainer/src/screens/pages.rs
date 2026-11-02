@@ -2,7 +2,7 @@
 //! and how rows split into columns, without any view, so they are testable alone. `view.rs` shows them.
 
 use super::registry::{self, Area, Feature, FeatureField, FeatureKind, FeatureValue};
-use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameField, HookState, PendingFields, TrainerSession};
+use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameField, HookState, TrainerSession};
 use spiderland_phrases::locale::numbers;
 use spiderland_phrases::{Conjunction, Phrase, list, phrases};
 
@@ -509,7 +509,7 @@ pub struct EditorRow {
     pub status: String,
     pub tone: Tone,
     was_connected: bool,
-    busy: Option<(Request, Box<dyn PendingFields>)>,
+    busy: Option<Request>,
 }
 
 /// What the row is waiting on the game for.
@@ -549,10 +549,9 @@ impl EditorRow {
         row
     }
 
-    /// Follows a change of the session: takes an answer that has come, and reads when the session becomes connected (and
-    /// when made while connected), not over a request of its own; not on any other state change.
+    /// Follows a change of the session: reads when it becomes connected (and when made while connected), not over a request
+    /// of its own; not on any other state change.
     pub fn follow(&mut self, session: &dyn TrainerSession) {
-        self.poll();
         let connected = session.is_connected();
         if connected && !self.was_connected && !self.is_busy() {
             self.read(session);
@@ -560,24 +559,11 @@ impl EditorRow {
         self.was_connected = connected;
     }
 
-    /// Takes the game's answer to the request the row waits on, if it has come. True when it had.
-    pub fn poll(&mut self) -> bool {
-        let Some(result) = self.busy.as_mut().and_then(|(_, pending)| pending.poll()) else {
-            return false;
-        };
-        match self.busy.take() {
-            Some((Request::Read, _)) => self.finish_read(result),
-            Some((Request::Apply(sent, labels), _)) => self.finish_apply(&sent, &labels, result),
-            None => {}
-        }
-        true
-    }
-
-    /// Takes the game's answer to the request the row waits on, as it came from outside the row.
+    /// Takes the game's answer to the request the row waits on: whoever made the request awaits it.
     pub fn answer(&mut self, result: FieldResult) {
         match self.busy.take() {
-            Some((Request::Read, _)) => self.finish_read(result),
-            Some((Request::Apply(sent, labels), _)) => self.finish_apply(&sent, &labels, result),
+            Some(Request::Read) => self.finish_read(result),
+            Some(Request::Apply(sent, labels)) => self.finish_apply(&sent, &labels, result),
             None => {}
         }
     }
@@ -638,7 +624,7 @@ impl EditorRow {
         }
         match session.read_fields(self.feature.id()) {
             FieldRequest::Done(result) => self.finish_read(result),
-            FieldRequest::Pending(pending) => self.busy = Some((Request::Read, pending)),
+            FieldRequest::Pending(_) => self.busy = Some(Request::Read),
         }
     }
 
@@ -670,7 +656,7 @@ impl EditorRow {
         let labels: Vec<String> = self.fields.iter().map(|f| f.label().to_owned()).collect();
         match session.write_fields(self.feature.id(), &sent) {
             FieldRequest::Done(result) => self.finish_apply(&sent, &labels, result),
-            FieldRequest::Pending(pending) => self.busy = Some((Request::Apply(sent, labels), pending)),
+            FieldRequest::Pending(_) => self.busy = Some(Request::Apply(sent, labels)),
         }
     }
 
@@ -852,7 +838,6 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
     use std::collections::{BTreeMap, BTreeSet};
-    use std::rc::Rc;
 
     #[test]
     fn steps_read_as_the_csharp_strings() {
@@ -1133,24 +1118,17 @@ mod tests {
     struct Game {
         fields: RefCell<BTreeMap<&'static str, Vec<GameField>>>,
         keep: RefCell<Option<f64>>,
-        /// Answers wait here until the test gives them, as the worker's do.
-        later: Option<Rc<RefCell<Option<FieldResult>>>>,
+        /// Answers wait until the test gives them, as the worker's do.
+        later: bool,
         unserved: Option<&'static str>,
-    }
-
-    struct Later(Rc<RefCell<Option<FieldResult>>>);
-
-    impl PendingFields for Later {
-        fn poll(&mut self) -> Option<FieldResult> {
-            self.0.borrow_mut().take()
-        }
     }
 
     impl Game {
         fn answer(&self, result: FieldResult) -> FieldRequest {
-            match &self.later {
-                Some(slot) => FieldRequest::Pending(Box::new(Later(slot.clone()))),
-                None => result.into(),
+            if self.later {
+                FieldRequest::Pending(Box::pin(std::future::pending()))
+            } else {
+                result.into()
             }
         }
     }
@@ -1194,9 +1172,8 @@ mod tests {
 
     #[test]
     fn a_row_waits_for_the_game_and_says_what_it_cannot_serve() {
-        let slot = Rc::new(RefCell::new(None));
         let game = Game {
-            later: Some(slot.clone()),
+            later: true,
             unserved: Some("currency"),
             ..Game::default()
         };
@@ -1205,9 +1182,7 @@ mod tests {
         let mut row = EditorRow::new(feature, false, &game);
         // Connected: the read is on its way, and everything waits for it.
         assert!(row.is_busy() && !row.can_use(&game) && !row.has_read);
-        assert!(!row.poll());
-        *slot.borrow_mut() = Some(Ok(vec![GameField::new("", 1.0), GameField::new("", 0.3)]));
-        assert!(row.poll());
+        row.answer(Ok(vec![GameField::new("", 1.0), GameField::new("", 0.3)]));
         assert!(row.has_read && row.can_use(&game));
         row.fields[0].set_amount(Some(1.1));
         assert!(row.can_apply(&game) && row.can_discard());
@@ -1216,18 +1191,16 @@ mod tests {
         // Discard does nothing while the game answers.
         row.discard();
         assert!(row.has_drafts());
-        *slot.borrow_mut() = Some(Ok(vec![GameField::new("", 1.1), GameField::new("", 0.3)]));
-        row.follow(&game);
+        row.answer(Ok(vec![GameField::new("", 1.1), GameField::new("", 0.3)]));
         assert_eq!((row.status.as_str(), row.tone), ("Confirmed.", Tone::Confirmed));
         assert!(!row.has_drafts() && row.can_use(&game));
         // A failed write that sent nothing keeps the drafts.
         row.fields[1].set_amount(Some(2.0));
         row.apply(&game);
-        *slot.borrow_mut() = Some(Err(FieldError {
+        row.answer(Err(FieldError {
             details: "The trainer cannot accept another command.".into(),
             nothing_sent: true,
         }));
-        row.poll();
         assert_eq!(row.status, "Not changed: The trainer cannot accept another command.");
         assert!(row.has_drafts());
 

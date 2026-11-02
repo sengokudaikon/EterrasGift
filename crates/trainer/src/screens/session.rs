@@ -5,6 +5,7 @@
 
 use super::profiles::Profile;
 use spiderland_phrases::phrases;
+use std::pin::Pin;
 
 /// Where a hook of the live profile stands in the game: the worker's own report.
 pub use crate::backend::HookRun as HookState;
@@ -48,16 +49,16 @@ pub struct FieldError {
 
 pub type FieldResult = Result<Vec<GameField>, FieldError>;
 
-/// A read or write the game answers later. The pages look again whenever the session changes, and while a request is
-/// unanswered; `poll` never waits.
-pub trait PendingFields {
-    fn poll(&mut self) -> Option<FieldResult>;
-}
+/// A read or write the game answers later, for whoever follows the session to await on the UI thread.
+pub type FieldAnswer = Pin<Box<dyn Future<Output = FieldResult>>>;
+
+/// A change on its way to the game: done once the worker has taken it, and the session then says what it did.
+pub type Settling = Pin<Box<dyn Future<Output = ()>>>;
 
 /// A read or write as the session took it: answered at once, or on its way to the game.
 pub enum FieldRequest {
     Done(FieldResult),
-    Pending(Box<dyn PendingFields>),
+    Pending(FieldAnswer),
 }
 
 impl From<FieldResult> for FieldRequest {
@@ -106,9 +107,13 @@ pub trait TrainerSession {
     fn set_hook_values(&self, id: &str, values: &[f64]);
     /// Where a hook stands in the game, while its character is in play.
     fn hook_state(&self, id: &str) -> Option<HookState>;
-    /// A change is on its way and not yet taken: the pages look again until it is.
+    /// A change is on its way and not yet taken.
     fn is_busy(&self) -> bool {
         false
+    }
+    /// What the changes made since the last call wait on, each handed out once. Await them, and look again after each.
+    fn settling(&self) -> Vec<Settling> {
+        Vec::new()
     }
     fn read_fields(&self, id: &str) -> FieldRequest;
     fn write_fields(&self, id: &str, fields: &[FieldWrite]) -> FieldRequest;

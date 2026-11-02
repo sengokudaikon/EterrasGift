@@ -8,7 +8,7 @@
 use super::pages::{self, Content, EditorRow, FieldModel, HookRow, PageModel, Row, Tone};
 use super::profiles::{self, Profile};
 use super::registry::{self, Area, Feature, FeatureKind, FeatureValue};
-use super::session::{FieldRequest, FieldResult, FieldWrite, HookState, PendingFields, TrainerSession};
+use super::session::{FieldRequest, FieldResult, FieldWrite, HookState, TrainerSession};
 use spiderland::{Effects, Feature as SpiderlandFeature, Tracked, Version};
 use spiderland_phrases::locale::numbers;
 use spiderland_phrases::phrases;
@@ -17,8 +17,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::time::Duration;
 
-/// How often a row waiting on the game looks for its answer: an answer can come just after the snapshot that announced it.
-pub const POLL: Duration = Duration::from_millis(50);
 /// The longest a section's rows stay hidden waiting for their heights.
 pub const REVEAL: Duration = Duration::from_millis(250);
 
@@ -71,13 +69,9 @@ pub fn read_facts(session: &dyn TrainerSession, features: &[Feature]) -> Facts {
     facts
 }
 
-/// A request whose answer comes back as an intent, not through the row.
-struct AnsweredByIntent;
-
-impl PendingFields for AnsweredByIntent {
-    fn poll(&mut self) -> Option<FieldResult> {
-        None
-    }
+/// A request as the row sees it inside the reducer: the host awaits the answer, and it comes back as an intent.
+fn answered_by_intent() -> FieldRequest {
+    FieldRequest::Pending(Box::pin(std::future::pending()))
 }
 
 /// The session as the rows see it inside the reducer.
@@ -140,14 +134,14 @@ impl TrainerSession for Commands<'_> {
     }
     fn read_fields(&self, id: &str) -> FieldRequest {
         self.push(Effect::ReadFields { id: id.to_owned() });
-        FieldRequest::Pending(Box::new(AnsweredByIntent))
+        answered_by_intent()
     }
     fn write_fields(&self, id: &str, fields: &[FieldWrite]) -> FieldRequest {
         self.push(Effect::WriteFields {
             id: id.to_owned(),
             fields: fields.to_vec(),
         });
-        FieldRequest::Pending(Box::new(AnsweredByIntent))
+        answered_by_intent()
     }
 }
 
@@ -177,8 +171,6 @@ pub enum Intent {
     Discard(i32),
     /// What the session says now.
     Facts(Box<Facts>),
-    /// Time to look again for answers, while something waits on the game.
-    Poll,
     /// The game answered a row's read or write.
     FieldsAnswered {
         id: String,
@@ -387,17 +379,6 @@ impl State {
 
     pub fn selected_section(&self) -> usize {
         self.page().map_or(0, |page| page.selected)
-    }
-
-    /// A row or the session waits on the game.
-    pub fn polling(&self) -> bool {
-        self.facts.busy
-            || self
-                .pages
-                .values()
-                .flatten()
-                .flat_map(|page| &page.sections)
-                .any(|section| matches!(&section.content, Content::Rows(rows) if rows.iter().any(|row| matches!(row, Row::Editor(editor) if editor.is_busy()))))
     }
 
     /// Why a typed text is no value for a row's value (empty when it is one).
@@ -876,7 +857,6 @@ impl SpiderlandFeature for TrainerPages {
                 follow_profiles(state, effects);
                 follow_rows(state, effects);
             }
-            Intent::Poll => effects.push(Effect::Refresh),
             Intent::FieldsAnswered { id, result } => {
                 let mut result = Some(result);
                 for page in state.pages.values_mut().flatten() {
@@ -1006,7 +986,6 @@ mod tests {
         let mut state = State::new(FEATURES.to_vec(), false, 24.0);
         send(&mut state, Intent::Facts(Box::new(facts(false))));
         send(&mut state, Intent::Open(Some(Area::Character)));
-        assert!(!state.polling());
         let effects = send(&mut state, Intent::Facts(Box::new(facts(true))));
         let id = effects
             .iter()
@@ -1015,7 +994,15 @@ mod tests {
                 _ => None,
             })
             .expect("a connected editor reads");
-        assert!(state.polling(), "the row waits for its answer");
+        let waiting = |state: &State| {
+            state
+                .pages
+                .values()
+                .flatten()
+                .flat_map(|page| &page.sections)
+                .any(|section| matches!(&section.content, Content::Rows(rows) if rows.iter().any(|row| matches!(row, Row::Editor(editor) if editor.is_busy()))))
+        };
+        assert!(waiting(&state), "the row waits for its answer");
         send(
             &mut state,
             Intent::FieldsAnswered {

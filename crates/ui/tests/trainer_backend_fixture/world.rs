@@ -728,6 +728,7 @@ impl Forge {
                 launcher: None,
                 mods: None,
                 trainer: true,
+                planned: false,
                 trainer_backend: Some(backend.clone()),
                 faults: None,
                 logs: None,

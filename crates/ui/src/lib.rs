@@ -41,6 +41,8 @@ pub struct App {
     /// This run has the trainer: its pages, its connection block and its Settings groups.
     pub trainer: bool,
     pub trainer_backend: Option<eg_trainer::backend::BackendHandle>,
+    /// A source checkout: the trainer's pages also list features with no row yet.
+    pub planned: bool,
     /// Where the Item Forge records an item it can't show; None in a run without a fault log.
     pub faults: Option<eg_core::fault::FaultLog>,
     /// Where the Item Forge keeps the user's item templates; None in tests, which set their own.
@@ -87,7 +89,7 @@ pub fn install(window: &MainWindow, app: App) -> Installed {
         mods.on_closed(move |closed| settings.send(if closed { SettingsIntent::CloseRequested } else { SettingsIntent::CloseAbandoned }));
     }
     trainer::connection::unbound(window, app.trainer);
-    trainer::install(window, trainer_backend.clone());
+    trainer::install(window, trainer_backend.clone(), app.planned, background.clone());
     let forge = trainer_backend.map(|backend| {
         trainer::connection::bind(window, backend.clone(), &shell, decorations);
         forge::bind(window, backend, background, &shell, app.faults, app.templates)

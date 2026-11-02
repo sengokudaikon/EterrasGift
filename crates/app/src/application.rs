@@ -39,6 +39,7 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
     })?;
     let (found_game, found_dotnet) = found.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
     let settings_unreadable = store.startup_error().is_some();
+    let source_checkout = store.paths().is_source_checkout;
     let service = SettingsService::new(store, &runtime.tasks());
     // The trainer saves its profiles through the service, so it starts once the service runs.
     let trainer_runtime = trainer.start(&service, found_game.as_deref(), startup.arguments.no_connect, &faults, &runtime.tasks());
@@ -71,6 +72,7 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
             }),
             trainer: trainer_runtime.is_some(),
             trainer_backend: trainer_runtime.as_ref().map(|runtime| runtime.handle.clone()),
+            planned: source_checkout,
             faults: Some(faults.clone()),
             templates: trainer_runtime.as_ref().map(|_| trainer.templates()),
             settings,

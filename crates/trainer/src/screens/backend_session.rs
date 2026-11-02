@@ -2,58 +2,90 @@
 //! path. Unported direct field editors keep the common interface but advertise no operation support.
 
 use super::profiles::Profile;
-use super::session::{FieldError, FieldRequest, FieldWrite, HookState, NotAvailable, TrainerSession};
+use super::session::{FieldError, FieldRequest, FieldWrite, HookState, NotAvailable, Settling, TrainerSession};
 use crate::backend::{BackendHandle, BackendSnapshot, Command, Pending, Phase};
 use crate::features::profiles::ProfileKey;
 use crate::features::{FeatureIntents, HookId};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 pub struct BackendSession {
     backend: BackendHandle,
-    /// Switches flipped and not yet taken by the worker: until they are, the row shows them as flipped.
-    switching: RefCell<BTreeMap<HookId, (Pending, bool)>>,
-    /// A profile chosen and not yet shown by the worker.
-    selecting: RefCell<Option<(Pending, ProfileKey)>>,
-    /// Other changes on their way, held only to know when they are taken.
-    changing: RefCell<Vec<Pending>>,
+    changes: Rc<RefCell<Changes>>,
+    /// Receipts' waits not yet handed to whoever follows the session.
+    settling: RefCell<Vec<Settling>>,
+}
+
+/// The changes the worker hasn't taken yet. From when it has, the snapshot says what they did.
+#[derive(Default)]
+struct Changes {
+    /// Switches flipped: until they are taken, the row shows them as flipped. A later flip of the hook replaces an earlier one.
+    switching: BTreeMap<HookId, (u64, bool)>,
+    /// A profile chosen and not yet shown by the worker. A later choice replaces an earlier one.
+    selecting: Option<(u64, ProfileKey)>,
+    /// Other changes on their way.
+    changing: usize,
+    last: u64,
+}
+
+impl Changes {
+    fn next(&mut self) -> u64 {
+        self.last += 1;
+        self.last
+    }
 }
 
 impl BackendSession {
     pub fn new(backend: BackendHandle) -> BackendSession {
         BackendSession {
             backend,
-            switching: RefCell::default(),
-            selecting: RefCell::default(),
-            changing: RefCell::default(),
+            changes: Rc::default(),
+            settling: RefCell::default(),
         }
+    }
+
+    /// Waits for `receipt`, whatever its answer: the snapshot says what the change did. `taken` then lets go of it.
+    fn track(&self, receipt: Pending, taken: impl FnOnce(&mut Changes) + 'static) {
+        let changes = self.changes.clone();
+        self.settling.borrow_mut().push(Box::pin(async move {
+            let _ = receipt.wait().await;
+            taken(&mut changes.borrow_mut());
+        }));
     }
 
     /// Queues a change whose answer the next snapshot shows; a full queue drops it, and the row keeps what the profile holds.
     fn submit(&self, command: Command) {
         if let Ok(receipt) = self.backend.try_submit(command) {
-            self.changing.borrow_mut().push(receipt);
+            self.changes.borrow_mut().changing += 1;
+            self.track(receipt, |changes| changes.changing -= 1);
+        }
+    }
+
+    /// Queues a change that flips the hook's switch; a full queue drops it, and the row keeps what the profile holds.
+    fn switch(&self, id: HookId, on: bool, command: Command) {
+        if let Ok(receipt) = self.backend.try_submit(command) {
+            let serial = {
+                let mut changes = self.changes.borrow_mut();
+                let serial = changes.next();
+                changes.switching.insert(id, (serial, on));
+                serial
+            };
+            self.track(receipt, move |changes| {
+                if changes.switching.get(&id).is_some_and(|(latest, _)| *latest == serial) {
+                    changes.switching.remove(&id);
+                }
+            });
         }
     }
 
     /// Whose hooks the pages show, and the hooks: the profile chosen, until the worker has taken the choice, else the
     /// worker's (a profile, or the hooks of the character in play without one).
     fn shown<'a>(&self, snapshot: &'a BackendSnapshot) -> Option<(ProfileKey, &'a FeatureIntents)> {
-        self.settle();
-        if let Some((_, key)) = self.selecting.borrow().as_ref() {
+        if let Some((_, key)) = self.changes.borrow().selecting.as_ref() {
             return snapshot.profiles.get(key).map(|profile| (key.clone(), &profile.hooks));
         }
         Some((snapshot.editing.clone()?, snapshot.shown_hooks()?))
-    }
-
-    /// Lets go of the changes the worker has taken: from then on the snapshot says what they did.
-    fn settle(&self) {
-        self.switching.borrow_mut().retain(|_, (receipt, _)| receipt.try_result().is_none());
-        let mut selecting = self.selecting.borrow_mut();
-        if selecting.as_mut().is_some_and(|(receipt, _)| receipt.try_result().is_some()) {
-            *selecting = None;
-        }
-        self.changing.borrow_mut().retain_mut(|receipt| receipt.try_result().is_none());
     }
 
     /// The worker's latest snapshot, while it runs.
@@ -101,7 +133,17 @@ impl TrainerSession for BackendSession {
     fn select_profile(&self, profile: &Profile) {
         let key = key_of(profile);
         if let Ok(receipt) = self.backend.try_submit(Command::SelectProfile(key.clone())) {
-            *self.selecting.borrow_mut() = Some((receipt, key));
+            let serial = {
+                let mut changes = self.changes.borrow_mut();
+                let serial = changes.next();
+                changes.selecting = Some((serial, key));
+                serial
+            };
+            self.track(receipt, move |changes| {
+                if changes.selecting.as_ref().is_some_and(|(latest, _)| *latest == serial) {
+                    changes.selecting = None;
+                }
+            });
         }
     }
 
@@ -113,8 +155,7 @@ impl TrainerSession for BackendSession {
         let Some(id) = HookId::parse(id) else {
             return false;
         };
-        self.settle();
-        if let Some((_, on)) = self.switching.borrow().get(&id) {
+        if let Some((_, on)) = self.changes.borrow().switching.get(&id) {
             return *on;
         }
         self.with(|snapshot| self.shown(snapshot).is_some_and(|(_, hooks)| hooks.is_wanted(id))).unwrap_or(false)
@@ -124,9 +165,7 @@ impl TrainerSession for BackendSession {
         let Some(id) = HookId::parse(id) else {
             return;
         };
-        if let Ok(receipt) = self.backend.try_submit(Command::SetHookWanted { id, on }) {
-            self.switching.borrow_mut().insert(id, (receipt, on));
-        }
+        self.switch(id, on, Command::SetHookWanted { id, on });
     }
 
     fn hook_values(&self, id: &str) -> Vec<f64> {
@@ -145,9 +184,7 @@ impl TrainerSession for BackendSession {
             let choice = descriptor.kind == crate::features::FeatureKind::Choice;
             if choice || matches!(descriptor.native_support(), crate::features::NativeSupport::GameplayOverride(_)) {
                 let on = if choice { values != [0.0] } else { self.is_hook_wanted(id.as_str()) };
-                if let Ok(receipt) = self.backend.try_submit(command) {
-                    self.switching.borrow_mut().insert(id, (receipt, on));
-                }
+                self.switch(id, on, command);
             } else {
                 self.submit(command);
             }
@@ -156,16 +193,19 @@ impl TrainerSession for BackendSession {
 
     fn hook_state(&self, id: &str) -> Option<HookState> {
         let id = HookId::parse(id)?;
-        self.settle();
-        if self.switching.borrow().contains_key(&id) {
+        if self.changes.borrow().switching.contains_key(&id) {
             return Some(HookState::Applying);
         }
         self.with(|snapshot| snapshot.hooks.get(&id).cloned()).flatten()
     }
 
     fn is_busy(&self) -> bool {
-        self.settle();
-        !self.switching.borrow().is_empty() || self.selecting.borrow().is_some() || !self.changing.borrow().is_empty()
+        let changes = self.changes.borrow();
+        !changes.switching.is_empty() || changes.selecting.is_some() || changes.changing > 0
+    }
+
+    fn settling(&self) -> Vec<Settling> {
+        self.settling.take()
     }
 
     fn read_fields(&self, _: &str) -> FieldRequest {

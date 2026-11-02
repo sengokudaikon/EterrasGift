@@ -8,11 +8,11 @@ use crate::{FeatureFieldView, FeatureRowKind, FeatureRowModels, FeatureRowPlace,
 use eg_trainer::backend::BackendHandle;
 use eg_trainer::screens::pages::Tone;
 use eg_trainer::screens::registry::{Area, Feature};
-use eg_trainer::screens::session::{FieldRequest, FieldResult, PendingFields, TrainerSession};
-use eg_trainer::screens::trainer_pages::{Effect, FieldRowView, Intent, POLL, PlaceView, REVEAL, RowKind, RowView, State, TrainerPages, ValueView, read_facts};
+use eg_trainer::screens::session::{FieldRequest, TrainerSession};
+use eg_trainer::screens::trainer_pages::{Effect, FieldRowView, Intent, PlaceView, REVEAL, RowKind, RowView, State, TrainerPages, ValueView, read_facts};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, VecModel, Weak};
 use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version, callbacks};
-use spiderland_slint::{Listening, Rows, after, every, on_watch};
+use spiderland_slint::{Background, Listening, Rows, after, on_watch};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -176,6 +176,7 @@ struct Window {
     session: Rc<dyn TrainerSession>,
     features: Rc<Vec<Feature>>,
     backend: Option<BackendHandle>,
+    background: Background,
     rows: Rc<VecModel<FeatureRowView>>,
     /// Each row's lists, apart from the row: an item changed in place while its row changed too would not be shown (Slint
     /// 1.18's repeater drops a row change that arrives while its model binding is dirty).
@@ -188,17 +189,14 @@ struct Window {
     shown_rows: Slice<(Version, Version, i32)>,
     shown_profiles: Slice<Version>,
     shown_layout: Slice<Version>,
-    /// Requests the session answers later, by the feature they are for.
-    answers: Vec<(String, Box<dyn PendingFields>)>,
     reveal: Timer,
-    polling: Subscriptions<()>,
     following: Subscriptions<()>,
 }
 
 /// Shows the trainer's pages on `session`. `features` is the registry; `planned` lists features that are not ported yet (a
-/// source checkout). `backend` is the worker `session` runs on, whose snapshots the pages follow. Binding again replaces the
-/// previous binding.
-pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<Feature>, planned: bool, backend: Option<BackendHandle>) -> Pages {
+/// source checkout). `backend` is the worker `session` runs on, whose snapshots the pages follow; `background` waits for what
+/// the session has on its way. Binding again replaces the previous binding.
+pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<Feature>, planned: bool, backend: Option<BackendHandle>, background: Background) -> Pages {
     let features = Rc::new(features);
     let spacing = window.global::<Tokens>().get_feature_section_spacing();
     let host = Window {
@@ -206,6 +204,7 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
         session: session.clone(),
         features: features.clone(),
         backend,
+        background,
         rows: Rc::new(VecModel::default()),
         row_models: Rc::new(VecModel::default()),
         nested: Vec::new(),
@@ -216,9 +215,7 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
         shown_rows: Slice::default(),
         shown_profiles: Slice::default(),
         shown_layout: Slice::default(),
-        answers: Vec::new(),
         reveal: Timer::default(),
-        polling: Subscriptions::default(),
         following: Subscriptions::default(),
     };
     let view = window.global::<TrainerState>();
@@ -297,9 +294,6 @@ impl Host<TrainerPages> for Window {
             view.set_rows_height(tallest);
             view.set_rows_ready(layout.rows_ready());
         });
-        // Looks for answers only while a row waits on the game.
-        let waiting = state.polling() || !self.answers.is_empty();
-        self.polling.sync(waiting.then_some(()), |()| every(POLL, intents, || Intent::Poll));
         if let Some(backend) = &self.backend {
             let (session, features) = (&self.session, &self.features);
             self.following.sync([()], |()| -> Listening {
@@ -324,16 +318,7 @@ impl Host<TrainerPages> for Window {
                 let request = self.session.write_fields(&id, &fields);
                 self.take_request(id, request, intents);
             }
-            Effect::Refresh => {
-                self.answers.retain_mut(|(id, pending)| match pending.poll() {
-                    Some(result) => {
-                        intents.send(Intent::FieldsAnswered { id: id.clone(), result });
-                        false
-                    }
-                    None => true,
-                });
-                intents.send(Intent::Facts(Box::new(read_facts(&*self.session, &self.features))));
-            }
+            Effect::Refresh => intents.send(Intent::Facts(Box::new(read_facts(&*self.session, &self.features)))),
             Effect::ScheduleSplit => {
                 let intents = intents.clone();
                 Timer::single_shot(Duration::ZERO, move || intents.send(Intent::SplitDue));
@@ -341,14 +326,19 @@ impl Host<TrainerPages> for Window {
             Effect::StartReveal => self.reveal = after(REVEAL, intents, || Intent::RevealDue),
             Effect::StopReveal => self.reveal.stop(),
         }
+        // A change's answer can come just after the snapshot that announced it, so its receipt says when to look again.
+        for settling in self.session.settling() {
+            let (session, features) = (self.session.clone(), self.features.clone());
+            self.background.wait(intents, settling, move |()| Intent::Facts(Box::new(read_facts(&*session, &features))));
+        }
     }
 }
 
 impl Window {
-    fn take_request(&mut self, id: String, request: FieldRequest, intents: &Intents<Intent>) {
+    fn take_request(&self, id: String, request: FieldRequest, intents: &Intents<Intent>) {
         match request {
-            FieldRequest::Done(result) => answer(intents, id, result),
-            FieldRequest::Pending(pending) => self.answers.push((id, pending)),
+            FieldRequest::Done(result) => intents.send(Intent::FieldsAnswered { id, result }),
+            FieldRequest::Pending(answer) => self.background.wait(intents, answer, move |result| Intent::FieldsAnswered { id, result }),
         }
     }
 
@@ -384,8 +374,4 @@ impl Window {
             }
         });
     }
-}
-
-fn answer(intents: &Intents<Intent>, id: String, result: FieldResult) {
-    intents.send(Intent::FieldsAnswered { id, result });
 }

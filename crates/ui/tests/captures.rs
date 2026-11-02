@@ -246,6 +246,7 @@ impl Session {
                 logs,
                 mods,
                 trainer,
+                planned: false,
                 trainer_backend: None,
                 faults: None,
                 templates: None,
