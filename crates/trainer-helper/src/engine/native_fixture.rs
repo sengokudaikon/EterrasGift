@@ -92,6 +92,10 @@ unsafe extern "C-unwind" fn native_callback(events: *const MethodInfo) {
                 code: ResponseCode::Done,
                 payload: gameplay_hooks::read(hook).encode(),
             },
+            Request::ReadGameplayHooks { hooks, .. } => Response {
+                code: ResponseCode::Done,
+                payload: eg_trainer_wire::hooks::HookObservation::encode_all(&hooks.iter().map(|&hook| gameplay_hooks::read(hook)).collect::<Vec<_>>()),
+            },
             _ => Response {
                 code: ResponseCode::Done,
                 payload: Vec::new(),

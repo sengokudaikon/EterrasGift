@@ -23,6 +23,12 @@ code and its tests, and what is still to build in [the helper's backlog](crates/
 - Stash: read and edit held woven echoes through the same checked quantity workflow.
 - Stash: duplicate player-dropped items; keys, consumables and woven echoes use the stack multiplier.
 
+- Trainer: the monitor reads every active hook in one request, one turn of the game's main thread rather than one per hook.
+- Trainer: the helper resolves its status and assembly lookups once per game run rather than on every request.
+- Trainer: an edit made just before an area load is refused and the session stays, instead of stopping at Blocked.
+- Trainer: a session that connects between areas reads its catalog when the character arrives, checked against the game's build.
+- Forge: Undo is offered only while it can still be done, and an area load ends it.
+- App: a lock file nothing can open no longer reads as another running app.
 - Forge: Weaver's Touch stops at the game's maximum again, with the override too; an idol already above it can only come down.
 - Trainer: connecting while the game freezes for a few seconds during a load waits it out, instead of stopping at Blocked.
 - Mods: once the mod library has stopped, the page is read-only, a change that never reached it is shown undone, and the app can close and restart.

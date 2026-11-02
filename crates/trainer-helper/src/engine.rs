@@ -440,6 +440,8 @@ fn after_original(state: &Shared) {
                 }
                 // SAFETY: same main-thread character admission; reads real entry bytes.
                 Request::ReadGameplayHook { expected_manager, hook, .. } => unsafe { gameplay_hooks::operation(expected_manager, hook, None) },
+                // SAFETY: as ReadGameplayHook, every hook in one turn.
+                Request::ReadGameplayHooks { expected_manager, hooks, .. } => unsafe { gameplay_hooks::read_all(expected_manager, &hooks) },
                 // SAFETY: same main-thread and per-operation graph ownership contract above.
                 Request::ReadForge { .. } => unsafe { read_forge() },
                 // SAFETY: admitted main thread; each operation validates the current offline manager and retains its graph.

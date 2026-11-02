@@ -229,7 +229,7 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
                             expected_manager: 1,
                             hook,
                             on,
-                            value,
+                            value: value.into(),
                         })
                         .await
                         .unwrap();
@@ -246,7 +246,7 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
                     let observation = HookObservation::decode(&read.payload).unwrap();
                     assert!(observation.confirmed(on));
                     if on {
-                        assert_eq!(observation.value, value);
+                        assert_eq!(observation.value, value.into());
                     }
                     if hook == GameplayHook::IncomingDamage {
                         // SAFETY: authored health target and actor storage outlive all calls.

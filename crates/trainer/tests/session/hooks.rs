@@ -191,19 +191,22 @@ fn drop_rates_send_all_four_values_and_confirm_every_lane_from_independent_readb
 fn shared_patch_ownership_is_reported_by_the_helper_for_any_disabled_feature() {
     for hook in GameplayHook::ALL {
         let fixture = Fixture::rehashing();
-        let shared = || {
-            done(
-                HookObservation {
-                    patch: PatchState::Shared,
-                    enabled: false,
-                    value: hook.default_value(),
-                }
-                .encode(),
-            )
+        let observed = HookObservation {
+            patch: PatchState::Shared,
+            enabled: false,
+            value: hook.default_value(),
         };
+        // The write's own readback, then the monitor's batched read.
         let wire = FakeTransport::new(
             fixture.target.clone(),
-            [fixture.discover(), status(false, 0x1234, 0), done(vec![]), shared(), status(false, 0x1234, 0), shared()],
+            [
+                fixture.discover(),
+                status(false, 0x1234, 0),
+                done(vec![]),
+                done(observed.encode()),
+                status(false, 0x1234, 0),
+                done(HookObservation::encode_all(&[observed])),
+            ],
         );
         let mut session = fixture.session(&wire);
         session.enable();
@@ -291,15 +294,10 @@ fn rift_mode_is_sent_and_confirmed_independently_of_enabled_state() {
 #[test]
 fn monitor_cannot_keep_reporting_portal_when_answer_changes_to_boss() {
     let fixture = Fixture::rehashing();
-    let observation = |value| {
-        done(
-            HookObservation {
-                patch: PatchState::Patched,
-                enabled: true,
-                value,
-            }
-            .encode(),
-        )
+    let observation = |value| HookObservation {
+        patch: PatchState::Patched,
+        enabled: true,
+        value,
     };
     let wire = FakeTransport::new(
         fixture.target.clone(),
@@ -307,9 +305,9 @@ fn monitor_cannot_keep_reporting_portal_when_answer_changes_to_boss() {
             fixture.discover(),
             status(false, 0x1234, 0),
             done(vec![]),
-            observation(1),
+            done(observation(1).encode()),
             status(false, 0x1234, 0),
-            observation(0),
+            done(HookObservation::encode_all(&[observation(0)])),
         ],
     );
     let mut session = fixture.session(&wire);
@@ -433,14 +431,11 @@ fn hook_monitor_reads_actual_disabled_state_after_helper_suspension() {
                 .encode(),
             ),
             status(false, 0x1234, 0),
-            done(
-                HookObservation {
-                    patch: PatchState::Original,
-                    enabled: false,
-                    value: 1,
-                }
-                .encode(),
-            ),
+            done(HookObservation::encode_all(&[HookObservation {
+                patch: PatchState::Original,
+                enabled: false,
+                value: 1,
+            }])),
         ],
     );
     let mut session = fixture.session(&wire);

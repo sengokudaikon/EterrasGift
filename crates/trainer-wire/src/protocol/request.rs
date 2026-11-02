@@ -87,6 +87,14 @@ impl Request {
                 body.byte(*hook as u8);
                 op::READ_GAMEPLAY_HOOK
             }
+            Self::ReadGameplayHooks { expected_manager, hooks, .. } => {
+                body.u64(*expected_manager);
+                body.byte(hooks.len() as u8);
+                for hook in hooks {
+                    body.byte(*hook as u8);
+                }
+                op::READ_GAMEPLAY_HOOKS
+            }
             Self::RegisterAffixes { expected_manager, affixes, .. } => {
                 body.u64(*expected_manager);
                 body.byte(affixes.len() as u8);
@@ -300,6 +308,7 @@ impl Request {
             op::DISCOVER | op::UNLOAD => Some(0),
             op::STATUS | op::CLEAR_HOOKS | op::READ_FORGE | op::READ_LOCALE => Some(DISPATCHER),
             op::READ_GAMEPLAY_HOOK => Some(DISPATCHER + 8 + 1),
+            op::READ_GAMEPLAY_HOOKS if (DISPATCHER + 8 + 1 + 1..=DISPATCHER + 8 + 1 + crate::hooks::GameplayHook::COUNT).contains(&length) => Some(length),
             op::READ_FIELDS => Some(DISPATCHER + 8 + 1),
             op::WRITE_FIELDS if (DISPATCHER..=crate::field_edits::MAX_BYTES + 32 * 1024).contains(&length) => Some(length),
             op::SET_GAMEPLAY_HOOK if [DISPATCHER + 8 + 1 + 1 + 8, DISPATCHER + 8 + 1 + 1 + 16].contains(&length) => Some(length),
@@ -347,6 +356,27 @@ impl Request {
             bytes: body.array()?,
         };
         let request = match operation {
+            op::READ_GAMEPLAY_HOOKS => {
+                let expected_manager = body.u64()?;
+                let count = usize::from(body.byte()?);
+                if expected_manager == 0 || !(1..=crate::hooks::GameplayHook::COUNT).contains(&count) {
+                    return Err(ProtocolError::InvalidData);
+                }
+                let mut hooks = Vec::with_capacity(count);
+                for _ in 0..count {
+                    let hook = crate::hooks::GameplayHook::decode(body.byte()?)?;
+                    // Ascending, so no hook is read twice in one turn.
+                    if hooks.last().is_some_and(|last| *last as u8 >= hook as u8) {
+                        return Err(ProtocolError::InvalidData);
+                    }
+                    hooks.push(hook);
+                }
+                Self::ReadGameplayHooks {
+                    dispatcher,
+                    expected_manager,
+                    hooks,
+                }
+            }
             op::SET_GAMEPLAY_HOOK | op::READ_GAMEPLAY_HOOK => {
                 let expected_manager = body.u64()?;
                 if expected_manager == 0 {

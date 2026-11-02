@@ -411,6 +411,32 @@ impl HookObservation {
             },
         })
     }
+    /// The reply to `ReadGameplayHooks`: each observation behind its length, in the order asked.
+    pub fn encode_all(observations: &[Self]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(observations.len() * 19);
+        for observation in observations {
+            let encoded = observation.encode();
+            bytes.push(encoded.len() as u8);
+            bytes.extend(encoded);
+        }
+        bytes
+    }
+    /// Exactly `count` observations and nothing after them.
+    pub fn decode_all(mut bytes: &[u8], count: usize) -> Result<Vec<Self>, ProtocolError> {
+        let mut observations = Vec::with_capacity(count);
+        for _ in 0..count {
+            let [length, ref rest @ ..] = *bytes else {
+                return Err(ProtocolError::InvalidData);
+            };
+            let (encoded, rest) = rest.split_at_checked(usize::from(length)).ok_or(ProtocolError::InvalidData)?;
+            observations.push(Self::decode(encoded)?);
+            bytes = rest;
+        }
+        if !bytes.is_empty() {
+            return Err(ProtocolError::InvalidData);
+        }
+        Ok(observations)
+    }
 }
 
 #[cfg(test)]
@@ -472,6 +498,50 @@ mod tests {
                 assert!(GameplayHook::ExperienceMultiplier.validate_value(packed.into()).is_err());
             }
         }
+    }
+
+    #[test]
+    fn a_batched_read_names_each_hook_once_in_order_and_its_reply_holds_one_observation_each() {
+        let dispatcher = DispatcherSpec { rva: 32, bytes: [0x90; 16] };
+        let all = Request::ReadGameplayHooks {
+            dispatcher,
+            expected_manager: 1,
+            hooks: GameplayHook::ALL.to_vec(),
+        };
+        assert_eq!(Request::decode(&all.encode()).unwrap(), all);
+        let read = |hooks: Vec<GameplayHook>| {
+            Request::ReadGameplayHooks {
+                dispatcher,
+                expected_manager: 1,
+                hooks,
+            }
+            .encode()
+        };
+        let (first, second) = (GameplayHook::ALL[0], GameplayHook::ALL[1]);
+        assert!(Request::decode(&read(vec![])).is_err(), "nothing to read");
+        assert!(Request::decode(&read(vec![second, first])).is_err(), "out of order");
+        assert!(Request::decode(&read(vec![first, first])).is_err(), "twice");
+        let mut unknown = read(vec![first]);
+        *unknown.last_mut().unwrap() = 255;
+        assert!(Request::decode(&unknown).is_err());
+
+        let observations = [
+            HookObservation {
+                patch: PatchState::Patched,
+                enabled: true,
+                value: 3,
+            },
+            HookObservation {
+                patch: PatchState::Original,
+                enabled: false,
+                value: HookValue::MAX,
+            },
+        ];
+        let reply = HookObservation::encode_all(&observations);
+        assert_eq!(HookObservation::decode_all(&reply, 2).unwrap(), observations);
+        assert!(HookObservation::decode_all(&reply, 1).is_err(), "an observation left over");
+        assert!(HookObservation::decode_all(&reply, 3).is_err(), "one missing");
+        assert!(HookObservation::decode_all(&reply[..reply.len() - 1], 2).is_err(), "cut short");
     }
 
     #[test]

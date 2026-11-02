@@ -77,6 +77,14 @@ opt-level = 3
 debug-assertions = false
 overflow-checks = false
 
+# As in the app workspace: hashing is seconds unoptimised.
+[profile.dev.package.sha2]
+opt-level = 3
+
+# As in the app workspace, so the two share dotscope's build: it decompresses through flate2 and miniz_oxide.
+[profile.dev.package.miniz_oxide]
+opt-level = 2
+
 [profile.dev.package.mio]
 opt-level = 3
 debug-assertions = false

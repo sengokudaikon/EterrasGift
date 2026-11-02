@@ -43,6 +43,7 @@ pub mod op {
     pub const REGISTER_AFFIXES: u32 = 30;
     pub const READ_FIELDS: u32 = 31;
     pub const WRITE_FIELDS: u32 = 32;
+    pub const READ_GAMEPLAY_HOOKS: u32 = 33;
 }
 
 pub const MAGIC: u32 = 0x4546_4735;
@@ -92,6 +93,13 @@ pub enum Request {
         expected_manager: u64,
         hook: crate::hooks::GameplayHook,
     },
+    /// Several hooks read in one turn of the game's main thread, as a monitor reads them; ascending, each once. The
+    /// reply holds one observation per hook, in the same order.
+    ReadGameplayHooks {
+        dispatcher: DispatcherSpec,
+        expected_manager: u64,
+        hooks: Vec<crate::hooks::GameplayHook>,
+    },
     Status {
         dispatcher: DispatcherSpec,
     },
@@ -139,6 +147,7 @@ impl Request {
             | Self::SetGameplayHook { dispatcher, .. }
             | Self::RegisterAffixes { dispatcher, .. }
             | Self::ReadGameplayHook { dispatcher, .. }
+            | Self::ReadGameplayHooks { dispatcher, .. }
             | Self::ClearHooks { dispatcher }
             | Self::ReadForge { dispatcher }
             | Self::ReadFields { dispatcher, .. }

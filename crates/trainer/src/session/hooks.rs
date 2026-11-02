@@ -67,32 +67,34 @@ impl<T: Transport> Session<T> {
         Ok(self.mutate(dispatcher, &request, &readback, control, acknowledged, observed).await)
     }
 
-    /// Poll only hooks this connection has confirmed; unsupported features need no RPC.
+    /// Poll only hooks this connection has confirmed; unsupported features need no RPC. They are read in one request,
+    /// which the helper answers in one turn of the game's main thread.
     pub(crate) async fn refresh_gameplay_hooks(&mut self) -> Result<(), SessionError> {
         let dispatcher = self.dispatcher()?;
         let expected_manager = self.status.ok_or(SessionError::NotConnected)?.manager;
+        let hooks: Vec<GameplayHook> = GameplayHook::ALL.into_iter().filter(|&hook| self.hooks[hook as usize].is_some()).collect();
+        if hooks.is_empty() {
+            return Ok(());
+        }
         self.state = SessionState::Connecting;
         let result = async {
-            for hook in GameplayHook::ALL {
-                if self.hooks[hook as usize].is_none() {
-                    continue;
-                }
-                self.provenance(&dispatcher)?;
-                let payload = self
-                    .request(&Request::ReadGameplayHook {
-                        dispatcher,
-                        expected_manager,
-                        hook,
-                    })
-                    .await?;
-                let actual = HookObservation::decode(&payload).map_err(SessionError::Protocol)?;
+            self.provenance(&dispatcher)?;
+            let payload = self
+                .request(&Request::ReadGameplayHooks {
+                    dispatcher,
+                    expected_manager,
+                    hooks: hooks.clone(),
+                })
+                .await?;
+            let observations = HookObservation::decode_all(&payload, hooks.len()).map_err(SessionError::Protocol)?;
+            self.provenance(&dispatcher)?;
+            for (hook, actual) in hooks.into_iter().zip(observations) {
                 if !actual.confirmed(actual.enabled) || hook.validate_value(actual.value).is_err() {
                     return Err(SessionError::Identity("Hook flag and entry bytes no longer agree".into()));
                 }
                 if actual.enabled && self.hooks[hook as usize].is_some_and(|previous| previous.enabled && previous.value != actual.value) {
                     return Err(SessionError::Identity("Hook selection changed since confirmation".into()));
                 }
-                self.provenance(&dispatcher)?;
                 self.hooks[hook as usize] = Some(actual);
             }
             Ok(())

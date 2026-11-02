@@ -234,19 +234,67 @@ pub(super) fn read(hook: GameplayHook) -> HookObservation {
     observation(hooks.slots[slot_of(hook)].as_ref(), hook)
 }
 
+/// The character in play is offline and still `expected_manager`; on the way, effects that lost it are closed.
+///
+/// # Safety
+/// The admitted main thread, as [`operation`].
+unsafe fn admit_manager(access: &RuntimeAccess, attached: &AttachedThread<'_>, expected_manager: u64) -> Result<(), Response> {
+    // SAFETY: as the caller's: the supplied manager is compared only.
+    let status = unsafe { access.status(attached) };
+    observe(status.as_ref().map_or(0, |s| if s.online { 0 } else { s.manager })).map_err(|e| server::failure(ResponseCode::Failed, e))?;
+    let status = status.map_err(game_failure)?;
+    if status.online || status.manager == 0 {
+        return Err(server::failure(ResponseCode::OfflineRequired, "Offline character required"));
+    }
+    if status.manager != expected_manager {
+        return Err(server::failure(ResponseCode::Refused, "Character changed; nothing ran"));
+    }
+    Ok(())
+}
+
+/// What `hook`'s slot holds now. A group whose effect no longer belongs to the character is closed first.
+///
+/// # Safety
+/// The admitted main thread, as [`operation`], after [`admit_manager`].
+unsafe fn read_slot(hooks: &mut Hooks, access: &RuntimeAccess, attached: &AttachedThread<'_>, expected_manager: u64, hook: GameplayHook) -> Result<HookObservation, Response> {
+    let slot = &mut hooks.slots[slot_of(hook)];
+    let current = |group: &Group| {
+        // SAFETY: as the caller's: the admitted main thread, with the manager just admitted.
+        unsafe { group.effect.current(access, attached, expected_manager) }
+    };
+    if let Some(group) = slot.as_ref()
+        && !current(group)?
+    {
+        change_group(group, hook, false, hook.default_value())?;
+        *slot = None;
+    }
+    Ok(observation(slot.as_ref(), hook))
+}
+
+/// Every hook in `hooks`, read in one turn of the main thread, as the monitor asks for them.
+///
+/// # Safety
+/// As [`operation`].
+pub(super) unsafe fn read_all(expected_manager: u64, hooks: &[GameplayHook]) -> Response {
+    // SAFETY: admitted main thread; same runtime/graph lifetime as status. The supplied manager is compared only.
+    unsafe {
+        runtime_operation(|_, access, attached| {
+            admit_manager(&access, attached, expected_manager)?;
+            let mut slots = HOOKS.lock().unwrap_or_else(|p| p.into_inner());
+            let observations = hooks
+                .iter()
+                .map(|&hook| read_slot(&mut slots, &access, attached, expected_manager, hook))
+                .collect::<Result<Vec<_>, _>>()?;
+            done(HookObservation::encode_all(&observations))
+        })
+    }
+}
+
 pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Option<(bool, eg_trainer_wire::hooks::HookValue)>) -> Response {
     // SAFETY: admitted main thread; same runtime/graph lifetime as status. The supplied manager is compared only.
     unsafe {
         runtime_operation(|runtime, access, attached| {
-            let status = access.status(attached);
-            observe(status.as_ref().map_or(0, |s| if s.online { 0 } else { s.manager })).map_err(|e| server::failure(ResponseCode::Failed, e))?;
-            let status = status.map_err(game_failure)?;
-            if status.online || status.manager == 0 {
-                return Err(server::failure(ResponseCode::OfflineRequired, "Offline character required"));
-            }
-            if status.manager != expected_manager {
-                return Err(server::failure(ResponseCode::Refused, "Character changed; nothing ran"));
-            }
+            admit_manager(&access, attached, expected_manager)?;
             if let Some((on, value)) = on {
                 let binding = FeatureBinding::resolve(&access, attached, runtime.ownership, expected_manager, hook, on)?;
                 change(hook, on, value, binding, || {
@@ -258,14 +306,7 @@ pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Op
                 done(Vec::new())
             } else {
                 let mut hooks = HOOKS.lock().unwrap_or_else(|p| p.into_inner());
-                let slot = &mut hooks.slots[slot_of(hook)];
-                if let Some(group) = slot.as_ref()
-                    && !group.effect.current(&access, attached, expected_manager)?
-                {
-                    change_group(group, hook, false, hook.default_value())?;
-                    *slot = None;
-                }
-                done(observation(slot.as_ref(), hook).encode())
+                done(read_slot(&mut hooks, &access, attached, expected_manager, hook)?.encode())
             }
         })
     }

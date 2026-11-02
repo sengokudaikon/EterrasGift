@@ -735,7 +735,7 @@ mod tests {
         // SAFETY: both identity tokens are live authored objects recognized by these fake APIs.
         unsafe {
             ForgeGraph {
-                images: crate::game::Images { all: vec![], game: token(3) },
+                images: crate::game::Images { all: &[], game: token(3) },
                 manager: attached.root(NonNull::new(token(MANAGER)).unwrap()).unwrap(),
                 item: attached.root(NonNull::new(token(ITEM)).unwrap()).unwrap(),
                 online_field: token(ONLINE_FIELD),

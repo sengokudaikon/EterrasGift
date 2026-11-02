@@ -186,6 +186,13 @@ fn requests() -> Vec<Request> {
             hook,
         });
     }
+    for hooks in [&GameplayHook::ALL[..1], &GameplayHook::ALL[..]] {
+        requests.push(Request::ReadGameplayHooks {
+            dispatcher,
+            expected_manager: 1,
+            hooks: hooks.to_vec(),
+        });
+    }
     requests
 }
 

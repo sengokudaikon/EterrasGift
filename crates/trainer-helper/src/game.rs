@@ -95,7 +95,48 @@ fn unsupported(contract: impl Into<String>) -> GameError {
 #[derive(Clone, Copy)]
 pub struct RuntimeAccess {
     api: MetadataApi,
-    presence: Option<&'static OnceLock<presence::PresenceBindings>>,
+    caches: Option<&'static Caches>,
+}
+
+/// Metadata resolved once per runtime: class, field and method descriptors are immutable once the runtime is up, and
+/// the queries that run on every poll (status, presence) or every lookup (the images) would otherwise resolve them on
+/// the game's main thread each time. Object state is never cached.
+#[derive(Default)]
+pub(crate) struct Caches {
+    presence: OnceLock<presence::PresenceBindings>,
+    status: OnceLock<accessors::player::StatusBindings>,
+    images: discovery::ImageCache,
+}
+
+/// A value from a cache, or made for one call by an access without one.
+pub(crate) enum Held<T: 'static> {
+    Cached(&'static T),
+    Local(T),
+}
+
+impl<T> Deref for Held<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        match self {
+            Self::Cached(value) => value,
+            Self::Local(value) => value,
+        }
+    }
+}
+
+impl RuntimeAccess {
+    /// The value in `slot`, made by `make` the first time.
+    fn cached<T>(&self, slot: fn(&'static Caches) -> &'static OnceLock<T>, make: impl FnOnce() -> Result<T, GameError>) -> Result<Held<T>, GameError> {
+        let Some(caches) = self.caches else {
+            return make().map(Held::Local);
+        };
+        let slot = slot(caches);
+        if let Some(value) = slot.get() {
+            return Ok(Held::Cached(value));
+        }
+        let _ = slot.set(make()?);
+        Ok(Held::Cached(slot.get().expect("set just above")))
+    }
 }
 
 impl Deref for RuntimeAccess {
@@ -122,7 +163,8 @@ impl RuntimeAccess {
         Ok(Self {
             // SAFETY: the caller establishes export identity, ABI and lifetime.
             api: unsafe { MetadataApi::resolve(resolver) }?,
-            presence: Some(Box::leak(Box::new(OnceLock::new()))),
+            // One per resolved runtime, kept for the process: the helper never frees what the game may still reach.
+            caches: Some(Box::leak(Box::default())),
         })
     }
 
@@ -131,7 +173,7 @@ impl RuntimeAccess {
     fn test_stubs() -> Self {
         Self {
             api: MetadataApi::test_stubs(),
-            presence: None,
+            caches: None,
         }
     }
 }

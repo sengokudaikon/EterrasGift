@@ -4,7 +4,7 @@
 use super::{Class, GameError, Ptr, RuntimeAccess, read_value, unsupported};
 use eg_trainer_wire::protocol::{Discovery, DispatcherSpec};
 use il2cpp_runtime::{AttachedThread, metadata::record_class};
-use std::{ffi::CStr, ptr::NonNull};
+use std::{ffi::CStr, ptr::NonNull, sync::Mutex};
 
 /// Discovery data plus a typed address retained only while the caller's runtime contract holds.
 pub struct DiscoveredRuntime {
@@ -12,21 +12,72 @@ pub struct DiscoveredRuntime {
     pub dispatcher: NonNull<u8>,
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct Images {
-    pub(crate) all: Vec<Ptr>,
+    pub(crate) all: &'static [Ptr],
     /// The game's own assembly: the image that defines `PlayerFinder`.
     pub(crate) game: Ptr,
 }
 
+/// The images of the assembly table they were read from. IL2CPP's table is fixed once its domain exists; a table at
+/// another address or of another length is read again rather than trusted.
+pub(crate) struct ImageCache(Mutex<Option<CachedImages>>);
+
+impl Default for ImageCache {
+    fn default() -> Self {
+        Self(Mutex::new(None))
+    }
+}
+
+struct CachedImages {
+    table: usize,
+    count: usize,
+    images: Images,
+}
+
+// SAFETY: image descriptors are the runtime's immutable metadata. The cache only hands them back to that runtime's
+// exports, on whichever thread is attached; it holds no object and no mutable state.
+unsafe impl Send for CachedImages {}
+
 impl RuntimeAccess {
+    /// Every assembly's image and the game's own, read once per assembly table. The image list is kept for the process,
+    /// as the helper keeps everything the game's threads may still reach.
     // SAFETY for internal helpers: called only beneath discover/status's live attached-runtime contract.
     pub(crate) unsafe fn images(&self) -> Result<Images, GameError> {
         // SAFETY: Image and class descriptors are retained immutable metadata; lookup never invokes a game method.
         unsafe {
-            let all = self.api.images()?;
+            let Some(caches) = self.caches else {
+                return self.read_images();
+            };
+            let domain = (self.domain_get)();
+            if domain.is_null() {
+                return Err(GameError::NotReady("domain unavailable"));
+            }
+            let mut count = 0;
+            let table = (self.assemblies)(domain, &mut count) as usize;
+            let cache = || caches.images.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(held) = cache().as_ref()
+                && held.table == table
+                && held.count == count
+            {
+                return Ok(held.images);
+            }
+            // The runtime is asked with no lock held.
+            let images = self.read_images()?;
+            *cache() = Some(CachedImages { table, count, images });
+            Ok(images)
+        }
+    }
+
+    /// # Safety
+    /// As [`RuntimeAccess::images`].
+    unsafe fn read_images(&self) -> Result<Images, GameError> {
+        // SAFETY: as `images`.
+        unsafe {
+            let all: &'static [Ptr] = Vec::leak(self.api.images()?);
             let mut game: Ptr = std::ptr::null_mut();
             let mut player_finder: Class = std::ptr::null_mut();
-            for &image in &all {
+            for &image in all {
                 let candidate = (self.class_from_name)(image, c"".as_ptr(), c"PlayerFinder".as_ptr());
                 if !candidate.is_null() {
                     record_class(&mut player_finder, candidate, c"PlayerFinder")?;
@@ -66,7 +117,7 @@ impl RuntimeAccess {
                     return Ok(nested);
                 }
             }
-            Ok(self.class_in(&images.all, namespace, name)?)
+            Ok(self.class_in(images.all, namespace, name)?)
         }
     }
 

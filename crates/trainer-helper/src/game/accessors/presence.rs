@@ -113,16 +113,7 @@ impl RuntimeAccess {
         // SAFETY: caller retains initialized runtime metadata and authorizes only
         // the checked static state getter; enum boxes remain rooted until copied.
         unsafe {
-            let local;
-            let bindings = if let Some(cache) = self.presence {
-                if cache.get().is_none() {
-                    let _ = cache.set(self.presence_bindings()?);
-                }
-                cache.get().unwrap()
-            } else {
-                local = self.presence_bindings()?;
-                &local
-            };
+            let bindings = self.cached(|caches| &caches.presence, || self.presence_bindings())?;
             let mut online = 1_u8;
             (self.static_get)(bindings.online as _, (&raw mut online).cast());
             if online > 1 {

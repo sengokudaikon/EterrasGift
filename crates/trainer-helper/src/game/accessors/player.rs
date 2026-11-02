@@ -7,7 +7,7 @@ use eg_trainer_wire::{
     protocol::RuntimeStatus,
 };
 use il2cpp_runtime::{AttachedThread, raw};
-use std::ptr::NonNull;
+use std::{ptr::NonNull, sync::OnceLock};
 
 /// Why the player could not be read: `Unavailable` is the game's own state (online, loading, changed), `Contract` a
 /// runtime that is not the supported one.
@@ -268,28 +268,22 @@ impl RuntimeAccess {
     pub unsafe fn status(&self, attached: &AttachedThread<'_>) -> Result<RuntimeStatus, GameError> {
         // SAFETY: The caller supplies the immutable main-thread graph span; static references are rooted and native pointer fields are validated before copying.
         unsafe {
-            let images = self.images()?;
-            let online_field = self.static_field(self.class(&images, c"EHG.Multiplayer", c"GameplayEnvironment")?, c"_isOnlinePlay", "System.Boolean")?;
+            let bindings = self.cached(|caches| &caches.status, || self.status_bindings())?;
             let mut online = 1_u8;
-            (self.static_get)(online_field, (&mut online as *mut u8).cast());
+            (self.static_get)(bindings.online as Ptr, (&mut online as *mut u8).cast());
             if online > 1 {
                 return Err(unsupported("online Boolean representation"));
             }
-            let manager_class = self.class(&images, c"", c"ItemContainersManager")?;
-            let field = self.static_field(self.class(&images, c"", c"PlayerFinder")?, c"localItemContainersManager", "ItemContainersManager")?;
             let mut manager = std::ptr::null_mut::<raw::Object>();
-            (self.static_get)(field, (&mut manager as *mut *mut raw::Object).cast());
+            (self.static_get)(bindings.manager as Ptr, (&mut manager as *mut *mut raw::Object).cast());
             let manager_root = NonNull::new(manager).map(|pointer| attached.root(pointer)).transpose()?;
             let mut manager_address = 0;
             if let Some(root) = &manager_root {
                 let manager = root.target().ok_or_else(|| unsupported("manager root target"))?;
-                self.check_object(manager_class, manager)?;
-                let cached = self.field(manager_class, c"m_CachedPtr")?;
-                if (self.field_flags)(cached) & raw::FIELD_ATTRIBUTE_STATIC != 0
-                    || (self.field_offset)(cached) != 16
-                    || self.type_name((self.field_type)(cached))? != "System.IntPtr"
-                {
-                    return Err(unsupported("manager native pointer"));
+                self.check_object(bindings.manager_class as Class, manager)?;
+                if bindings.native_pointer.get().is_none() {
+                    self.check_native_pointer(bindings.manager_class as Class)?;
+                    let _ = bindings.native_pointer.set(());
                 }
                 // The managed wrapper is strongly rooted; this reads only its pointer-sized field,
                 // and never dereferences the native object or assumes a root preserves native life.
@@ -297,13 +291,11 @@ impl RuntimeAccess {
                     manager_address = manager.as_ptr() as u64;
                 }
             }
-            let master_class = self.class(&images, c"", c"AffixList")?;
-            let field = self.static_field(self.class(&images, c"LE.AssetManagement", c"GlobalAssets")?, c"_storage_MasterAffixesList", "AffixList")?;
             let mut master = std::ptr::null_mut::<raw::Object>();
-            (self.static_get)(field, (&mut master as *mut *mut raw::Object).cast());
+            (self.static_get)(bindings.master as Ptr, (&mut master as *mut *mut raw::Object).cast());
             let master_root = NonNull::new(master).map(|pointer| attached.root(pointer)).transpose()?;
             if let Some(root) = master_root {
-                self.check_object(master_class, root.target().ok_or_else(|| unsupported("master root target"))?)?;
+                self.check_object(bindings.master_class as Class, root.target().ok_or_else(|| unsupported("master root target"))?)?;
             }
             Ok(RuntimeStatus {
                 online: online != 0,
@@ -312,4 +304,54 @@ impl RuntimeAccess {
             })
         }
     }
+
+    /// The classes and fields [`RuntimeAccess::status`] reads, resolved and checked once.
+    ///
+    /// # Safety
+    /// As [`RuntimeAccess::status`].
+    unsafe fn status_bindings(&self) -> Result<StatusBindings, GameError> {
+        // SAFETY: Class and field descriptors are retained immutable metadata; nothing here reads an object.
+        unsafe {
+            let images = self.images()?;
+            let online = self.static_field(self.class(&images, c"EHG.Multiplayer", c"GameplayEnvironment")?, c"_isOnlinePlay", "System.Boolean")?;
+            let manager_class = self.class(&images, c"", c"ItemContainersManager")?;
+            let manager = self.static_field(self.class(&images, c"", c"PlayerFinder")?, c"localItemContainersManager", "ItemContainersManager")?;
+            let master_class = self.class(&images, c"", c"AffixList")?;
+            let master = self.static_field(self.class(&images, c"LE.AssetManagement", c"GlobalAssets")?, c"_storage_MasterAffixesList", "AffixList")?;
+            Ok(StatusBindings {
+                online: online as usize,
+                manager_class: manager_class as usize,
+                manager: manager as usize,
+                master_class: master_class as usize,
+                master: master as usize,
+                native_pointer: OnceLock::new(),
+            })
+        }
+    }
+
+    /// The manager's `m_CachedPtr` is the instance `IntPtr` at offset 16 that `status` reads.
+    ///
+    /// # Safety
+    /// As [`RuntimeAccess::status`].
+    unsafe fn check_native_pointer(&self, manager_class: Class) -> Result<(), GameError> {
+        // SAFETY: field and type descriptors are retained immutable metadata.
+        unsafe {
+            let cached = self.field(manager_class, c"m_CachedPtr")?;
+            if (self.field_flags)(cached) & raw::FIELD_ATTRIBUTE_STATIC != 0 || (self.field_offset)(cached) != 16 || self.type_name((self.field_type)(cached))? != "System.IntPtr" {
+                return Err(unsupported("manager native pointer"));
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Descriptors [`RuntimeAccess::status`] reads through, kept as addresses so the cache can be shared.
+pub(crate) struct StatusBindings {
+    online: usize,
+    manager_class: usize,
+    manager: usize,
+    master_class: usize,
+    master: usize,
+    /// Checked the first time a manager is there to read; until then nothing needs it.
+    native_pointer: OnceLock<()>,
 }
