@@ -648,6 +648,11 @@ impl AffixRow {
         self.change(next)
     }
 
+    /// Whether [`AffixRow::set_roll`] would change the draft, asked without touching the row.
+    pub fn takes_roll(&self, roll: u8) -> bool {
+        self.draft.roll != roll
+    }
+
     /// Drafts a tier and a seal together, as one Undo step; the roll position is kept.
     pub fn draft_tier(&mut self, tier: u8, seal: Seal) -> bool {
         let next = AffixDraft { tier, seal, ..self.draft.clone() };
@@ -918,6 +923,11 @@ impl RollRow {
             .filter(|text| !text.is_empty())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// Whether [`RollRow::set_roll`] would change the draft, asked without touching the row.
+    pub fn takes_roll(&self, position: usize, value: u8) -> bool {
+        self.rolls.get(position).is_some_and(|roll| roll.value != value)
     }
 
     pub fn set_roll(&mut self, position: usize, value: u8) -> bool {
@@ -1274,12 +1284,19 @@ impl FieldDraft {
 
     /// Sets the value a roll position of the integer table stands for.
     pub fn set_roll(&mut self, roll: u8) -> bool {
-        let value = self
-            .editor
+        self.set(self.value_at(roll))
+    }
+
+    /// Whether [`FieldDraft::set_roll`] would change the draft, asked without touching the row.
+    pub fn takes_roll(&self, roll: u8) -> bool {
+        self.value_at(roll) != self.value && self.is_editable()
+    }
+
+    fn value_at(&self, roll: u8) -> i64 {
+        self.editor
             .as_ref()
             .and_then(|editor| editor.sample_at(roll))
-            .map_or(i64::from(roll), |sample| sample.value as i64);
-        self.set(value)
+            .map_or(i64::from(roll), |sample| sample.value as i64)
     }
 
     pub fn undo_draft(&mut self) -> bool {

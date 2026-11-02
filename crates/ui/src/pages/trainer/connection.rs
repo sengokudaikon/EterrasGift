@@ -53,7 +53,7 @@ fn observed(backend: &BackendHandle) -> Intent {
     if !backend.is_running() && backend.peek(|state| state.phase) != Phase::Stopped {
         Intent::WorkerLost
     } else {
-        Intent::Observed(Box::new(backend.snapshot()))
+        Intent::Observed(backend.latest())
     }
 }
 

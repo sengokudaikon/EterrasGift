@@ -50,6 +50,17 @@ impl ForgeEditor {
 
     /// Writes a roll position into the cell's draft; returns whether the draft changed.
     pub(super) fn set_cell(&mut self, cell: Cell, roll: u8) -> bool {
+        // Asked first through a shared borrow: a mutable one moves the rows' version, and a scrub that stays on one roll
+        // position would redraw the rows and project the whole draft again on every pointer move.
+        let takes = match cell {
+            Cell::Affix(row) => self.affixes.get(row).is_some_and(|row| row.takes_roll(roll)),
+            Cell::Unique(row, position) => self.uniques.get(row).is_some_and(|line| line.takes_roll(position, roll)),
+            Cell::Implicit(row, position) => self.implicits.get(row).is_some_and(|line| line.takes_roll(position, roll)),
+            Cell::Field(index) => self.fields.get(index).is_some_and(|field| field.takes_roll(roll)),
+        };
+        if !takes {
+            return false;
+        }
         let changed = match cell {
             Cell::Affix(row) => self.affixes.get_mut(row).is_some_and(|row| row.set_roll(roll)),
             Cell::Unique(row, position) => self.uniques.get_mut(row).is_some_and(|line| line.set_roll(position, roll)),

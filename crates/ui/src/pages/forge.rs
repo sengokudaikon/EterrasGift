@@ -93,7 +93,7 @@ struct ForgeHost {
 /// What the worker has now, sent ahead of a receipt's answer so the answer is judged on the state it left.
 fn observed(backend: &BackendHandle) -> Intent {
     Intent::Observed {
-        snapshot: Box::new(backend.snapshot()),
+        snapshot: backend.latest(),
         running: backend.is_running(),
     }
 }

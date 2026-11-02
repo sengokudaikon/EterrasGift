@@ -7,6 +7,7 @@ use crate::backend::{Activity, BackendSnapshot, Command, ErrorKind, HelperReside
 use eg_core::{bloom::BloomPhase, game_log::GameReadiness};
 use spiderland::{Effects, Feature, Tracked};
 use spiderland_phrases::phrases;
+use std::sync::Arc;
 
 phrases! {
     NotConnected: "Not connected"
@@ -92,7 +93,7 @@ pub struct ConnectionFeature;
 
 pub enum Intent {
     /// A new snapshot from the worker.
-    Observed(Box<BackendSnapshot>),
+    Observed(Arc<BackendSnapshot>),
     /// The worker has ended, without saying it stopped: nothing it last said can be trusted.
     WorkerLost,
     /// The user asked to connect.

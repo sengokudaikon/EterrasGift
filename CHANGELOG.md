@@ -23,6 +23,7 @@ code and its tests, and what is still to build in [the helper's backlog](crates/
 - Stash: read and edit held woven echoes through the same checked quantity workflow.
 - Stash: duplicate player-dropped items; keys, consumables and woven echoes use the stack multiplier.
 
+- Forge: a drag that stays on one roll redraws nothing, and the base and identity menus are made again only when the item, catalog or override changes.
 - Trainer: the monitor reads every active hook in one request, one turn of the game's main thread rather than one per hook.
 - Trainer: the helper resolves its status and assembly lookups once per game run rather than on every request.
 - Trainer: an edit made just before an area load is refused and the session stays, instead of stopping at Blocked.

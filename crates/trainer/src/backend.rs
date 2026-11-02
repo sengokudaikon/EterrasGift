@@ -205,7 +205,7 @@ struct Envelope {
 }
 pub struct BackendHandle {
     commands: mpsc::Sender<Envelope>,
-    snapshots: watch::Receiver<BackendSnapshot>,
+    snapshots: watch::Receiver<Arc<BackendSnapshot>>,
     intent: Arc<Mutex<u64>>,
     handles: Arc<AtomicUsize>,
 }
@@ -262,14 +262,19 @@ impl BackendHandle {
     pub fn peek<R>(&self, read: impl FnOnce(&BackendSnapshot) -> R) -> R {
         read(&self.snapshots.borrow())
     }
+    /// A copy of the latest snapshot, to keep or take apart.
     pub fn snapshot(&self) -> BackendSnapshot {
+        (**self.snapshots.borrow()).clone()
+    }
+    /// The latest snapshot, shared: what observers that only read it take, so a publish is not copied once per observer.
+    pub fn latest(&self) -> Arc<BackendSnapshot> {
         self.snapshots.borrow().clone()
     }
     /// The worker still runs: its snapshots can still change.
     pub fn is_running(&self) -> bool {
         self.snapshots.has_changed().is_ok()
     }
-    pub fn subscribe(&self) -> watch::Receiver<BackendSnapshot> {
+    pub fn subscribe(&self) -> watch::Receiver<Arc<BackendSnapshot>> {
         self.snapshots.clone()
     }
     pub fn try_submit(&self, command: Command) -> Result<Pending, SubmitError> {
@@ -338,7 +343,7 @@ where
     clock: K,
     options: BackendOptions,
     commands: mpsc::Receiver<Envelope>,
-    snapshots: watch::Sender<BackendSnapshot>,
+    snapshots: watch::Sender<Arc<BackendSnapshot>>,
     intent: Arc<Mutex<u64>>,
     state: BackendSnapshot,
     connection: Option<C::Connection>,
@@ -409,7 +414,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         hooks: BTreeMap::new(),
     };
     let (sender, commands) = mpsc::channel(32);
-    let (snapshots, receiver) = watch::channel(state.clone());
+    let (snapshots, receiver) = watch::channel(Arc::new(state.clone()));
     let intent = Arc::new(Mutex::new(0));
     (
         BackendHandle {
@@ -523,8 +528,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.state.unique_preview = None;
         }
         if self.state.undo_forge.as_ref().is_some_and(|undo| {
-            self.state.expected_observation().as_ref() != Ok(undo.after())
-                || self.state.runtime_status.as_ref().is_none_or(|status| status.online || status.manager != undo.manager())
+            expected.as_ref() != Some(undo.after()) || self.state.runtime_status.as_ref().is_none_or(|status| status.online || status.manager != undo.manager())
         }) {
             self.state.undo_forge = None;
             self.forge_history.clear();
@@ -553,7 +557,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             return;
         }
         self.state.revision = self.snapshots.borrow().revision.wrapping_add(1);
-        self.snapshots.send_replace(self.state.clone());
+        self.snapshots.send_replace(Arc::new(self.state.clone()));
     }
     /// Whether the state is what was last published, apart from its revision (and its read sequence unless
     /// `sequence_too`).
@@ -564,7 +568,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         if !sequence_too {
             self.state.forge_read_sequence = published.forge_read_sequence;
         }
-        let same = *published == self.state;
+        let same = **published == self.state;
         self.state.revision = revision;
         self.state.forge_read_sequence = sequence;
         same

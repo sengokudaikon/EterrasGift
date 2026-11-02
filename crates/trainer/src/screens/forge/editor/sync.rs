@@ -121,6 +121,7 @@ impl ForgeEditor {
             *self.identity = None;
             self.identity_keys.clear();
             self.fields_key.clear();
+            self.options_source = None;
             self.menu_generation += 1;
             return Vec::new();
         };
@@ -145,7 +146,18 @@ impl ForgeEditor {
             if let Some(base) = self.base.as_mut() {
                 base.update(base_key(item.item_type, item.sub_type));
             }
-            // The options follow the game too; the menus are rebuilt only when they changed.
+            // The options follow the item, the catalog and the override, and nothing else: the same three make the same
+            // options, so they are not made again for every read that changed something else. Making them prepares an
+            // edit for each unique of the item's type.
+            let made_from = OptionsSource::of(self, &item);
+            if self.options_source.as_ref() == Some(&made_from) {
+                if let Some(identity) = self.identity.as_mut() {
+                    identity.update(item.identity_id().map_or(0, i64::from));
+                }
+                return Vec::new();
+            }
+            self.options_source = Some(made_from);
+            // The menus are rebuilt only when the options changed.
             let options = self.base_options(&item);
             if let Some(base) = self.base.as_mut()
                 && base.options != options
@@ -165,6 +177,7 @@ impl ForgeEditor {
             return Vec::new();
         }
         self.fields_key = key;
+        self.options_source = Some(OptionsSource::of(self, &item));
         let drafted: Vec<FieldDraft> = if same_item {
             self.all_fields().filter(|field| field.is_dirty()).cloned().collect()
         } else {
@@ -415,7 +428,28 @@ impl ForgeEditor {
             })
             .collect()
     }
+}
 
+/// What the base and identity options are made from: the item, the catalog (by address: it is replaced, never changed)
+/// and the override.
+#[derive(PartialEq)]
+pub(super) struct OptionsSource {
+    item: ForgeItem,
+    catalog: usize,
+    unrestricted: bool,
+}
+
+impl OptionsSource {
+    pub(super) fn of(editor: &ForgeEditor, item: &ForgeItem) -> Self {
+        Self {
+            item: item.clone(),
+            catalog: std::ptr::from_ref(editor.catalog()) as usize,
+            unrestricted: editor.unrestricted(),
+        }
+    }
+}
+
+impl ForgeEditor {
     /// How many of the item's affixes a change to `item_type`'s `sub_type` would make incompatible, judged with the class
     /// requirement that base carries.
     pub(super) fn broken_by_base(&self, item: &ForgeItem, item_type: u16, sub_type: u16) -> usize {

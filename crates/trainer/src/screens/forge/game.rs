@@ -361,8 +361,8 @@ impl ForgeGame {
     }
 
     /// Takes what the worker has published, without touching what is on its way.
-    pub(super) fn observe(&mut self, snapshot: BackendSnapshot, running: bool) {
-        self.snapshot = Arc::new(snapshot);
+    pub(super) fn observe(&mut self, snapshot: Arc<BackendSnapshot>, running: bool) {
+        self.snapshot = snapshot;
         self.running = running;
         self.generation += 1;
     }

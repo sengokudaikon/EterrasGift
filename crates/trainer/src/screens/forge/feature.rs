@@ -34,7 +34,7 @@ pub enum FocusTarget {
 pub enum Intent {
     /// What the worker has published, and whether it still runs.
     Observed {
-        snapshot: Box<BackendSnapshot>,
+        snapshot: Arc<BackendSnapshot>,
         running: bool,
     },
     /// Whether the Forge page is the one showing.
@@ -339,7 +339,7 @@ impl Feature for Forge {
         let editor = &mut state.editor;
         match intent {
             Intent::Observed { snapshot, running } => {
-                editor.observe(*snapshot, running);
+                editor.observe(snapshot, running);
                 settle(state, false, effects);
             }
             Intent::PageChanged { forge } => {
@@ -584,7 +584,7 @@ mod tests {
 
     fn observed(revision: u64, phase: Phase, running: bool) -> Intent {
         Intent::Observed {
-            snapshot: Box::new(snapshot(revision, phase)),
+            snapshot: Arc::new(snapshot(revision, phase)),
             running,
         }
     }

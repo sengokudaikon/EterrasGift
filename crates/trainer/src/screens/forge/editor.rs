@@ -259,6 +259,8 @@ pub struct ForgeEditor {
     pub identity: Tracked<Option<FieldDraft>>,
     pub identity_search: String,
     fields_key: String,
+    /// What the base and identity options were last made from.
+    options_source: Option<sync::OptionsSource>,
     selected_affix: Option<usize>,
     selected_unique: Option<usize>,
     draft_order: Vec<RowRef>,
@@ -338,6 +340,7 @@ impl ForgeEditor {
             identity: Tracked::default(),
             identity_search: String::new(),
             fields_key: String::new(),
+            options_source: None,
             selected_affix: None,
             selected_unique: None,
             draft_order: Vec::new(),
@@ -372,7 +375,7 @@ impl ForgeEditor {
     }
 
     /// Takes what the worker published. Nothing shown changes until `set_catalog` or `refresh`.
-    pub(super) fn observe(&mut self, snapshot: BackendSnapshot, running: bool) {
+    pub(super) fn observe(&mut self, snapshot: std::sync::Arc<BackendSnapshot>, running: bool) {
         self.game.observe(snapshot, running);
     }
 
