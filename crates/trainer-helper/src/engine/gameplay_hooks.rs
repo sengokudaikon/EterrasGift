@@ -452,6 +452,8 @@ mod tests {
         use native_hooks::leaf::LeafEffect;
         #[unsafe(naked)]
         unsafe extern "C-unwind" fn restored() -> bool {
+            // Padded with int3 rather than nop, in counts no other fixture uses, so the linker cannot fold these entries
+            // into another test's: two tests would then hook one address.
             core::arch::naked_asm!(
                 "nop",
                 "nop",
@@ -460,19 +462,19 @@ mod tests {
                 "nop",
                 "xor eax,eax",
                 "ret",
-                "nop",
-                "nop",
-                "nop",
-                "nop",
-                "nop",
-                "nop",
-                "nop",
-                "nop"
+                "int3",
+                "int3",
+                "int3",
+                "int3",
+                "int3",
+                "int3",
+                "int3",
+                "int3",
+                "int3"
             );
         }
         #[unsafe(naked)]
         unsafe extern "C-unwind" fn held() -> bool {
-            // Not `xor`, so the linker cannot fold the two entries into one.
             core::arch::naked_asm!(
                 "nop",
                 "nop",
@@ -481,14 +483,16 @@ mod tests {
                 "nop",
                 "mov eax,0",
                 "ret",
-                "nop",
-                "nop",
-                "nop",
-                "nop",
-                "nop",
-                "nop",
-                "nop",
-                "nop"
+                "int3",
+                "int3",
+                "int3",
+                "int3",
+                "int3",
+                "int3",
+                "int3",
+                "int3",
+                "int3",
+                "int3"
             );
         }
         let group = |entry: *mut u8| {
