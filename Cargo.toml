@@ -28,7 +28,7 @@ tokio = { version = "=1.53.3", features = ["rt", "net", "io-util", "time", "sync
 
 task-runtime = { path = "libs/task-runtime" }
 binary-reader = { path = "libs/binary-reader" }
-spiderland = { path = "../spiderland/spiderland" }
+spiderland = { path = "../spiderland/spiderland", features = ["nightly"] }
 spiderland-slint = { path = "../spiderland/spiderland-slint" }
 il2cpp-runtime = { path = "libs/il2cpp-runtime" }
 native-hooks = { path = "libs/native-hooks" }
