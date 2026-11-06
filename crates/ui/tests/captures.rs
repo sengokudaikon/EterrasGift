@@ -31,11 +31,11 @@ use std::time::{Duration, Instant};
 use task_runtime::CancellationToken;
 
 mod mods_scenarios;
-// The fixture game behind the Item Forge, on the real worker (spec/forge-fixture.json).
+// The fixture game behind the Item Forge, on the real worker: synthetic, not game data.
 mod trainer_backend_fixture;
 mod trainer_scenarios;
 
-/// The window classes from `.impeccable/platform-windows.md` ("Verifying the build").
+/// The window classes the captures use.
 const SIZES: [(&str, u32, u32); 4] = [("narrow", 680, 580), ("compact", 940, 580), ("standard", 1100, 700), ("maximized", 1920, 1080)];
 
 /// A game host that records starts instead of making them, so no capture ever starts the real game.
@@ -683,6 +683,8 @@ impl ModuleLink for LinkedTrainer {
 // Settings scrolled to its end at 1100×700: the first location box (Game executable).
 const LOCATION_BOX_X: f32 = 300.0;
 const FIRST_LOCATION_BOX_Y: f32 = 58.0;
+// About, under Locations: scrolled back by this from the page's end, the first location box is at FIRST_LOCATION_BOX_Y.
+const ABOUT_HEIGHT: f32 = 173.0;
 // The rail at scale 1: Home's row, and the Trainer item's.
 const RAIL_X: f32 = 28.0;
 const HOME_ROW_Y: f32 = 80.0;
@@ -692,12 +694,14 @@ const MODULE_SWITCH: (f32, f32) = (744.0, 98.0);
 const RETRY: (f32, f32) = (900.0, 672.0);
 
 fn settings(session: &Session) {
-    // Locations, scrolled into view by the wheel; typing into a box enables Save locations.
+    // About at the page's end, then Locations, scrolled into view by the wheel; typing into a box enables Save locations.
     let ui = session.open_settings(session.settings_with_game(session.trainer_on()));
     assert_eq!(ui.global::<Nav>().get_current_page(), "settings");
     for _ in 0..10 {
         session.scroll(500.0, 300.0, -120.0);
     }
+    session.capture(&ui, "settings-about");
+    session.scroll(500.0, 300.0, ABOUT_HEIGHT);
     session.capture(&ui, "settings-locations");
     session.click(LOCATION_BOX_X, FIRST_LOCATION_BOX_Y);
     session.type_text(r"D:\Games\Last Epoch\Last Epoch.exe");
@@ -720,6 +724,7 @@ fn settings(session: &Session) {
     for _ in 0..10 {
         session.scroll(500.0, 300.0, -120.0);
     }
+    session.scroll(500.0, 300.0, ABOUT_HEIGHT);
     session.click(LOCATION_BOX_X, FIRST_LOCATION_BOX_Y);
     session.type_text("Last Epoch.exe");
     ui.global::<SettingsState>().invoke_save_locations();

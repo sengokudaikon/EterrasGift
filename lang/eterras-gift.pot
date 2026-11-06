@@ -873,7 +873,7 @@ msgid "Where games with mods run MelonLoader from. Leave empty for the game fold
 msgstr ""
 
 #: crates/core/src/settings_page.rs
-msgid "Your own mod projects, for the Mods page to build and install."
+msgid "Your own mod projects, for the Mods page to build and install. The .NET SDK reads every project here, so keep only projects you trust."
 msgstr ""
 
 #: crates/core/src/settings_page.rs
@@ -4374,11 +4374,35 @@ msgid "×{}"
 msgstr ""
 
 #: crates/ui/ui/strings/settings.slint
+msgid "About"
+msgstr ""
+
+#: crates/ui/ui/strings/settings.slint
 msgid "Browse…"
 msgstr ""
 
 #: crates/ui/ui/strings/settings.slint
+msgid "Cinzel and Noto Sans are under the SIL Open Font License 1.1."
+msgstr ""
+
+#: crates/ui/ui/strings/settings.slint
+msgid "Eterra's Gift {}"
+msgstr ""
+
+#: crates/ui/ui/strings/settings.slint
+msgid "Fluent System Icons are under the MIT License."
+msgstr ""
+
+#: crates/ui/ui/strings/settings.slint
+msgid "Free software under the GNU General Public License, version 3."
+msgstr ""
+
+#: crates/ui/ui/strings/settings.slint
 msgid "Locations"
+msgstr ""
+
+#: crates/ui/ui/strings/settings.slint
+msgid "Made with Slint."
 msgstr ""
 
 #: crates/ui/ui/strings/settings.slint
@@ -4399,6 +4423,10 @@ msgstr ""
 
 #: crates/ui/ui/strings/settings.slint
 msgid "Save the locations above"
+msgstr ""
+
+#: crates/ui/ui/strings/settings.slint
+msgid "Source code: {}"
 msgstr ""
 
 #: crates/ui/ui/strings/settings.slint

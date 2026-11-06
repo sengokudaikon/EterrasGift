@@ -101,6 +101,7 @@ pub(crate) fn bind(window: &MainWindow, settings: Settings, close_first: Option<
         saves: Subscriptions::default(),
     };
     let view = window.global::<SettingsState>();
+    view.set_version(env!("CARGO_PKG_VERSION").into());
     view.set_modules(host.modules.model());
     view.set_sections(host.sections.model());
     view.set_locations(host.locations.model());

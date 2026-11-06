@@ -13,4 +13,13 @@ export global SettingsText {
     out property <string> retry-save-tip: @tr("Try saving again");
     out property <string> save-locations: @tr("Save locations");
     out property <string> save-locations-tip: @tr("Save the locations above");
+    out property <string> about: @tr("About");
+    public pure function version(version: string) -> string { return @tr("Eterra's Gift {}", version); }
+    out property <string> license: @tr("Free software under the GNU General Public License, version 3.");
+    public pure function source(address: string) -> string { return @tr("Source code: {}", address); }
+    // Where the source is published, not a word to translate.
+    out property <string> source-address: "https://github.com/sengokudaikon/EterrasGift";
+    out property <string> made-with-slint: @tr("Made with Slint.");
+    out property <string> fonts: @tr("Cinzel and Noto Sans are under the SIL Open Font License 1.1.");
+    out property <string> icons: @tr("Fluent System Icons are under the MIT License.");
 }

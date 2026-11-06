@@ -198,7 +198,7 @@ impl Location {
             Location::ModSources => [
                 Phrase::new("Mod sources folder"),
                 Phrase::new("Mod sources folder"),
-                Phrase::new("Your own mod projects, for the Mods page to build and install."),
+                Phrase::new("Your own mod projects, for the Mods page to build and install. The .NET SDK reads every project here, so keep only projects you trust."),
                 Phrase::new("Browse for the mod sources folder"),
                 Phrase::new("Select the mod sources folder"),
             ],

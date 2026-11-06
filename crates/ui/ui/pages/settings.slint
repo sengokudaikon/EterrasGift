@@ -30,6 +30,8 @@ export struct SettingsSectionRow {
 }
 
 export global SettingsState {
+    // The app's version, for About.
+    in property <string> version;
     in property <[ModuleRow]> modules;
     in property <[SettingsSectionRow]> sections;
     in property <[LocationSetting]> locations;
@@ -54,6 +56,7 @@ export global SettingsState {
 
 export component SettingsView inherits Rectangle {
     in property <bool> compact;
+    in property <string> version;
     in property <[ModuleRow]> modules;
     in property <[SettingsSectionRow]> sections;
     in property <[LocationSetting]> locations;
@@ -97,7 +100,7 @@ export component SettingsView inherits Rectangle {
             content-width: self.visible-width;
             // Measured from where the body actually ends: a layout's preferred height counts wrapped text inside `if` and
             // `for` blocks as one line (crates/ui/README.md).
-            content-height: body.y + locations-group.y + locations-list.y + locations-end.y + Tokens.settings-body-margin.bottom;
+            content-height: body.y + about-group.y + about-list.y + about-end.y + Tokens.settings-body-margin.bottom;
 
             // The body's margin sits outside its maximum width. Its height is its own, so where its
             // last child ends never depends on the scroll content's height (that would be a binding loop).
@@ -180,10 +183,8 @@ export component SettingsView inherits Rectangle {
                     }
                 }
 
-                locations-group := SettingGroup {
-                    last: true;
-
-                    locations-list := VerticalLayout {
+                SettingGroup {
+                    VerticalLayout {
                         spacing: Tokens.space-16;
 
                         SectionText {
@@ -225,8 +226,45 @@ export component SettingsView inherits Rectangle {
                             }
                         }
 
+                    }
+                }
+
+                about-group := SettingGroup {
+                    last: true;
+
+                    about-list := VerticalLayout {
+                        spacing: Tokens.space-6;
+
+                        SectionText {
+                            text: SettingsText.about;
+                        }
+
+                        BodyText {
+                            text: SettingsText.version(root.version);
+                        }
+
+                        SecondaryText {
+                            text: SettingsText.license;
+                        }
+
+                        SecondaryText {
+                            text: SettingsText.source(SettingsText.source-address);
+                        }
+
+                        SecondaryText {
+                            text: SettingsText.made-with-slint;
+                        }
+
+                        CaptionText {
+                            text: SettingsText.fonts;
+                        }
+
+                        CaptionText {
+                            text: SettingsText.icons;
+                        }
+
                         // Where the page really ends; see `content-height`.
-                        locations-end := Rectangle {
+                        about-end := Rectangle {
                             height: 0px;
                         }
                     }
@@ -273,6 +311,7 @@ export component SettingsPage inherits Rectangle {
         width: root.width;
         height: root.height;
         compact: root.compact;
+        version: SettingsState.version;
         modules: SettingsState.modules;
         sections: SettingsState.sections;
         locations: SettingsState.locations;
