@@ -4,6 +4,7 @@ description = "Files handled with care on Windows: atomic writes, resumable fold
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 serde_json.workspace = true

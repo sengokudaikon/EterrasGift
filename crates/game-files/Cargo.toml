@@ -4,6 +4,7 @@ description = "Reads Last Epoch's shipped data files into owned game data. Files
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 binary-reader.workspace = true

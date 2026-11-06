@@ -3,6 +3,7 @@ name = "eterras-gift"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # The app is an install's only entry, with no launcher before it; eg_core::paths::EXECUTABLE names it.
 [[bin]]

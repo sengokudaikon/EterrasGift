@@ -4,6 +4,7 @@ description = "A Unity player's data files read without running it: UnityFS bund
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [features]
 # Writers for small, real bundles and type trees, for tests of code built on this crate.

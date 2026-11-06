@@ -4,6 +4,7 @@ description = "The trainer inside the game: the pipe server, Last Epoch's runtim
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]

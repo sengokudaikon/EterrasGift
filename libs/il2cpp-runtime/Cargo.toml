@@ -4,6 +4,7 @@ description = "A live IL2CPP runtime through its public exports: attached thread
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [features]
 # Export tables whose every function panics when reached, for tests of code built on this crate.

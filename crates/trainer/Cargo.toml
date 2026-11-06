@@ -4,6 +4,7 @@ description = "Trainer operations and dispatch contracts, independent of the com
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 binary-reader.workspace = true

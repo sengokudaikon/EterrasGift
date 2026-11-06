@@ -9,6 +9,7 @@ exclude = ["target"]
 version = "0.1.0"
 edition = "2024"
 publish = false
+license = "GPL-3.0-only"
 
 [workspace.dependencies]
 tokio = { version = "=1.53.3", features = ["rt", "net", "io-util", "time", "sync"] }

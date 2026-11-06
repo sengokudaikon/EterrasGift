@@ -9,6 +9,7 @@ exclude = ["libs"]
 version = "0.1.0"
 edition = "2024"
 publish = false
+license = "GPL-3.0-only"
 
 [workspace.dependencies]
 # Slint is pinned exactly: point releases have broken APIs before (crates/ui/README.md).

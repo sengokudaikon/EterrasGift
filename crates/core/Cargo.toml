@@ -4,6 +4,7 @@ description = "The shared kernel: where the app keeps its files, its settings, f
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 file-ops.workspace = true

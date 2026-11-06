@@ -4,6 +4,7 @@ description = "MelonLoader's files without running it: what a mod's DLL declares
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 dotscope.workspace = true
