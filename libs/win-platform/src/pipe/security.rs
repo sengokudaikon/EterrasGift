@@ -1,4 +1,4 @@
-//! Pipe access is limited to the current process's user and LocalSystem.
+//! Pipe access is limited to the current process's user and LocalSystem, at medium integrity or above.
 use std::{
     ffi::c_void,
     io,
@@ -60,8 +60,9 @@ impl PipeSecurity {
     }
     pub(super) fn current_user() -> io::Result<Self> {
         let sid_text = Self::current_user_sid()?;
-        // Protected DACL: no inherited Everyone/anonymous/admin grants.
-        let descriptor = crate::wide(format!("D:P(A;;GA;;;SY)(A;;GA;;;{sid_text})"));
+        // Protected DACL: no inherited Everyone/anonymous/admin grants. The medium label refuses reads as well as writes
+        // from a lower integrity level, so a sandboxed process of the same user cannot hold the only instance.
+        let descriptor = crate::wide(format!("D:P(A;;GA;;;SY)(A;;GA;;;{sid_text})S:(ML;;NWNR;;;ME)"));
         // SAFETY: NUL-terminated SDDL, with owned API output transferred on success.
         unsafe {
             let mut security = std::ptr::null_mut();
@@ -83,10 +84,10 @@ impl PipeSecurity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use windows_sys::Win32::Security::{Authorization::ConvertSecurityDescriptorToStringSecurityDescriptorW, DACL_SECURITY_INFORMATION};
+    use windows_sys::Win32::Security::{Authorization::ConvertSecurityDescriptorToStringSecurityDescriptorW, DACL_SECURITY_INFORMATION, LABEL_SECURITY_INFORMATION};
 
     #[test]
-    fn descriptor_grants_only_system_and_current_user_with_no_inheritance() {
+    fn descriptor_grants_only_system_and_current_user_at_medium_or_above_with_no_inheritance() {
         let security = PipeSecurity::current_user().unwrap();
         let attributes = security.attributes();
         assert_eq!(attributes.bInheritHandle, 0);
@@ -95,13 +96,19 @@ mod tests {
         // SAFETY: descriptor remains owned, correctly sized API outputs and allocation.
         unsafe {
             assert_ne!(
-                ConvertSecurityDescriptorToStringSecurityDescriptorW(attributes.lpSecurityDescriptor, SDDL_REVISION_1, DACL_SECURITY_INFORMATION, &mut text, &mut length),
+                ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                    attributes.lpSecurityDescriptor,
+                    SDDL_REVISION_1,
+                    DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION,
+                    &mut text,
+                    &mut length
+                ),
                 0
             );
             let _allocation = LocalAllocation(text.cast());
             let units = std::slice::from_raw_parts(text, length as usize);
             let sddl = String::from_utf16(&units[..units.iter().position(|&unit| unit == 0).unwrap()]).unwrap();
-            assert_eq!(sddl, format!("D:P(A;;GA;;;SY)(A;;GA;;;{})", PipeSecurity::current_user_sid().unwrap()));
+            assert_eq!(sddl, format!("D:P(A;;GA;;;SY)(A;;GA;;;{})S:(ML;;NWNR;;;ME)", PipeSecurity::current_user_sid().unwrap()));
         }
     }
 }
