@@ -11,8 +11,8 @@ use eg_trainer::screens::registry::{Area, Feature};
 use eg_trainer::screens::session::{FieldRequest, TrainerSession};
 use eg_trainer::screens::trainer_pages::{Effect, FieldRowView, Intent, PlaceView, REVEAL, RowKind, RowView, State, TrainerPages, ValueView, read_facts};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, VecModel, Weak};
-use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version, callbacks};
-use spiderland_slint::{Background, Listening, Rows, after, on_watch};
+use spiderland::{Host, Intents, Listening, Slice, Store, Subscriptions, Version, callbacks};
+use spiderland_slint::{Background, Rows, after, on_watch};
 use std::rc::Rc;
 use std::time::Duration;
 

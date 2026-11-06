@@ -14,8 +14,8 @@ use eg_trainer::screens::forge::editor::ForgeEditor;
 use eg_trainer::screens::forge::feature::{Effect, FocusTarget, Forge, Intent, State};
 use eg_trainer::screens::forge::game::{PREVIEW_DELAY, Request};
 use slint::{ComponentHandle, Timer, Weak};
-use spiderland::{Host, Intents, Store, Subscriptions};
-use spiderland_slint::{Background, Dropping, after, on_watch};
+use spiderland::{Dropping, Host, Intents, Store, Subscriptions};
+use spiderland_slint::{Background, after, on_watch};
 use std::collections::HashMap;
 use std::sync::Arc;
 
