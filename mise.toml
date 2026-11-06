@@ -87,22 +87,6 @@ run = ["cargo test -p eg-game-files --release -- --ignored --nocapture", "cargo 
 description = "The trainer packages' tests alone (part of test); no live game"
 run = ["cargo test --manifest-path libs/Cargo.toml -p il2cpp-runtime -p native-hooks --offline", "cargo test -p eg-trainer-wire -p eg-game-access -p eg-trainer -p eg-trainer-helper --offline"]
 
-[tasks."trainer:verify"]
-description = "verify, then build the isolated controller (outside the workspace, so nothing else compiles it); required for trainer changes"
-run = ["mise run verify", "mise run trainer:player:client:build"]
-
-[tasks."trainer:helper:build"]
-description = "Build and snapshot the Rust helper with source/DLL identities, for the fixture player; no process access. The desktop embeds its own"
-run = "pwsh -NoProfile -File tools/trainer-eval/persistent-player/Build-Helper.ps1"
-
-[tasks."trainer:player:client:build"]
-description = "Build the isolated authored Unity-player controller; no player launch"
-run = "cargo build --manifest-path tools/trainer-eval/persistent-player/client/Cargo.toml --release --offline"
-
 [tasks."trainer:unload"]
 description = "Plain native fixture: 100 unload/reloads with active callers, then a stuck callback; no Unity or game"
 run = ["cargo build -p eg-trainer-helper --release --features fixture --offline", "cargo test -p eg-trainer-helper --release --features fixture --test unload --offline -- --ignored --nocapture"]
-
-[tasks."trainer:player:lifecycle"]
-description = "Build and exercise owned Unity 6000.4.8f1 menu departure, zone travel and fresh external helper loads; no game"
-run = "pwsh -NoProfile -File tools/trainer-eval/persistent-player/Run-Lifecycle.ps1"
