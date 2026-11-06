@@ -4965,6 +4965,7 @@ dependencies = [
 [[package]]
 name = "spiderland"
 version = "0.1.0"
+source = "git+https://github.com/sengokudaikon/spiderland?rev=7d5daf7ac82cd8633351446a2b3da31e3db2c496#7d5daf7ac82cd8633351446a2b3da31e3db2c496"
 dependencies = [
  "tokio",
 ]
@@ -4972,6 +4973,7 @@ dependencies = [
 [[package]]
 name = "spiderland-phrases"
 version = "0.1.0"
+source = "git+https://github.com/sengokudaikon/spiderland?rev=7d5daf7ac82cd8633351446a2b3da31e3db2c496#7d5daf7ac82cd8633351446a2b3da31e3db2c496"
 dependencies = [
  "windows-sys 0.61.2",
 ]
@@ -4979,6 +4981,7 @@ dependencies = [
 [[package]]
 name = "spiderland-phrases-build"
 version = "0.1.0"
+source = "git+https://github.com/sengokudaikon/spiderland?rev=7d5daf7ac82cd8633351446a2b3da31e3db2c496#7d5daf7ac82cd8633351446a2b3da31e3db2c496"
 dependencies = [
  "rspolib",
 ]
@@ -4986,6 +4989,7 @@ dependencies = [
 [[package]]
 name = "spiderland-slint"
 version = "0.1.0"
+source = "git+https://github.com/sengokudaikon/spiderland?rev=7d5daf7ac82cd8633351446a2b3da31e3db2c496#7d5daf7ac82cd8633351446a2b3da31e3db2c496"
 dependencies = [
  "slint",
  "spiderland",

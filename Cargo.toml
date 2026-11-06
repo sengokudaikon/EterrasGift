@@ -1,5 +1,5 @@
 # The app. It builds on two workspaces of their own, which name neither the app nor the game: the libraries (`libs/`) and
-# the UI framework (`../spiderland`, a repository of its own).
+# the UI framework, spiderland, a repository of its own taken by revision (all four of its crates at the same one).
 [workspace]
 resolver = "3"
 members = ["crates/*"]
@@ -28,13 +28,13 @@ tokio = { version = "=1.53.3", features = ["rt", "net", "io-util", "time", "sync
 
 task-runtime = { path = "libs/task-runtime" }
 binary-reader = { path = "libs/binary-reader" }
-spiderland = { path = "../spiderland/spiderland", features = ["nightly"] }
-spiderland-slint = { path = "../spiderland/spiderland-slint" }
+spiderland = { git = "https://github.com/sengokudaikon/spiderland", rev = "7d5daf7ac82cd8633351446a2b3da31e3db2c496", features = ["nightly"] }
+spiderland-slint = { git = "https://github.com/sengokudaikon/spiderland", rev = "7d5daf7ac82cd8633351446a2b3da31e3db2c496" }
 il2cpp-runtime = { path = "libs/il2cpp-runtime" }
 native-hooks = { path = "libs/native-hooks" }
 eg-core = { path = "crates/core" }
-spiderland-phrases = { path = "../spiderland/spiderland-phrases" }
-spiderland-phrases-build = { path = "../spiderland/spiderland-phrases-build" }
+spiderland-phrases = { git = "https://github.com/sengokudaikon/spiderland", rev = "7d5daf7ac82cd8633351446a2b3da31e3db2c496" }
+spiderland-phrases-build = { git = "https://github.com/sengokudaikon/spiderland", rev = "7d5daf7ac82cd8633351446a2b3da31e3db2c496" }
 file-ops = { path = "libs/file-ops" }
 melon-loader = { path = "libs/melon-loader" }
 unity-files = { path = "libs/unity-files" }
