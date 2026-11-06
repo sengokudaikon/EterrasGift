@@ -7,11 +7,31 @@ use dotscope::metadata::tables::{
     AssemblyRaw, CustomAttributeRaw, ManifestResourceRaw, MemberRefRaw, MethodDefRaw, NestedClassRaw, RowReadable, TableId, TypeDefRaw, TypeRefRaw, TypeSpecRaw,
 };
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::Path;
 
+/// The most bytes a DLL read here may have. A mod is kilobytes to a few megabytes, and MelonLoader's generated assemblies
+/// tens of megabytes at most; a larger file is refused unread rather than parsed.
+pub(crate) const MAX_DLL_BYTES: u64 = 64 << 20;
+
+/// A DLL's bytes, refused when it is larger than [`MAX_DLL_BYTES`].
+pub(crate) fn read_dll(path: &Path) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    fs::File::open(path)?.take(MAX_DLL_BYTES + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_DLL_BYTES {
+        return Err(invalid(format!("{} is too large for a mod's DLL.", path.file_name().unwrap_or_default().to_string_lossy())));
+    }
+    Ok(bytes)
+}
+
+/// Runs a parse of a DLL someone else built. A panic in it is that DLL's problem: the caller reads it as a DLL that cannot
+/// be read, and the process goes on. The panic hook has still reported it. An abort, or running out of stack, can't be caught.
+pub(crate) fn contained<T>(parse: impl FnOnce() -> T) -> Option<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(parse)).ok()
+}
+
 pub(crate) fn read_view(path: &Path) -> io::Result<CilAssemblyView> {
-    let bytes = fs::read(path)?;
+    let bytes = read_dll(path)?;
     let view = CilAssemblyView::from_mem(bytes).map_err(|_| not_assembly(path))?;
     one_assembly(&view, path)?;
     Ok(view)
@@ -30,12 +50,22 @@ pub(crate) fn one_assembly(view: &CilAssemblyView, path: &Path) -> io::Result<()
 
 pub(crate) trait RawRows: RowReadable {
     fn read_rows(view: &CilAssemblyView) -> io::Result<Vec<Self>>;
+    fn read_row(view: &CilAssemblyView, rid: u32) -> io::Result<Option<Self>>;
+    fn count(view: &CilAssemblyView) -> io::Result<u32>;
 }
 macro_rules! raw_rows {
     ($($row:ty),+ $(,)?) => { $(impl RawRows for $row {
         fn read_rows(view: &CilAssemblyView) -> io::Result<Vec<Self>> {
             let tables = view.tables().ok_or_else(|| invalid("Missing metadata tables."))?;
             match tables.table::<Self>() { Some(table) => table.iter().map(|row| row.map_err(invalid)).collect(), None => Ok(Vec::new()) }
+        }
+        fn read_row(view: &CilAssemblyView, rid: u32) -> io::Result<Option<Self>> {
+            let tables = view.tables().ok_or_else(|| invalid("Missing metadata tables."))?;
+            match tables.table::<Self>() { Some(table) => table.get(rid).map_err(invalid), None => Ok(None) }
+        }
+        fn count(view: &CilAssemblyView) -> io::Result<u32> {
+            let tables = view.tables().ok_or_else(|| invalid("Missing metadata tables."))?;
+            Ok(tables.table::<Self>().map_or(0, |table| table.row_count))
         }
     })+ };
 }
@@ -52,6 +82,42 @@ raw_rows!(
 );
 pub(crate) fn rows<T: RawRows>(view: &CilAssemblyView) -> io::Result<Vec<T>> {
     T::read_rows(view)
+}
+
+/// Row `rid` of a table, read where it lies rather than by reading the table: a lookup per attribute or type stays
+/// constant however large the DLL's tables are. None when the table has no such row.
+pub(crate) fn row<T: RawRows>(view: &CilAssemblyView, rid: u32) -> io::Result<Option<T>> {
+    T::read_row(view, rid)
+}
+
+/// The row of `rows` (a whole table, as [`rows`] reads it) whose ID is `rid`.
+pub(crate) fn by_rid<T: HasRid>(rows: &[T], rid: u32) -> Option<&T> {
+    rows.get(rid.checked_sub(1)? as usize).filter(|row| row.rid() == rid)
+}
+
+/// A table row's own ID, which [`by_rid`] checks.
+pub(crate) trait HasRid {
+    fn rid(&self) -> u32;
+}
+macro_rules! has_rid {
+    ($($row:ty),+ $(,)?) => { $(impl HasRid for $row { fn rid(&self) -> u32 { self.rid } })+ };
+}
+has_rid!(TypeDefRaw);
+
+/// The TypeDef that owns method `rid`: the last whose method list starts at or before it. A binary search over rows read
+/// in place, since the lists are in order; a DLL whose lists are not finds some owner, whose attribute is then skipped.
+pub(crate) fn method_owner(view: &CilAssemblyView, rid: u32) -> io::Result<Option<TypeDefRaw>> {
+    let (mut low, mut high) = (1, TypeDefRaw::count(view)? + 1);
+    while low < high {
+        let middle = low + (high - low) / 2;
+        let ty = row::<TypeDefRaw>(view, middle)?.ok_or_else(|| invalid("Missing TypeDef."))?;
+        if ty.method_list <= rid {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+    if low == 1 { Ok(None) } else { row::<TypeDefRaw>(view, low - 1) }
 }
 
 pub(crate) fn string(view: &CilAssemblyView, index: u32) -> io::Result<String> {
@@ -183,17 +249,11 @@ pub(crate) fn type_token(coded: u32) -> io::Result<(TableId, u32)> {
 pub(crate) fn type_name(view: &CilAssemblyView, (table, rid): (TableId, u32)) -> io::Result<(String, String)> {
     let (space, name) = match table {
         TableId::TypeDef => {
-            let row = rows::<TypeDefRaw>(view)?
-                .into_iter()
-                .find(|row| row.rid == rid)
-                .ok_or_else(|| invalid("Missing TypeDef."))?;
+            let row = row::<TypeDefRaw>(view, rid)?.ok_or_else(|| invalid("Missing TypeDef."))?;
             (row.type_namespace, row.type_name)
         }
         TableId::TypeRef => {
-            let row = rows::<TypeRefRaw>(view)?
-                .into_iter()
-                .find(|row| row.rid == rid)
-                .ok_or_else(|| invalid("Missing TypeRef."))?;
+            let row = row::<TypeRefRaw>(view, rid)?.ok_or_else(|| invalid("Missing TypeRef."))?;
             (row.type_namespace, row.type_name)
         }
         _ => return Err(invalid("Unsupported attribute type.")),
@@ -204,21 +264,12 @@ pub(crate) fn type_name(view: &CilAssemblyView, (table, rid): (TableId, u32)) ->
 pub(crate) fn attribute(view: &CilAssemblyView, row: &CustomAttributeRaw) -> io::Result<(String, String, Vec<Argument>)> {
     let (parent, signature) = match row.constructor.tag {
         TableId::MemberRef => {
-            let method = rows::<MemberRefRaw>(view)?
-                .into_iter()
-                .find(|item| item.rid == row.constructor.row)
-                .ok_or_else(|| invalid("Missing MemberRef."))?;
+            let method = self::row::<MemberRefRaw>(view, row.constructor.row)?.ok_or_else(|| invalid("Missing MemberRef."))?;
             ((method.class.tag, method.class.row), method.signature)
         }
         TableId::MethodDef => {
-            let method = rows::<MethodDefRaw>(view)?
-                .into_iter()
-                .find(|item| item.rid == row.constructor.row)
-                .ok_or_else(|| invalid("Missing MethodDef."))?;
-            let owner = rows::<TypeDefRaw>(view)?
-                .into_iter()
-                .rfind(|item| item.method_list <= method.rid)
-                .ok_or_else(|| invalid("Missing method owner."))?;
+            let method = self::row::<MethodDefRaw>(view, row.constructor.row)?.ok_or_else(|| invalid("Missing MethodDef."))?;
+            let owner = method_owner(view, method.rid)?.ok_or_else(|| invalid("Missing method owner."))?;
             ((TableId::TypeDef, owner.rid), method.signature)
         }
         _ => return Err(invalid("Unsupported attribute constructor.")),

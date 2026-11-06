@@ -3,11 +3,12 @@
 MelonLoader's files, read and edited without running it or any mod. Names no app or game.
 
 - **`assembly`**: a DLL's MelonInfo and related attributes, its `#US` strings and one embedded resource, from CIL metadata
-  only. No DLL is loaded or executed. A DLL is someone else's bytes, so a panic in the parse is caught and read as a DLL
-  that can't be read. An abort, or running out of stack, can't be caught.
+  only. No DLL is loaded or executed. A DLL is someone else's bytes: one over 64 MiB is refused unread, rows are looked up
+  where they lie so the work grows with the attributes read rather than with the tables, and a panic in the parse is
+  caught and read as a DLL that can't be read. An abort, or running out of stack, can't be caught.
 - **`loader_state`**: the loader's version, whether it has prepared for a game build (the build's SHA-512 and Unity version
   against its `Config.cfg`, unless `Loader.cfg` forces regeneration), and the repair of its generated
-  `UnityEngine.CoreModule.dll`.
+  `UnityEngine.CoreModule.dll`, whose parses are bounded and contained the same way.
 - **`log`**: what Latest.log observed. An earlier build's failure is no evidence against a new DLL, and an incomplete load or
   failed Unity support leaves each mod's status unknown.
 - **`preferences`**: MelonPreferences.cfg. Edits replace only the original value's span, so comments, order, spacing, unknown

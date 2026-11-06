@@ -1,14 +1,13 @@
 //! What a mod's or MelonLoader's own DLL says about itself, inspected as metadata only. No DLL is loaded or executed, and
 //! a parse that panics on someone else's DLL stops there ([`contained`]).
 
-use crate::cil::{Argument, Cursor, attribute, blob, not_assembly, one_assembly, read_view, rows, string, type_name, type_token};
+use crate::cil::{Argument, Cursor, attribute, blob, by_rid, contained, not_assembly, one_assembly, read_dll, read_view, row, rows, string, type_name, type_token};
 use crate::invalid;
 use dotscope::CilAssemblyView;
 use dotscope::metadata::tables::{AssemblyRaw, CustomAttributeRaw, ManifestResourceRaw, NestedClassRaw, TableId, TypeDefRaw, TypeSpecRaw};
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
-use std::fs;
 use std::io;
 use std::path::Path;
 
@@ -188,12 +187,6 @@ impl MelonAssembly {
     }
 }
 
-/// Runs a parse of a DLL someone else built. A panic in it is that DLL's problem: the caller reads it as a DLL that cannot
-/// be read, and the process goes on. The panic hook has still reported it. An abort, or running out of stack, can't be caught.
-fn contained<T>(parse: impl FnOnce() -> T) -> Option<T> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(parse)).ok()
-}
-
 /// An embedded resource to ask a DLL for, and the most bytes it may hold.
 #[derive(Clone, Copy, Debug)]
 pub struct EmbeddedResource {
@@ -224,7 +217,7 @@ fn parse_facts(path: &Path, resource: EmbeddedResource) -> AssemblyFacts {
         resource: Ok(None),
         strings: BTreeSet::new(),
     };
-    let bytes = match fs::read(path) {
+    let bytes = match read_dll(path) {
         Ok(bytes) => bytes,
         Err(error) => return failed(error.kind(), error.to_string()),
     };
@@ -245,7 +238,7 @@ fn parse_facts(path: &Path, resource: EmbeddedResource) -> AssemblyFacts {
 
 /// Ownership evidence, not executable inspection: all #US strings, including those in methods not currently called.
 pub fn read_strings(path: &Path) -> BTreeSet<String> {
-    let Ok(bytes) = fs::read(path) else {
+    let Ok(bytes) = read_dll(path) else {
         return BTreeSet::new();
     };
     contained(|| {
@@ -265,7 +258,7 @@ fn user_strings(view: &CilAssemblyView) -> BTreeSet<String> {
 
 /// Only embedded resources count. Linked resources are never followed. What the bytes mean is the caller's to check.
 pub fn read_resource(path: &Path, resource: EmbeddedResource) -> io::Result<Option<Vec<u8>>> {
-    let bytes = fs::read(path)?;
+    let bytes = read_dll(path)?;
     contained(|| {
         let view = CilAssemblyView::from_mem(bytes).map_err(invalid)?;
         embedded(&view, resource)
@@ -409,7 +402,7 @@ fn kind_of(view: &CilAssemblyView, serialized: &str) -> io::Result<MelonKind> {
         return Ok(MelonKind::Unresolved);
     };
     for _ in 0..32 {
-        let Some(ty) = types.iter().find(|ty| ty.rid == current) else {
+        let Some(ty) = by_rid(&types, current) else {
             return Ok(MelonKind::Unresolved);
         };
         if ty.extends.is_null() {
@@ -417,7 +410,7 @@ fn kind_of(view: &CilAssemblyView, serialized: &str) -> io::Result<MelonKind> {
         }
         let mut base = (ty.extends.tag, ty.extends.row);
         if base.0 == TableId::TypeSpec {
-            let Some(spec) = rows::<TypeSpecRaw>(view)?.into_iter().find(|row| row.rid == base.1) else {
+            let Some(spec) = row::<TypeSpecRaw>(view, base.1)? else {
                 return Ok(MelonKind::Unresolved);
             };
             let mut bytes = Cursor(blob(view, spec.signature)?);
@@ -446,7 +439,7 @@ fn full_name(view: &CilAssemblyView, types: &[TypeDefRaw], parents: &HashMap<u32
     if depth >= 64 {
         return Err(invalid("Cyclic or overly deep nested types."));
     }
-    let ty = types.iter().find(|ty| ty.rid == rid).ok_or_else(|| invalid("Missing enclosing type."))?;
+    let ty = by_rid(types, rid).ok_or_else(|| invalid("Missing enclosing type."))?;
     let name = string(view, ty.type_name)?;
     if let Some(parent) = parents.get(&rid) {
         return Ok(format!("{}+{name}", full_name(view, types, parents, *parent, depth + 1)?));
@@ -480,11 +473,23 @@ fn parse_loader_version(path: &Path) -> io::Result<LoaderVersion> {
 
 #[cfg(test)]
 mod tests {
-    use super::contained;
+    use super::*;
+    use crate::cil::MAX_DLL_BYTES;
 
     #[test]
     fn a_panic_in_a_parse_stops_at_the_parse() {
         assert_eq!(contained(|| 7), Some(7));
         assert_eq!(contained(|| -> i32 { panic!("fixture panic") }), None);
+    }
+
+    #[test]
+    fn a_dll_larger_than_any_mod_is_refused_unread() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("Huge.dll");
+        std::fs::File::create(&path).unwrap().set_len(MAX_DLL_BYTES + 1).unwrap();
+        assert_eq!(read_dll(&path).unwrap_err().kind(), io::ErrorKind::InvalidData);
+        assert_eq!(MelonAssembly::read(&path).unwrap_err().kind(), io::ErrorKind::InvalidData);
+        assert!(read_facts(&path, EmbeddedResource { name: "x", max_length: 1 }).melon.is_err());
+        assert!(read_strings(&path).is_empty());
     }
 }

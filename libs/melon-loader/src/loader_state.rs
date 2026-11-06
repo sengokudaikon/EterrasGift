@@ -2,7 +2,7 @@
 //! These routines operate on files only, and callers run repair only while the game is stopped.
 
 use crate::assembly::{LoaderVersion, loader_version};
-use crate::cil::{read_view, rows};
+use crate::cil::{by_rid, contained, not_assembly, read_dll, read_view, rows};
 use crate::invalid;
 use crate::paths as melon_paths;
 use dotscope::CilAssemblyView;
@@ -137,19 +137,25 @@ pub fn needs_repair(root: &Path) -> bool {
 }
 
 fn core_module_unsorted(path: &Path) -> bool {
-    let Ok(view) = read_view(path) else {
-        return false;
-    };
-    let Ok(nested) = rows::<NestedClassRaw>(&view) else {
-        return false;
-    };
-    !nested.windows(2).all(|pair| pair[0].nested_class < pair[1].nested_class) || duplicates(&view, &nested).is_ok_and(|names| !names.is_empty())
+    contained(|| {
+        let Ok(view) = read_view(path) else {
+            return false;
+        };
+        let Ok(nested) = rows::<NestedClassRaw>(&view) else {
+            return false;
+        };
+        !nested.windows(2).all(|pair| pair[0].nested_class < pair[1].nested_class) || duplicates(&view, &nested).is_ok_and(|names| !names.is_empty())
+    })
+    .unwrap_or(false)
 }
 
 /// Groups types using the loader's sorted-table lookup, so unsorted parent mappings expose the same false duplicates.
 pub fn loader_duplicates(path: &Path) -> io::Result<Vec<String>> {
-    let view = read_view(path)?;
-    duplicates(&view, &rows::<NestedClassRaw>(&view)?)
+    contained(|| {
+        let view = read_view(path)?;
+        duplicates(&view, &rows::<NestedClassRaw>(&view)?)
+    })
+    .unwrap_or_else(|| Err(not_assembly(path)))
 }
 
 fn duplicates(view: &CilAssemblyView, nested: &[NestedClassRaw]) -> io::Result<Vec<String>> {
@@ -160,7 +166,7 @@ fn duplicates(view: &CilAssemblyView, nested: &[NestedClassRaw]) -> io::Result<V
         let name = strings.get(ty.type_name as usize).map_err(invalid)?;
         let key = if let Ok(index) = nested.binary_search_by_key(&ty.rid, |row| row.nested_class) {
             let parent = nested[index].enclosing_class;
-            let declaring = types.iter().find(|ty| ty.rid == parent).ok_or_else(|| invalid("Missing enclosing type."))?;
+            let declaring = by_rid(&types, parent).ok_or_else(|| invalid("Missing enclosing type."))?;
             format!("{}#{parent}/{name}", strings.get(declaring.type_name as usize).map_err(invalid)?)
         } else {
             format!("{}.{name}", strings.get(ty.type_namespace as usize).map_err(invalid)?)
@@ -175,22 +181,26 @@ fn duplicates(view: &CilAssemblyView, nested: &[NestedClassRaw]) -> io::Result<V
 /// A clean assembly is left byte-for-byte unchanged, including an earlier backup.
 pub fn repair_core_module(root: &Path) -> io::Result<usize> {
     let path = core_module_path(root);
-    let original = fs::read(&path)?;
-    let view = CilAssemblyView::from_mem(original.clone()).map_err(invalid)?;
-    let (repaired, renamed) = repaired_bytes(view)?;
+    let original = read_dll(&path)?;
+    let (repaired, renamed) =
+        contained(|| repaired_bytes(CilAssemblyView::from_mem(original.clone()).map_err(invalid)?)).unwrap_or_else(|| Err(not_assembly(&path)))?;
     let Some(repaired) = repaired else {
         return Ok(0);
     };
     atomic::replace(&path, |temporary| {
         fs::write(temporary, &repaired)?;
         // Validate the bytes actually written, before preserving the original and replacing it.
-        let check = read_view(temporary)?;
-        let nested = rows::<NestedClassRaw>(&check)?;
-        validate_nesting(&rows::<TypeDefRaw>(&check)?, &nested)?;
-        if !nested.windows(2).all(|pair| pair[0].nested_class < pair[1].nested_class) || !duplicates(&check, &nested)?.is_empty() {
-            return Err(invalid("UnityEngine.CoreModule.dll still has duplicate types after a repair, so it was left as it was."));
-        }
-        if fs::read(&path)? != original {
+        contained(|| {
+            let check = read_view(temporary)?;
+            let nested = rows::<NestedClassRaw>(&check)?;
+            validate_nesting(&rows::<TypeDefRaw>(&check)?, &nested)?;
+            if !nested.windows(2).all(|pair| pair[0].nested_class < pair[1].nested_class) || !duplicates(&check, &nested)?.is_empty() {
+                return Err(invalid("UnityEngine.CoreModule.dll still has duplicate types after a repair, so it was left as it was."));
+            }
+            Ok(())
+        })
+        .unwrap_or_else(|| Err(not_assembly(temporary)))?;
+        if read_dll(&path)? != original {
             return Err(io::Error::other("UnityEngine.CoreModule.dll changed during its repair; it was left as it was."));
         }
         atomic::write(&path.with_extension("dll.bak"), &original)
