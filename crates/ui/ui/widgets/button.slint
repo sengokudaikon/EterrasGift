@@ -12,10 +12,10 @@ export component Button inherits Rectangle {
     in property <ButtonKind> kind: ButtonKind.standard;
     in property <bool> enabled: true;
     // Icon-only buttons need a tip (and an accessible label); it names what the button does. A disabled button takes no
-    // focus, but a waiting one keeps its tip for the pointer, saying why (DESIGN.md, Buttons › Focus); the page says the
+    // focus, but a waiting one keeps its tip for the pointer, saying why; the page says the
     // reason too, except on Home's Play buttons.
     in property <string> tip;
-    // Where the pointer's tip opens. A keyboard tip opens below unless told otherwise, as `KeyboardToolTips` places it.
+    // Where the pointer's tip opens. A keyboard tip opens below unless told otherwise.
     in property <TipPlacement> tip-placement: TipPlacement.below;
     in property <TipPlacement> keyboard-tip-placement: TipPlacement.below;
     // Inside a flyout's popup, which shows its tip (`Tip.in-flyout`).

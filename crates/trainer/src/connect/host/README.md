@@ -51,8 +51,7 @@ for native departure evidence. These shutdown/read-only checks remain permitted
 after offline admission is lost. A lost ACK is never replayed. A proven self-unload
 is reported as departed, allowing the next offline character to prepare a fresh helper.
 
-Run `mise run trainer:verify` for the trainer product suite followed by workspace
-lint, formatting, token checks and fake-host captures. The persistent-player
-controller's lifecycle run (`mise run trainer:player:lifecycle`) exercises the owned
-NativePreparer route in an authored Unity player. No test selects a running Last Epoch process. The pre-refactor source and tests remain at
-Git tag `archive/trainer-evaluations-2026-10-19`; the [helper's README](../../../../trainer-helper/README.md) records the current assumptions.
+Run `mise run verify` for workspace lint, formatting, token checks, the trainer
+product suite and fake-host captures. The owned NativePreparer route was exercised
+in an authored Unity player. No test selects a running Last Epoch process. The
+[helper's README](../../../../trainer-helper/README.md) records the current assumptions.

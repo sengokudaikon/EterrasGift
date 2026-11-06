@@ -23,7 +23,7 @@ Last Epoch's data, read from the files it ships, with no game process. `mise run
 | (set bonuses) | `resources.assets`, `SetBonusesList` | **stripped** | 25 entries |
 | `LocalizationSettings` + `Localization.Items` names | `StreamingAssets/aa/StandaloneWindows64/localization-string-tables-<language>_assets_all.bundle` + `localization-assets-shared_assets_all.bundle` (keys) | in the bundles | 23 tables per language, e.g. `Item_Affixes` (`Item_Affix_25_DisplayName` = "Health", `_Title` = "of Life"), `Item_Names` (`Item_BaseType_Name_0` = "Helmet"), `Properties`, `Descriptors`, `Ailments`, `Skills` |
 
-Other masters in `PermaLoad` (not read today): `MasterColorList` (the game colours AGENTS.md requires),
+Other masters in `PermaLoad` (not read today): `MasterColorList` (the game's own colours),
 `MasterItemTooltipAssetList`, `MasterGearSpriteList`, `AilmentList`, `Character Class List`, `FactionList`, `ShrineList`…
 `resources.assets` also has `AbilityPropertyList`, `PlayerPropertyList`, `GlyphOfInsightReplacementAffixList`,
 `ShardDropTable`. A `Localization` text asset there is the platform SDK's UI strings (`Gpp`), not game text.
@@ -66,7 +66,7 @@ installed build: 42 bases, 1,156 affixes and 489 uniques, every numeric presenta
   found game) and publishes `GameFiles` in its snapshot. On connect, and when the game's language changes, a session
   whose hashes match uses it. Another build or an unreadable folder: nothing is loaded into that game, as its data
   cannot describe it.
-- **Settings** says "Reading game files", then "Game files · 1156 affixes" before a session (`PORT.md`).
+- **Settings** says "Reading game files", then "Game files · 1156 affixes" before a session.
 - `AilmentList` lists Ignite three times; repeats are accepted while their effect agrees, refused if they ever differ.
 - **A Steam update while the app runs** (`ff0352a`): the catalog keeps the size and write time of every file it
   read; at connect, if any changed, the backend reads the files again before comparing hashes.

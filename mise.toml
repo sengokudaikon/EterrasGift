@@ -1,4 +1,4 @@
-# Project tasks: `mise tasks` lists them, `mise run <task>` runs one. Prefer these over ad-hoc scripts (AGENTS.md).
+# Project tasks: `mise tasks` lists them, `mise run <task>` runs one. Prefer these over ad-hoc scripts.
 # Rust nightly is selected by rust-toolchain.toml; slint-viewer and slint-lsp 1.18.1 are on PATH.
 
 [tasks.build]

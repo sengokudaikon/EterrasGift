@@ -217,7 +217,7 @@ pub struct PlaceView {
     pub ends: bool,
 }
 
-/// The split of the rows into columns (`RowColumnsPanel`): the view says how many fit and how tall each row is; the split
+/// The split of the rows into columns: the view says how many fit and how tall each row is; the split
 /// waits for every height and is made once per batch of reports, after the view has settled. The rows are placed at once
 /// on every report, so a row that grows pushes the ones under it down in the same frame.
 ///

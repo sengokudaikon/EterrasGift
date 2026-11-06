@@ -50,7 +50,7 @@ pub(super) fn project_catalog(data: &GameCatalog) -> Catalog {
                     corrupted: base.is_corrupted,
                     class_requirement: base.class_requirement,
                     affix_effect_modifier: base.affix_effect_modifier,
-                    // C# `ForgeChoices.BaseOptions` lists each implicit with `ImplicitLine`; an undescribed list is none.
+                    // Each implicit is listed as its line (`implicit_line`); an undescribed list is none.
                     implicits: match &base.implicits {
                         Availability::Available(implicits) => implicits
                             .iter()
@@ -141,8 +141,7 @@ pub(super) fn project_catalog(data: &GameCatalog) -> Catalog {
                     Availability::Unavailable { .. } => 0,
                 },
             });
-            // Each tier's range from the game data, as the C# app formatted it (TierRanges): a tier with a property it
-            // cannot format shows none.
+            // Each tier's range from the game data: a tier with a property it cannot format shows none.
             if let Availability::Available(tiers) = &definition.numeric {
                 for (index, tier) in tiers.iter().enumerate() {
                     let columns: Vec<Option<item::TierProperty>> = tier

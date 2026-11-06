@@ -553,7 +553,7 @@ impl RuntimeAccess {
         }
     }
 
-    /// Checks every change against the game's own word on the item, as the C# app did, and returns the live roll array
+    /// Checks every change against the game's own word on the item, and returns the live roll array
     /// (rooted) with its length. A unique roll must be read by an editable line of the game's unique tooltip; an implicit
     /// roll must belong to an implicit whose range is more than one value.
     // Internal caller supplies edit_forge's full live-runtime/exclusive-write contract.

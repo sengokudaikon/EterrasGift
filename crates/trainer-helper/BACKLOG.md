@@ -2,15 +2,15 @@
 
 The backlog of trainer features not built yet, and what each needs. A feature leaves this file when it lands: its
 row is deleted, never marked done. What landed, in brief, is in [CHANGELOG.md](../../CHANGELOG.md); how a built feature
-works is in its module's `//!` docs under `crates/trainer-helper/src/game/features/`. The C# implementation in
-`../EterrasGift` is the behaviour reference; the helper's runtime assumptions are in [its README](README.md).
+works is in its module's `//!` docs under `crates/trainer-helper/src/game/features/`. The helper's runtime
+assumptions are in [its README](README.md).
 
 **Confirmed in the live game:** Mysterious Rifts selection and Any item in the offhand (the user, 2026-10-27). Other
 built hooks are covered by fixtures and static inspection only. Record a new live check here, with the exact
 combinations checked.
 
 **Names (2026-10-29):** each feature has one name. The ID uses its title's words, and the wire variant, helper group
-and module are spelled from the ID. The C# IDs (`cast-speed`, `offhand`, …) are read through `RENAMED` in
+and module are spelled from the ID. Older IDs (`cast-speed`, `offhand`, …) are read through `RENAMED` in
 [profiles](../trainer/src/features/profiles.rs) and never written back. Game nouns follow the game's own text
 (Skill Specialization Slots, Favor Cache, Omen Window). `endgame-cache` is the zone cache the old cheat table called
 "Eternity cache"; the game's Eternity Cache is only the Temporal Sanctum's (`eternity-cache-anywhere`).
@@ -40,15 +40,11 @@ by [the catalog](../trainer/src/features/registry.rs); native support is declare
 
 ### Character
 
-Behavior reference: [character.h](../../../EterrasGift/native/hooks/character.h).
-
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
 | Todo | `specialization-slots` — `PlayerFinder.getPlayerActor` | Call original, raise the returned actor's `localTreeData.numberOfUnlockedSlots` to at least five. On disabling, recount through `LocalTreeData.updateUnlockedSlots` on the main thread when a character still exists. Avoid the folded byte getter. | Detour lifecycle; object descriptors. Keep recount and its timing feature-specific. | A level/load recount is raised again; off restores the natural count; missing character needs no stale-object write. |
 
 ### Combat
-
-Behavior reference: [combat.h](../../../EterrasGift/native/hooks/combat.h).
 
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
@@ -59,22 +55,18 @@ Behavior reference: [combat.h](../../../EterrasGift/native/hooks/combat.h).
 
 ### Monolith
 
-Behavior reference: [monolith.h](../../../EterrasGift/native/hooks/monolith.h).
-
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
 | Todo | `cycle-echo-types` — `getIslandTypeForNewIsland`, `CalculateModAndZoneForIsland`, `CanHaveSubsequentConnectionsRevealed`, `OnIslandCompleted` table | Cycle the seven original type values; pass tier at least 19 for the related generation calls using per-thread web/tier context; permit subsequent connections; redirect normal/arena completion table entries to Super Beacon. Share type target with echo-type. Restore the table on off. | Shared/multiple target ownership, scoped context, atomic cycle index and checked data patching. Keep the cycle and table decoding specific. | Sequence/wrap, unrelated web, explicit-type precedence, normal/arena reveal behavior, table restoration and partial installation failure. |
 
 ### Factions
 
-Behavior reference: [factions.h](../../../EterrasGift/native/hooks/factions.h).
-
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
 | Todo | `prophecy-max-lp` — `ProphecySlotReward.SpawnRewardForPlayer` | Temporarily raise generic reward minimum LP to at least four, call original, restore the previous asset value even on native unwind. Share handler with reward multiplier; prove the eight-byte Nullable lens ABI. | Shared target; reuse retained native unwind cleanup with feature-specific asset records. | Shared asset remains pristine after normal/throwing calls; existing LP above four preserved; absent generic item. |
 | Todo | `prophecy-reward-multiplier` — same `SpawnRewardForPlayer` | Temporarily scale `itemsDropped`, rounded and clamped to 0..1000, then restore. Preserve downstream lucky-lens doubling and composition with max LP. Shared reward assets must not retain repeated multiplication. | Same target and restoration record as max LP; settings. | Repeated calls do not compound; both features together; nested/concurrent calls require an explicit target-threading contract. |
 
-The Forge item editor follows its own planner/private-preview path; its remaining work is in [PORT.md](../../PORT.md).
+The Forge item editor follows its own planner/private-preview path and is not listed here.
 
 ## Remaining work by reusable family
 

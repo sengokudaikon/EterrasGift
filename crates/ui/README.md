@@ -1,13 +1,11 @@
 # eg-ui
 
-The app's view: hosts over the pages' features, and the Slint files they show. Slint is pinned to `=1.18.1`; its licence is
-Royalty-free 2.0, which needs attribution (the `AboutSlint` widget in an About box, or "Made with Slint" on the download page).
+The app's view: hosts over the pages' features, and the Slint files they show. Slint is pinned to `=1.18.1` and used under
+the GPLv3, as the app is; Settings' About section says "Made with Slint" and names the bundled fonts' and icons' licences.
 
 ## Words
 
-How the app's words read. The C# app's wording is not ported verbatim; this wins.
-
-How the app's words read. The C# app's wording is not ported verbatim; this wins.
+How the app's words read.
 
 - **Labels** (buttons, headers, columns, toggles, field names) are short names in sentence case, no trailing period.
   "Add mod", not "Add a mod from its DLL".
@@ -81,9 +79,9 @@ Each of these was hit and worked around in `crates/ui/ui`.
 - **Painting the ground colour over the ground isn't a no-op in the software renderer.** A ground-to-transparent gradient
   over the ground came out one level darker (13 against 14), which left faint boxes on the screen. Fade the image
   itself instead.
-- **`line-height-factor` (1.18) does not shrink a single-line `Text`'s box.** Setting Cinzel 28px to DESIGN's 34px line
+- **`line-height-factor` (1.18) does not shrink a single-line `Text`'s box.** Setting Cinzel 28px to a 34px line
   (factor = 34 / (ascent − descent), measured on a hidden probe) moved the glyphs up 2px but left the preferred height
-  as it was, so titles still sit about 4px taller than Avalonia's. Reading `font-metrics` on the same `Text` that sets
+  as it was, so titles still sit about 4px taller than a 34px line. Reading `font-metrics` on the same `Text` that sets
   its `line-height-factor` panics with "Recursion detected". Left as is.
 - **A `PopupWindow` as a child of a component instance without `@children` panics the 1.18.1 Rust generator.** Wrap it
   in a plain `Rectangle` (`pages/forge/`).
@@ -95,7 +93,7 @@ Each of these was hit and worked around in `crates/ui/ui`.
   them; an elliptical gradient is an SVG instead (`ui/gradients/`).
 - **Slint surfaces no window activation**, so the Windows settings it can't read itself ("Animation effects", high
   contrast) are polled every 2 s (`eg_ui::follow_system_settings`, started by the app and not by captures).
-- **`slint-viewer` can't run headless with MCP, even though the vendored skill says it can.** `SLINT_BACKEND=headless`
+- **`slint-viewer` can't run headless with MCP.** `SLINT_BACKEND=headless`
   fails with "headless backend requested but it is not available".
   - This holds for the prebuilt binary and for `cargo install --features mcp`.
   - The viewer always picks its backend through `BackendSelector::select()`. `BackendSelector` has no `headless`
@@ -107,7 +105,7 @@ Each of these was hit and worked around in `crates/ui/ui`.
   on the command line, never in `Cargo.toml`. It builds into `target/mcp` so the normal cache survives.
   - `get_element_tree` takes an `elementHandle` (the window's `rootElementHandle`), not the `windowHandle`.
 - **The standard ScrollView's thumb is nearly invisible on this ground**, so `widgets/scroll-view.slint` replaces it
-  with the C# app's Fluent scroll bar (Flickable plus a drawn bar). A component named `ListView` that has `content-y`,
+  with a Fluent-style scroll bar (Flickable plus a drawn bar). A component named `ListView` that has `content-y`,
   `content-height`, `content-width`, `visible-height` and `visible-width` lengths keeps the compiler's virtualised rows
   (`object_tree.rs` checks the name and those properties), so the picker's `ListView` inherits the new `ScrollView`.
 - **These worked first time:**

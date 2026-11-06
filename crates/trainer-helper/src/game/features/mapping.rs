@@ -272,7 +272,7 @@ impl RuntimeAccess {
             })
         }
     }
-    /// What one unique or implicit roll shows on `item`, as the C# app read it (`numericEffects`). A unique roll: every
+    /// What one unique or implicit roll shows on `item`. A unique roll: every
     /// line (or only `address.line`) that reads it; a preformatted line through its roll-range replacements, a plain line
     /// through its modifier. An implicit roll: its line.
     unsafe fn modifier_effects<'a, 'r>(
@@ -360,7 +360,7 @@ impl RuntimeAccess {
         }
     }
     /// Stores roll positions in the detached copy's unique or implicit roll array, never the live item's. An implicit's
-    /// values are then rebuilt from its rolls, as the C# app did (`UpdateItemImplicitData`, else `AfterIDChange`).
+    /// values are then rebuilt from its rolls by the game's `UpdateItemImplicitData`, else `AfterIDChange`.
     unsafe fn modifier_store_rolls(
         &self,
         attached: &AttachedThread<'_>,

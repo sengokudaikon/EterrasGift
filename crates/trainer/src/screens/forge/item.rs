@@ -303,7 +303,7 @@ pub struct ForgeItem {
 }
 
 impl ForgeItem {
-    /// Original ForgeSnapshotComparer.StateEquals: optional tooltip text/ranges
+    /// Whether two observations hold the same item state. Optional tooltip text/ranges
     /// and formatting availability are presentation, never a stale-write or Undo key.
     pub fn same_state(&self, other: &Self) -> bool {
         fn identity(value: &Option<UniqueState>) -> Option<(u16, &[u8])> {

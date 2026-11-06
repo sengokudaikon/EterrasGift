@@ -1,5 +1,5 @@
-// The C# suite's stand-in mods (tests/EterrasGift.Companion.Testing/ModFixtures.cs and CompanionPageTests' CompilingRunner),
-// one per -p:Sample. A mod's category is a string literal, as MelonLoader mods create theirs.
+// The stand-in mods for the Mods captures, one per -p:Sample. A mod's category is a string literal, as MelonLoader mods
+// create theirs.
 using MelonLoader;
 #if FLICKER_DREAMS
 [assembly: MelonInfo(typeof(Sample.Entry), "Flicker Dreams", "0.12.1", "sengokudaikon")]

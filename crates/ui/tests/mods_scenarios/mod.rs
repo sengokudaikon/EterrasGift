@@ -495,7 +495,7 @@ fn mods_input(session: &Session) {
     wait_for("the close to finish", || !ui.window().is_visible());
 }
 
-/// The Mods page on a sample library, under the C# captures' names so the two can be laid side by side: Flicker Dreams
+/// The Mods page on a sample library: Flicker Dreams
 /// and Ability Ranges loaded in the last game with mods, Stash Sorter did not, and Ward Meter is off. The stand-in DLLs are
 /// metadata only (`fixtures/sample-mods`).
 pub(super) fn mods_captures(session: &Session) {
@@ -577,7 +577,7 @@ pub(super) fn mods_captures(session: &Session) {
         file
     }
 
-    // A game folder as `ModFixtures.GameFolder` leaves it: MelonLoader 0.7.3 prepared for the game build, the four mods
+    // A game folder as earlier games with mods leave it: MelonLoader 0.7.3 prepared for the game build, the four mods
     // adopted by a first game with mods, Ward Meter turned off before the last one, and that game's MelonPreferences.cfg
     // and Latest.log. `sources` is the mod sources folder Settings names, if any.
     let game_folder = |sources: Option<(&Path, Arc<SampleRunner>)>| -> ModsFixture {

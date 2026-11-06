@@ -69,8 +69,8 @@ export component MainWindow inherits Window {
 
     // Focus visuals show once a navigation key is pressed; widgets hide them again on a pointer press. In a text box the
     // arrows, Home, End and the page keys move the caret, not focus, so they leave the visuals as they are: a click into a
-    // box and then Left shows no ring and no tip (as `KeyboardToolTips` opens a tip only when focus arrives by Tab or
-    // direction).
+    // box and then Left shows no ring and no tip (a keyboard tip opens only when focus arrives by Tab or a direction
+    // key).
     FocusScope {
         focus-on-click: false;
         focus-on-tab-navigation: false;

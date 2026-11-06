@@ -1,7 +1,7 @@
 //! Scale the original hunt's changes: a newly assigned starting length, positive elapsed time while still hunting,
 //! and positive time added by a kill. Never revive an ended hunt or rescale an unchanged secondary hunt. The game
 //! retains its config, escalation curve, kill popup and bar-sync timing; adjustments become visible on its next
-//! update. Off keeps elapsed progress. Original exceptions propagate without retry or post-call writes, as in C#.
+//! update. Off keeps elapsed progress. Original exceptions propagate without retry or post-call writes.
 //!
 //! Three targets share one lifecycle and the same three-float settings. Each call keeps its receiver and prior time
 //! in its own gateway home words. The game retains and serializes that receiver through the original; no helper

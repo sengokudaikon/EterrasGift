@@ -131,7 +131,7 @@ unchanged and there is no retained scope to clean up on exceptions.
 
 Prophecy uses snapshots the slot's completed charges in invocation-local home words and restores only a decrease
 after a successful normal return. The original Boolean and actual chargesConsumed output remain unchanged; original
-exceptions skip restoration, matching the C# trainer. Skip quest echoes raises the run before SetRunInfo, validating
+exceptions skip restoration. Skip quest echoes raises the run before SetRunInfo, validating
 its difficulty against both the list count and backing array length. Progress and stability already above the floor
 stay intact, and disabling does not rewind the saved run. Both use the existing entry/settings/readback lifecycle.
 
@@ -194,10 +194,9 @@ The build ID is the SHA-256 of the helper's DLL. The desktop hashes the exact by
 ID to the helper in the bootstrap block, and the helper reports it back in discovery. A helper left in a game
 by another build reports another ID. This is compatibility/provenance, not authentication.
 
-Validation uses real local pipes with authored child processes plus the disposable Unity 6000.4.8
-IL2CPP player in [persistent-player](../../tools/trainer-eval/persistent-player/README.md). All artifacts,
-logs and phase observations stay separate from the installed game. The desktop uses this helper through the serialized trainer service. Historical
-checkpoints are archived.
+Validation uses real local pipes with authored child processes plus a disposable, authored Unity 6000.4.8
+IL2CPP player. All artifacts, logs and phase observations stay separate from the installed game. The desktop
+uses this helper through the serialized trainer service.
 
 The game-side watchdog polls every 250 ms on the verified dispatcher. It caches the online
 field, app-state getter and enum metadata. Login/CharacterSelect or online state stop the
@@ -208,7 +207,7 @@ The enum values come from literal metadata, never fixed numeric guesses.
 A missing offline character during InGame returns typed CharacterLoading. The session clears
 old manager/editor authority, retains the connection and binary lease, and resumes from a fresh
 read without reloading. This response never authorizes a store or an automatic write retry.
-`mise run trainer:player:lifecycle` checks six fresh external loads, menu/login/online/unknown
+The lifecycle check against the authored IL2CPP player covers six fresh external loads, menu/login/online/unknown
 state departure, explicit Disconnect, and four seconds of InGame character absence.
 
 ## The supported game's graph
@@ -229,7 +228,7 @@ inventory has 68 feature registrations over 74 owners: 54 detour targets, 31 byt
 7 field sets. Gameplay detours follow the caller's thread, not a universal main-thread rule.
 Offline transitions and owner loss must turn effects off and report actual removal failures.
 
-The detour trial and product checks (`hook-eval/detour-trial.md`, archived 2026-10-28 in `../EterrasGiftRS-archive/2026-10-28-trainer-eval/`) include
+The detour trial and product checks include
 the authored Unity ExecuteTasks route: a throwing task with one Rust cleanup, subsequent task
 progress, injected second-target failure with dispatcher recovery, owner-exit restoration and
 reinstallation by a new owner. No actual-game execution or gameplay-specific ABI proof is claimed.
@@ -245,16 +244,16 @@ Owned rooted reads replace tear-prone remote object walking. Existing field read
 until a replacement getter passes equivalent readiness/refusal tests. In particular, the old
 locale getter can wait for initialization: the current reader inspects only a completed selected
 locale operation, then calls the audited identifier/code/version getters. Its identifier has
-two references, a 16-byte payload and 8-byte alignment. Empty cached item names are also accepted
-by the original C# reader; they are not evidence that field walking is inherently wrong.
+two references, a 16-byte payload and 8-byte alignment. Empty cached item names were also accepted
+by the earlier trainer's reader; they are not evidence that field walking is inherently wrong.
 
-The unused numeric formatter and its probes are archived at `%USERPROFILE%/Developer/EterrasGiftRS-archive/2026-10-20-trainer-evaluations/unused-formatters`. Virtual dispatch must use the exact
+An unused numeric formatter and its probes were removed; these findings came from them. Virtual dispatch must use the exact
 resolved override; culture and provider affect text. Raw numeric quantities do not always have
 the same scale as display text. None of those mechanisms provides a producer, description,
 preview or roll-mapping operation by itself. Implicit descriptions now use the game tooltip
 builder directly and resolve virtual text/range methods; they do not use the staged numeric
 field adapter or infer display values from numeric fields. The unused in-game display parser/provider/context
-modules were removed. Host parsing now follows the captured locale as the original app did: explicitly named Windows
+modules were removed. Host parsing now follows the captured locale: explicitly named Windows
 numeric symbols without user overrides, finite Float/AllowThousands-style display parsing and
 exact unit removal. Standard CultureInfo for the captured language is the supported assumption;
 custom game NumberFormatInfo remains unsupported. en-US/de-DE/fr-FR authored comparisons cover
@@ -318,8 +317,8 @@ native work or authorizes replay.
 
 ## Added affix definitions
 
-`AffixList` keeps no ID index: `GetAffix` scans `singleAffixes`, then `multiAffixes`, and returns null on a miss. Loom
-(`../EterrasGift/mods/loom/src/Game/HeraldVariants.cs`) has appended `SingleAffix` entries this way and cleared `allAffixes`,
+`AffixList` keeps no ID index: `GetAffix` scans `singleAffixes`, then `multiAffixes`, and returns null on a miss. The
+Loom mod has appended `SingleAffix` entries this way and cleared `allAffixes`,
 which rebuilds lazily. Unlike Loom, the helper arrives after a character's items have loaded, which has these consequences,
 read from the 2026-10-21 build's disassembly and not yet seen live:
 

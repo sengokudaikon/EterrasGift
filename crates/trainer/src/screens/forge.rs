@@ -1,4 +1,4 @@
-//! The Item Forge, the Forge page's Item section (DESIGN.md "Item Forge"), without a window.
+//! The Item Forge, the Forge page's Item section, without a window.
 //!
 //! `editor` holds the rows and their drafts, the ledger, Apply and Undo; `rows` the rows themselves; `item` the game rules it
 //! applies before writing; `picker` the affix picker's filters. `game` is what the editor knows of the game: plain data

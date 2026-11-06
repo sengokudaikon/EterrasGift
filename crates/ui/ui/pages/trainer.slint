@@ -1,4 +1,4 @@
-// Trainer pages (DESIGN.md "Trainer Pages"): a page's sections along the top,
+// Trainer pages: a page's sections along the top,
 // left out when it has one, and the chosen section beneath: rows of features, or Forge › Item, which is the Item Forge.
 // Rust (crates/ui/src/trainer) builds the rows from the catalog and owns every value; the view lays them out.
 // Forge › Item is the Item Forge (pages/forge/) while the session holds an item. Without the game the hooks are a profile
@@ -745,7 +745,7 @@ component FeatureRow inherits Rectangle {
 }
 
 // A section's rows: one width on every page (520–600), left beside the navigation; a page with room for two rows side by
-// side takes them in two columns, split by Rust from the heights the rows report (RowColumnsPanel.cs).
+// side takes them in two columns, split by Rust from the heights the rows report.
 component FeatureList inherits Rectangle {
     // From the page: what this shows and what it asks of it.
     callback apply(int);

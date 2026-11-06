@@ -348,7 +348,7 @@ fn fixture_catalog() -> GameCatalog {
                         cannot_drop: false,
                         is_corrupted: false,
                         // The first base grants none, so the item's own reads stay as they are; the second grants
-                        // one with the game's text at both ends and one without it (C# `ForgeChoices.ImplicitLine`).
+                        // one with the game's text at both ends and one without it.
                         implicits: Availability::Available(if sub_type == 2 {
                             vec![
                                 implicit(Availability::Available("+10 Armour Ω".into()), Availability::Available("+16 Armour Ω".into())),
@@ -568,8 +568,7 @@ pub(super) fn capture(session: &Session) {
     data.games.store(2, Ordering::SeqCst);
     ui.global::<eg_ui::Connection>().invoke_connect();
     wait(|| handle.snapshot().phase == Phase::WaitingForGame && ui.global::<eg_ui::TrainerState>().get_connection_waiting());
-    // Connected by hand (automatic connection off), so it asks for a Connect again rather than saying it waits (C#'s
-    // `SessionErrorMessages` `waits`).
+    // Connected by hand (automatic connection off), so it asks for a Connect again rather than saying it waits.
     let multiple = "Close all but one copy of Last Epoch, then connect.";
     assert_eq!(ui.global::<eg_ui::Connection>().get_text(), multiple);
     assert_eq!(ui.global::<eg_ui::TrainerState>().get_connection_detail(), multiple);
@@ -709,8 +708,7 @@ pub(super) fn capture(session: &Session) {
     assert!(!forge.get_message().contains("could not be confirmed"));
 
     // Base and identity pickers use the same command and completion path. The base menu lists the implicits each base
-    // grants from the captured catalog, and a drafted base previews them (C# `ForgeChoices.BaseOptions`,
-    // `ItemEditorViewModel.ImplicitPreview`).
+    // grants from the captured catalog, and a drafted base previews them.
     assert!(forge.get_can_change_base());
     let options = forge.get_base_options();
     assert_eq!(options.row_data(0).unwrap().implicits, "");
@@ -750,7 +748,7 @@ pub(super) fn capture(session: &Session) {
     forge.invoke_picker_search_edited("Vitality".into());
     forge.invoke_picker_select(0);
     session.capture(&ui, "backend-forge-affix-picker");
-    // Enter in the search does nothing, as in the C# picker: Down moves into the list, where Enter uses the entry.
+    // Enter in the search does nothing: Down moves into the list, where Enter uses the entry.
     session.key(Key::DownArrow);
     session.key(Key::Return);
     assert!(!forge.get_picker_open());
@@ -807,7 +805,7 @@ pub(super) fn capture(session: &Session) {
     forge.invoke_undo();
     wait(|| !forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().affixes.iter().all(|a| a.tier == 5 && a.seal == 0));
     assert_eq!(data.item.lock().unwrap().as_ref().unwrap().affixes.iter().map(|a| a.id).collect::<Vec<_>>(), vec![4, 1]);
-    // Adding and removing are drafts Apply writes (the C# Forge wrote them at once), with the same asynchronous outcomes.
+    // Adding and removing are drafts that Apply writes, with the same asynchronous outcomes.
     *data.item.lock().unwrap() = Some(item("Add and remove", 24));
     command(&handle, Command::ReadForge, || true);
     wait(|| forge.get_item_name() == "Add and remove");
@@ -1247,7 +1245,7 @@ fn gameplay_hooks(session: &Session, ui: &MainWindow, handle: &BackendHandle, da
     settle();
 }
 
-/// The forge while it waits, on the real worker with a game it never reaches (the C# `AutoConnectionTests`): for Last
+/// The forge while it waits, on the real worker with a game it never reaches: for Last
 /// Epoch, at three window classes (`forge-waiting`, `-compact`, `-maximized`), then for an offline character once a game
 /// runs whose log says no character is loaded (`forge-waiting-character`). The gate stops both before any connect.
 pub(super) fn capture_waiting(session: &Session) {

@@ -1,4 +1,4 @@
-# Text is checked out with CRLF everywhere (matches .editorconfig); the repository stores LF. Same as ../EterrasGift.
+# Text is checked out with CRLF everywhere (matches .editorconfig); the repository stores LF.
 * text=auto eol=crlf
 
 *.png binary

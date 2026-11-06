@@ -1,7 +1,6 @@
 # Sample mods for the Mods captures
 
-Metadata-only stand-ins for the C# suite's sample library (`tests/EterrasGift.Companion.Testing/ModFixtures.cs` and
-`CompanionPageTests`' `CompilingRunner` in `../EterrasGift`): Flicker Dreams, Ability Ranges (with its embedded settings
+Metadata-only stand-ins for a sample mod library: Flicker Dreams, Ability Ranges (with its embedded settings
 description), Stash Sorter, Ward Meter, the many-mods samples, and the builds the sources scenarios install. They are
 never loaded or executed; `tests/captures.rs` (`mods_captures`) reads them through the real mod library, so running the
 captures needs no .NET SDK.

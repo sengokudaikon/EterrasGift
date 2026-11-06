@@ -5,6 +5,6 @@
 /.claude/
 /.impeccable/
 /spec/
-# design/ is local reference material (the C# app's captures).
+# Local reference material, not part of the project.
 /design/
 /.idea/

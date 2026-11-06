@@ -1,5 +1,5 @@
-//! The fixture world behind the Item Forge's `item-*` captures, on the real worker: the boots, unique boots and rings of
-//! the C# app's `FakeGameSession` and `ShowcaseSession` (`spec/forge-fixture.json`). Synthetic, not game data. The fake
+//! The fixture world behind the Item Forge's `item-*` captures, on the real worker: boots, unique boots and rings.
+//! Synthetic, not game data. The fake
 //! connection reads a write back as its plan's projection, formats the unique's lines from its rolls and answers value
 //! tables from the world's ranges; drafts, Apply and Undo are the app's own.
 use super::*;
@@ -37,7 +37,7 @@ const CORRUPTED: i32 = 6;
 struct World {
     catalog: GameCatalog,
     item: ForgeSnapshot,
-    /// Every table is value = roll, as the C# `FakeGameSession`'s.
+    /// Every table is value = roll.
     identity: bool,
     /// Affixes whose value tables the game cannot read.
     unmapped: Vec<u16>,
@@ -196,7 +196,7 @@ fn catalog(base_implicits: bool, class_affixes: bool) -> GameCatalog {
         .into_iter()
         .collect(),
         affixes,
-        // The ring uniques of the C# `UniqueIdentityTests`: one on another base and never legendary, one with Weaver's
+        // The ring uniques: one on another base and never legendary, one with Weaver's
         // Will, a set item; the amulet's must not be offered.
         uniques: [
             unique(77, "Wayfarer's Boots", BOOTS, &[0], false, false, true),
@@ -368,8 +368,7 @@ impl World {
         }
     }
 
-    /// The ring of the C# header tests (`ItemHeaderTests`), or with implicits and bases that grant them (`ImplicitTests`);
-    /// identity tables as `FakeGameSession`.
+    /// A Gold Ring with one affix, or with implicits and bases that grant them; every table is value = roll.
     fn ring(implicits: bool) -> World {
         World {
             catalog: catalog(implicits, false),
@@ -391,7 +390,7 @@ impl World {
         }
     }
 
-    /// A unique ring (`UniqueIdentityTests`): its name opens the identity picker.
+    /// A unique ring: its name opens the identity picker.
     fn unique_ring() -> World {
         let mut world = World::ring(false);
         world.item.name = "Fixture Potential Unique".into();
@@ -403,7 +402,7 @@ impl World {
     }
 
     /// A Sentinel's ring with two class affixes, for the base picker's incompatible counts and the refusal of a base that
-    /// breaks affixes (the C# `ForgeChoices.BaseOptions`, `ApplyPlanner`).
+    /// breaks affixes.
     fn class_ring() -> World {
         let mut world = World::ring(false);
         world.catalog = catalog(false, true);
@@ -837,7 +836,7 @@ fn type_value(editor: &mut ForgeEditor, cell: Cell, text: &str) {
     assert!(editor.commit_input(cell));
 }
 
-/// The Item Forge on the fixture world, as the C# app's fixture captures show it: drafts, Apply and Undo, the cells' menus,
+/// The Item Forge on the fixture world: drafts, Apply and Undo, the cells' menus,
 /// the pickers, implicits and a unique item.
 pub(in super::super) fn item_captures(session: &Session) {
     // Not connected, Connect in the page (`forge-not-connected`; Home stays in the rail), and the same wait at three sizes.
@@ -939,7 +938,7 @@ pub(in super::super) fn item_captures(session: &Session) {
     drop(forge);
 
     // A name too long for the header wraps to two lines and ends in an ellipsis, with a seal drafted and another row
-    // selected (`item-long-name-{940,1100}`, the C# `shell-{940,1100}-long-name`).
+    // selected (`item-long-name-{940,1100}`).
     const LONG_NAME: &str = "Wayfarer's Boots of Unwavering Determination and Extraordinary Elemental Resistance";
     for (width, height) in [(940, 580), (1100, 700)] {
         let forge = Forge::open(session, World::boots().change(|item| item.name = LONG_NAME.into()), width, height);

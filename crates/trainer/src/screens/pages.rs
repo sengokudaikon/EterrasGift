@@ -762,8 +762,8 @@ pub fn step_text(step: f64) -> String {
     Step.with(&[("step", &numbers().plain(step))])
 }
 
-/// Where each column starts: the split whose tallest column is shortest, at headings when there are any
-/// (`RowColumnsPanel.Split`). A heading has `section_spacing` above it unless it starts a column.
+/// Where each column starts: the split whose tallest column is shortest, at headings when there are any.
+/// A heading has `section_spacing` above it unless it starts a column.
 pub fn split(heights: &[f32], headings: &[bool], columns: usize, section_spacing: f32) -> Vec<usize> {
     let count = heights.len();
     if columns <= 1 || count < 2 {

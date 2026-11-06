@@ -25,7 +25,7 @@ export component HelpButton inherits Rectangle {
     accessible-description: root.help;
     accessible-action-default => { root.toggle(); }
 
-    // Tab opened the tip already, so the first press after it means "show it" and keeps it open (`KeyboardToolTips`).
+    // Tab opened the tip already, so the first press after it means "show it" and keeps it open.
     property <bool> opened-by-focus;
     // The `Tip.owner` a press took; the trigger below keeps its own for hover and focus.
     property <int> claim: -1;

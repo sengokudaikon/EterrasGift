@@ -225,7 +225,7 @@ pub fn connect_command(phase: Phase) -> Option<Command> {
 
 /// What the app says about the connection: what every trainer page shows in place of its body while not connected, the
 /// navigation foot's status line, whether the connection stopped for a reason the user has to fix, and how far a wait has
-/// come (ItemEditorViewModel, TrainerConnectionViewModel).
+/// come.
 struct Status {
     title: &'static str,
     detail: String,
@@ -234,8 +234,8 @@ struct Status {
     waiting: Option<BloomPhase>,
 }
 
-/// Several games run: the advice says the app connects by itself only when it will, as the C# `SessionErrorMessages`
-/// `waits` (automatic connection, with the game being watched) decides.
+/// Several games run: the advice says the app connects by itself only when it will, which is with automatic connection
+/// on and the game being watched.
 fn multiple_games(snapshot: &BackendSnapshot) -> &'static str {
     if snapshot.monitoring && snapshot.auto_connect {
         CloseExtraGames.get()
