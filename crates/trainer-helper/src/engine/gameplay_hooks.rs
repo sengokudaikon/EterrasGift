@@ -67,17 +67,29 @@ static HOOKS: Mutex<Hooks> = Mutex::new(Hooks {
 
 impl Hooks {
     fn clear(&mut self) -> Result<(), String> {
-        // Close every effect before any fallible restoration. On failure keep every owner and receiver binding.
+        self.clear_with(|group| group.effect.restore())
+    }
+    /// Close every effect before any fallible restoration. A group whose effect fails to restore (a scalar gate a
+    /// game thread is still inside) keeps its entries and its owner and receiver bindings, and its error is returned
+    /// for the caller to retry. Every other group is still restored, so one stuck gate never leaves code patches in.
+    fn clear_with(&mut self, restore: impl Fn(&Group) -> Result<(), String>) -> Result<(), String> {
         for group in self.slots.iter().flatten() {
             group.effect.close();
         }
-        for group in self.slots.iter().flatten() {
-            group.effect.restore()?;
-        }
+        let mut failure = None;
+        let restored: Vec<bool> = self
+            .slots
+            .iter()
+            .map(|slot| {
+                slot.as_ref()
+                    .is_some_and(|group| restore(group).map_err(|error| failure.get_or_insert(error)).is_ok())
+            })
+            .collect();
         let changes: Vec<_> = self
             .slots
             .iter()
-            .flatten()
+            .zip(&restored)
+            .filter_map(|(slot, restored)| slot.as_ref().filter(|_| *restored))
             .flat_map(|group| &group.hooks)
             .filter(|hook| hook.state() != HookState::Disabled)
             .map(|hook| (hook, false))
@@ -86,12 +98,13 @@ impl Hooks {
             // SAFETY: serialized owner; generated code never enters the helper and is retained.
             unsafe { entry::commit(&changes) }?;
         }
-        for slot in &mut self.slots {
-            if self.closing || slot.as_ref().is_some_and(|group| !group.effect.keep_when_off()) {
+        let closing = self.closing;
+        for (slot, restored) in self.slots.iter_mut().zip(restored) {
+            if restored && (closing || slot.as_ref().is_some_and(|group| !group.effect.keep_when_off())) {
                 *slot = None;
             }
         }
-        Ok(())
+        failure.map_or(Ok(()), Err)
     }
     fn observe_manager(&mut self, manager: u64) -> Result<(), String> {
         if manager != self.manager || manager == 0 {
@@ -435,6 +448,62 @@ mod tests {
             assert!(!std::hint::black_box(first)());
             assert!(std::hint::black_box(second)());
         }
+    }
+    #[test]
+    fn a_group_that_fails_to_restore_keeps_its_entries_while_every_other_group_is_restored() {
+        use crate::game::registry::ResolvedMethod;
+        use native_hooks::leaf::LeafEffect;
+        #[unsafe(naked)]
+        unsafe extern "C-unwind" fn restored() -> bool {
+            core::arch::naked_asm!("nop", "nop", "nop", "nop", "nop", "xor eax,eax", "ret", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop");
+        }
+        #[unsafe(naked)]
+        unsafe extern "C-unwind" fn held() -> bool {
+            // Not `xor`, so the linker cannot fold the two entries into one.
+            core::arch::naked_asm!("nop", "nop", "nop", "nop", "nop", "mov eax,0", "ret", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop");
+        }
+        let group = |entry: *mut u8| {
+            // SAFETY: authored padded process-lifetime entries with the exact Boolean leaf ABI.
+            unsafe {
+                let target = ResolvedMethod {
+                    name: "fixture restore".into(),
+                    address: NonNull::new(entry).unwrap(),
+                    bytes: entry.cast::<[u8; 16]>().read_unaligned(),
+                }
+                .leaf(LeafEffect::Boolean(true), None, None);
+                Group::prepare(FeatureBinding::fixture(GameplayHook::AnyOffhand), &[target]).unwrap()
+            }
+        };
+        let mut owner = Hooks {
+            slots: [const { None }; FEATURES.len()],
+            manager: 1,
+            closing: true,
+        };
+        owner.slots[0] = Some(group(restored as *mut u8));
+        owner.slots[1] = Some(group(held as *mut u8));
+        for slot in &owner.slots[..2] {
+            change_group(slot.as_ref().unwrap(), GameplayHook::AnyOffhand, true, 1).unwrap();
+        }
+        // SAFETY: the installed entries preserve their authored Boolean ABI.
+        unsafe {
+            assert!(std::hint::black_box(restored)());
+            assert!(std::hint::black_box(held)());
+        }
+        let stuck: *const Group = owner.slots[1].as_ref().unwrap();
+        let error = owner
+            .clear_with(|group| if std::ptr::eq(group, stuck) { Err("did not drain".into()) } else { group.effect.restore() })
+            .unwrap_err();
+        assert_eq!(error, "did not drain");
+        assert!(owner.slots[0].is_none());
+        let kept = owner.slots[1].as_ref().unwrap();
+        assert!(kept.hooks.iter().all(|hook| hook.state() == HookState::Enabled));
+        // SAFETY: the restored entry is the authored original again.
+        unsafe { assert!(!std::hint::black_box(restored)()) };
+        // A retry restores what the failure kept.
+        owner.clear().unwrap();
+        assert!(owner.slots[1].is_none());
+        // SAFETY: as above.
+        unsafe { assert!(!std::hint::black_box(held)()) };
     }
     #[test]
     fn scalar_groups_share_lifecycle_but_keep_independent_settings_and_restore_on_clear() {

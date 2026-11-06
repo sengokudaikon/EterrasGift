@@ -26,7 +26,7 @@ use std::{
         Mutex, OnceLock,
         atomic::{AtomicBool, AtomicU64, Ordering::SeqCst},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 use windows_sys::Win32::System::{
     LibraryLoader::{FreeLibraryAndExitThread, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, GetModuleHandleExW},
@@ -34,7 +34,7 @@ use windows_sys::Win32::System::{
 };
 
 #[cfg(feature = "fixture")]
-use std::{sync::atomic::AtomicPtr, time::Duration};
+use std::sync::atomic::AtomicPtr;
 
 static PRESENCE_ERROR_REPORTED: AtomicBool = AtomicBool::new(false);
 /// Whether this load asked for affixes to be added: without that, leaving the game touches no list.
@@ -543,7 +543,7 @@ impl Backend for Control<'_> {
         gameplay_hooks::clear(false)
     }
     fn restore(&mut self) -> Result<(), String> {
-        gameplay_hooks::clear(true)?;
+        clear_for_unload()?;
         // SAFETY: the control thread owns the target and all generated code is retained.
         let restored = unsafe { restore_and_drain(self.hook, self.gate.as_ref()) };
         // Nothing of the helper's stays in the game's lists, once no helper callback can be running. A failure is reported
@@ -559,6 +559,24 @@ impl Backend for Control<'_> {
         }
         restored
     }
+}
+
+/// How many times the control thread tries to clear the gameplay hooks before the helper gives up and stays loaded.
+const CLEAR_ATTEMPTS: u32 = 6;
+
+/// Clears every gameplay hook before an unload. A group whose scalar gate does not drain is kept while every other group
+/// is restored, so this tries the kept groups again; each try waits up to the gate's own drain deadline. Once the service
+/// has stopped, the watchdog no longer runs, so this is the last retry.
+fn clear_for_unload() -> Result<(), String> {
+    let mut cleared = gameplay_hooks::clear(true);
+    for _ in 1..CLEAR_ATTEMPTS {
+        if cleared.is_ok() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+        cleared = gameplay_hooks::clear(true);
+    }
+    cleared
 }
 
 /// Ok when the module may unload. A setup failure is Ok too: it comes before the dispatcher hook exists, so nothing
