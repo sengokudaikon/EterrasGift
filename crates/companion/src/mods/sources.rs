@@ -345,10 +345,12 @@ impl ModSources {
         {
             return Ok((known.project.clone(), true));
         }
+        // From the SDK's own folder rather than the project's: `dotnet` takes the `global.json` it finds from where it
+        // runs, and one beside a downloaded project could choose which SDK, and so which code, it loads.
         let request = ProcessRequest {
             executable: executable.to_path_buf(),
-            arguments: evaluation_arguments(file),
-            directory: file.parent().unwrap_or(folder).to_path_buf(),
+            arguments: evaluation_arguments(&std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf())),
+            directory: executable.parent().filter(|parent| parent.is_absolute()).unwrap_or(folder).to_path_buf(),
         };
         let output = match self.runner.run(&request, cancel) {
             Ok(output) => output,

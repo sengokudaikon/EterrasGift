@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf, Prefix};
 use std::time::SystemTime;
 
 pub mod dotnet;
@@ -31,12 +31,14 @@ pub struct Evaluation {
     pub imports: Vec<PathBuf>,
 }
 
-/// What to give `dotnet` for it to print the evaluation [`read_evaluation`] reads.
+/// What to give `dotnet` for it to print the evaluation [`read_evaluation`] reads. A `Directory.Build.rsp` beside or
+/// above the project is not read: it could add a build target or a logger, which would run the project's code.
 pub fn evaluation_arguments(file: &Path) -> Vec<OsString> {
     let mut arguments = vec![OsString::from("msbuild"), file.as_os_str().to_owned()];
     arguments.extend(
         [
             "-nologo",
+            "-noAutoResponse",
             "-getProperty:TargetPath",
             "-getProperty:OutputType",
             "-getProperty:AssemblyName",
@@ -51,7 +53,9 @@ pub fn evaluation_arguments(file: &Path) -> Vec<OsString> {
     arguments
 }
 
-/// None when the output isn't JSON at all: a first-run banner, which says nothing about the project.
+/// None when the output isn't JSON at all: a first-run banner, which says nothing about the project. Only paths on a
+/// local drive are kept: the app reads and hashes them on every scan, and a network share named by a downloaded
+/// project would be sent this user's credentials.
 pub fn read_evaluation(file: &Path, output: &str) -> Option<Evaluation> {
     let root: Value = serde_json::from_str(output).ok()?;
     let Some(properties) = root.get("Properties").filter(|value| value.is_object()) else {
@@ -65,10 +69,10 @@ pub fn read_evaluation(file: &Path, output: &str) -> Option<Evaluation> {
         .flat_map(|value| value.split(';'))
         .map(str::trim)
         .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
+        .filter(|path| on_local_drive(path))
         .collect();
     let target = PathBuf::from(text(properties, "TargetPath").unwrap_or_default());
-    if !target.is_absolute() || !target.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("dll")) {
+    if !on_local_drive(&target) || !target.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("dll")) {
         return Some(Evaluation { project: None, imports });
     }
     let library = text(properties, "OutputType").is_some_and(|kind| kind.eq_ignore_ascii_case("Library"));
@@ -86,6 +90,11 @@ pub fn read_evaluation(file: &Path, output: &str) -> Option<Evaluation> {
         }),
         imports,
     })
+}
+
+/// A full path that starts with a drive letter, not a share (`\\host\share`) or a device.
+fn on_local_drive(path: &Path) -> bool {
+    path.is_absolute() && matches!(path.components().next(), Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_)))
 }
 
 fn text<'a>(owner: &'a Value, name: &str) -> Option<&'a str> {
@@ -224,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluation_identifies_melon_packages_but_never_guesses_relative_output_paths() {
+    fn evaluation_identifies_melon_packages_but_never_guesses_relative_or_remote_output_paths() {
         let temp = tempfile::tempdir().unwrap();
         let file = temp.path().join("Loom.csproj");
         let mut answer = json!({
@@ -235,8 +244,10 @@ mod tests {
         assert!(found.is_mod);
         assert_eq!(found.name, "CustomName");
         assert_eq!(found.version.as_deref(), Some("0.7.0"));
-        answer["Properties"]["TargetPath"] = "bin/Loom.dll".into();
-        assert!(read_evaluation(&file, &answer.to_string()).unwrap().project.is_none());
+        for unusable in ["bin/Loom.dll", r"\\host\share\Loom.dll", r"\\?\UNC\host\share\Loom.dll", r"\\.\pipe\Loom.dll"] {
+            answer["Properties"]["TargetPath"] = unusable.into();
+            assert!(read_evaluation(&file, &answer.to_string()).unwrap().project.is_none(), "{unusable}");
+        }
         assert!(read_evaluation(&file, "Welcome to .NET").is_none());
     }
 
@@ -245,7 +256,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let file = temp.path().join("Loom.csproj");
         let imported = temp.path().join("custom.targets");
-        let answer = json!({ "Properties": { "TargetPath": "bin/Loom.dll", "MSBuildAllProjects": format!("relative.props;{}", imported.display()) } });
+        let imports = format!(r"relative.props;{};\\host\share\x.props;\\?\UNC\host\share\y.props", imported.display());
+        let answer = json!({ "Properties": { "TargetPath": "bin/Loom.dll", "MSBuildAllProjects": imports } });
         let evaluation = read_evaluation(&file, &answer.to_string()).unwrap();
         assert_eq!(
             evaluation,
@@ -269,6 +281,7 @@ mod tests {
         assert_eq!(arguments[0], "msbuild");
         assert_eq!(arguments[1], "mods/Loom.csproj");
         assert!(arguments.contains(&"-p:Configuration=Release".into()));
+        assert!(arguments.contains(&"-noAutoResponse".into()));
     }
 
     #[test]
