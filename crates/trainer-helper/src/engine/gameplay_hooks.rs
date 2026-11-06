@@ -80,10 +80,7 @@ impl Hooks {
         let restored: Vec<bool> = self
             .slots
             .iter()
-            .map(|slot| {
-                slot.as_ref()
-                    .is_some_and(|group| restore(group).map_err(|error| failure.get_or_insert(error)).is_ok())
-            })
+            .map(|slot| slot.as_ref().is_some_and(|group| restore(group).map_err(|error| failure.get_or_insert(error)).is_ok()))
             .collect();
         let changes: Vec<_> = self
             .slots
@@ -455,12 +452,44 @@ mod tests {
         use native_hooks::leaf::LeafEffect;
         #[unsafe(naked)]
         unsafe extern "C-unwind" fn restored() -> bool {
-            core::arch::naked_asm!("nop", "nop", "nop", "nop", "nop", "xor eax,eax", "ret", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop");
+            core::arch::naked_asm!(
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "xor eax,eax",
+                "ret",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop"
+            );
         }
         #[unsafe(naked)]
         unsafe extern "C-unwind" fn held() -> bool {
             // Not `xor`, so the linker cannot fold the two entries into one.
-            core::arch::naked_asm!("nop", "nop", "nop", "nop", "nop", "mov eax,0", "ret", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop");
+            core::arch::naked_asm!(
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "mov eax,0",
+                "ret",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop"
+            );
         }
         let group = |entry: *mut u8| {
             // SAFETY: authored padded process-lifetime entries with the exact Boolean leaf ABI.
@@ -491,7 +520,13 @@ mod tests {
         }
         let stuck: *const Group = owner.slots[1].as_ref().unwrap();
         let error = owner
-            .clear_with(|group| if std::ptr::eq(group, stuck) { Err("did not drain".into()) } else { group.effect.restore() })
+            .clear_with(|group| {
+                if std::ptr::eq(group, stuck) {
+                    Err("did not drain".into())
+                } else {
+                    group.effect.restore()
+                }
+            })
             .unwrap_err();
         assert_eq!(error, "did not drain");
         assert!(owner.slots[0].is_none());

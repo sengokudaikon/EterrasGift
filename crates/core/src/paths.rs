@@ -109,7 +109,9 @@ fn mask_folder(text: &str, folder: &str, name: &str) -> String {
     let (mut copied, mut at) = (0, 0);
     while at + wanted.len() <= bytes.len() {
         let end = at + wanted.len();
-        let whole = bytes.get(end).is_none_or(|next| !(next.is_ascii_alphanumeric() || matches!(next, b'_' | b'-' | b'.' | b' ') || *next >= 0x80));
+        let whole = bytes
+            .get(end)
+            .is_none_or(|next| !(next.is_ascii_alphanumeric() || matches!(next, b'_' | b'-' | b'.' | b' ') || *next >= 0x80));
         if whole && bytes[at..end].iter().zip(&wanted).all(|(byte, wanted)| fold(*byte) == *wanted) {
             // The folder starts with an ASCII drive letter and ends before an ASCII byte, so both cuts are char boundaries.
             masked.push_str(&text[copied..at]);

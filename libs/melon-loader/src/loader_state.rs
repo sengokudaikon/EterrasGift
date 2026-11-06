@@ -182,8 +182,7 @@ fn duplicates(view: &CilAssemblyView, nested: &[NestedClassRaw]) -> io::Result<V
 pub fn repair_core_module(root: &Path) -> io::Result<usize> {
     let path = core_module_path(root);
     let original = read_dll(&path)?;
-    let (repaired, renamed) =
-        contained(|| repaired_bytes(CilAssemblyView::from_mem(original.clone()).map_err(invalid)?)).unwrap_or_else(|| Err(not_assembly(&path)))?;
+    let (repaired, renamed) = contained(|| repaired_bytes(CilAssemblyView::from_mem(original.clone()).map_err(invalid)?)).unwrap_or_else(|| Err(not_assembly(&path)))?;
     let Some(repaired) = repaired else {
         return Ok(0);
     };

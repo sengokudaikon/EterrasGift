@@ -82,8 +82,8 @@ mod identity {
     use windows_sys::Win32::Foundation::{FILETIME, HANDLE, STILL_ACTIVE, WAIT_TIMEOUT};
     use windows_sys::Win32::Security::{GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenIntegrityLevel};
     use windows_sys::Win32::System::Threading::{
-        GetCurrentProcess, GetExitCodeProcess, GetProcessTimes, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-        QueryFullProcessImageNameW, WaitForSingleObject,
+        GetCurrentProcess, GetExitCodeProcess, GetProcessTimes, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, QueryFullProcessImageNameW,
+        WaitForSingleObject,
     };
 
     /// The room [`identity`] gives an executable's path, in UTF-16 units, its closing NUL included.
