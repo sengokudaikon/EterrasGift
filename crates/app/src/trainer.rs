@@ -96,7 +96,7 @@ impl Module {
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
         let logs = FileLogFactory::new(folders::player_log())?;
         let (handle, worker) = backend::service(
-            GameProcesses::new(process_name),
+            GameProcesses::new(process_name, game.map(Path::to_path_buf)),
             DesktopConnector::new(helper, eg_core::paths::local_directory().join("helpers"), logs.clone()),
             logs.reader(),
             SystemClock,

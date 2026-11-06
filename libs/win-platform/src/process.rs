@@ -79,9 +79,11 @@ mod identity {
     use std::io;
     use std::os::windows::ffi::OsStringExt;
     use std::os::windows::io::{AsHandle, AsRawHandle, FromRawHandle, OwnedHandle};
-    use windows_sys::Win32::Foundation::{FILETIME, STILL_ACTIVE, WAIT_TIMEOUT};
+    use windows_sys::Win32::Foundation::{FILETIME, HANDLE, STILL_ACTIVE, WAIT_TIMEOUT};
+    use windows_sys::Win32::Security::{GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenIntegrityLevel};
     use windows_sys::Win32::System::Threading::{
-        GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, QueryFullProcessImageNameW, WaitForSingleObject,
+        GetCurrentProcess, GetExitCodeProcess, GetProcessTimes, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+        QueryFullProcessImageNameW, WaitForSingleObject,
     };
 
     /// The room [`identity`] gives an executable's path, in UTF-16 units, its closing NUL included.
@@ -155,6 +157,48 @@ mod identity {
         })
     }
 
+    /// The mandatory integrity level of the process behind `process`: its token label's last sub-authority, such as
+    /// `0x1000` for low, `0x2000` for medium and `0x3000` for high. Takes any handle with the limited query right.
+    pub fn integrity(process: impl AsHandle) -> io::Result<u32> {
+        // SAFETY: the handle is borrowed live for the call.
+        unsafe { token_integrity(process.as_handle().as_raw_handle()) }
+    }
+
+    /// The mandatory integrity level of this process, as [`integrity`] gives it.
+    pub fn own_integrity() -> io::Result<u32> {
+        // SAFETY: the current-process pseudo-handle is always valid and needs no closing.
+        unsafe { token_integrity(GetCurrentProcess()) }
+    }
+
+    /// # Safety
+    /// `process` is a live process handle with the limited query right, or the current-process pseudo-handle.
+    unsafe fn token_integrity(process: HANDLE) -> io::Result<u32> {
+        // SAFETY: query rights only, a token owned by its guard, label storage aligned for the structure, and the SID
+        // read while that storage lives.
+        unsafe {
+            let mut token = std::ptr::null_mut();
+            if OpenProcessToken(process, TOKEN_QUERY, &raw mut token) == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let token = OwnedHandle::from_raw_handle(token);
+            let mut length = 0;
+            GetTokenInformation(token.as_raw_handle(), TokenIntegrityLevel, std::ptr::null_mut(), 0, &raw mut length);
+            if (length as usize) < size_of::<TOKEN_MANDATORY_LABEL>() {
+                return Err(io::Error::last_os_error());
+            }
+            let mut storage = vec![0_usize; (length as usize).div_ceil(size_of::<usize>())];
+            if GetTokenInformation(token.as_raw_handle(), TokenIntegrityLevel, storage.as_mut_ptr().cast(), length, &raw mut length) == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let sid = (*storage.as_ptr().cast::<TOKEN_MANDATORY_LABEL>()).Label.Sid;
+            let count = *GetSidSubAuthorityCount(sid);
+            if count == 0 {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "the integrity label has no level"));
+            }
+            Ok(*GetSidSubAuthority(sid, u32::from(count - 1)))
+        }
+    }
+
     /// When `pid` started, in FILETIME ticks, or None when it has exited or can't be asked. See the module's note on telling
     /// a process runs.
     pub fn started_if_running(pid: u32) -> Option<u64> {
@@ -194,6 +238,9 @@ mod tests {
         assert_eq!(found.created, created(&handle).unwrap());
         assert_eq!(found.executable, std::env::current_exe().unwrap().into_os_string());
         assert_eq!(started_if_running(pid), Some(found.created));
+        let level = integrity(&handle).unwrap();
+        assert_eq!(level, own_integrity().unwrap());
+        assert!((0x1000..=0x4000).contains(&level), "from low to system: {level:#x}");
     }
 
     #[cfg(windows)]

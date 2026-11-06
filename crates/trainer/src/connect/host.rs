@@ -58,18 +58,31 @@ impl HelperPackage {
     }
 }
 
+/// The game's running processes, by executable name. Only a process the app could prepare counts: one this user can
+/// open, at this app's integrity level or above, and, when the installed game is known, started from its executable.
+/// A sandboxed copy, another user's game or a same-named program elsewhere is passed over rather than failing the lookup.
 pub struct GameProcesses {
     executable_name: String,
+    installed: Option<PathBuf>,
 }
 impl GameProcesses {
-    pub fn new(executable_name: impl Into<String>) -> Self {
+    pub fn new(executable_name: impl Into<String>, installed: Option<PathBuf>) -> Self {
         Self {
             executable_name: executable_name.into(),
+            installed,
         }
+    }
+    fn is_installed(&self, executable: &Path) -> bool {
+        let Some(installed) = &self.installed else {
+            return true;
+        };
+        let canonical = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        file_ops::paths::same_place(&canonical(executable), &canonical(installed))
     }
 }
 impl ProcessLocator for GameProcesses {
     async fn find(&mut self) -> Result<Vec<ProcessIdentity>, BackendError> {
+        let own = win_platform::process::own_integrity().map_err(|error| BackendError::blocked(ErrorKind::Identity, format!("Could not identify this app: {error}")))?;
         let mut named = Vec::new();
         win_platform::process::each(|pid, executable| {
             if win_platform::process::is_named(executable, &self.executable_name) {
@@ -79,10 +92,11 @@ impl ProcessLocator for GameProcesses {
         .map_err(|error| BackendError::waiting(ErrorKind::NotReady, error.to_string()))?;
         let mut found = Vec::new();
         for pid in named {
-            match eg_game_access::process::capture(pid) {
-                Ok(identity) => found.push(identity),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(BackendError::blocked(ErrorKind::Identity, format!("Could not identify Last Epoch: {error}"))),
+            if let Ok((identity, integrity)) = eg_game_access::process::capture_with_integrity(pid)
+                && integrity >= own
+                && self.is_installed(&identity.executable)
+            {
+                found.push(identity);
             }
         }
         Ok(found)
@@ -176,6 +190,19 @@ mod tests {
     fn connect(connector: &mut DesktopConnector<Logs>) -> BackendError {
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         runtime.block_on(connector.connect(target(), Timestamp::now())).err().unwrap()
+    }
+
+    #[test]
+    fn a_game_process_counts_only_when_started_from_the_installed_executable() {
+        // The test process stands in for the game: it is this user's, at this app's integrity level.
+        let executable = std::env::current_exe().unwrap();
+        let name = executable.file_name().unwrap().to_string_lossy().into_owned();
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let mut find = |installed| runtime.block_on(GameProcesses::new(name.clone(), installed).find()).unwrap();
+        let ours = |found: Vec<ProcessIdentity>| found.iter().any(|identity| identity.pid == std::process::id());
+        assert!(ours(find(None)));
+        assert!(ours(find(Some(executable.clone()))));
+        assert!(!ours(find(Some(executable.with_file_name("elsewhere").join(&name)))));
     }
 
     #[test]
