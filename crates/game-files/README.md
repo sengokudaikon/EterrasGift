@@ -56,7 +56,7 @@ Other masters in `PermaLoad` (not read today): `MasterColorList` (the game's own
 
 `eg_trainer::definitions::files` builds the trainer's `GameCatalog` from `eg-game-files` with the live capture's rules: stored names
 (`displayName`, else `name`), the same `Unavailable` reasons (generated affix names, rarity names, implicit texts),
-and the presentation selection ported from `catalog_numeric_property`. Item limits come from the `ItemData` and
+and the live capture's choice of how each numeric property is presented. Item limits come from the `ItemData` and
 `ExperienceTracker.maxLevel` `const int`s in the metadata (format 29+ stores them as compressed signed integers). On the
 installed build: 42 bases, 1,156 affixes and 489 uniques, every numeric presentation available, ~0.3–0.9 s with hashing.
 

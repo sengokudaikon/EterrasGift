@@ -3,6 +3,18 @@
 What the rewrite can do, newest first, one line per feature. Add a line when a feature lands; details live in the
 code and its tests, and what is still to build in [the helper's backlog](crates/trainer-helper/BACKLOG.md).
 
+## 2026-11-06
+
+- Trainer: a hook group that can't restore no longer keeps the others in the game; the rest are restored and the helper retries it before giving up.
+- Trainer: only the installed game, at the app's integrity level or above, is prepared; a process this user can't open is passed over.
+- Trainer: the helper's pipe refuses lower-integrity processes.
+- Mods: project evaluation ignores response files and the project's global.json, and keeps no network paths.
+- Mods: a mod DLL over 64 MiB is refused, and parsing grows with what is read rather than with the DLL's tables.
+- Logs: fault reports and the Logs page write the profile folder as %USERPROFILE%; Forge reports leave out memory addresses.
+- App: release builds carry no build-machine paths.
+- Settings: an About section with the version, the licence (GPL-3.0-only), the source and third-party licences.
+- Build: spiderland comes from its repository at a pinned revision.
+
 ## 2026-11-02
 
 - World: set camera distance persistently, preserving game-setting changes and restoring each camera's baseline on off.
