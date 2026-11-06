@@ -6,6 +6,7 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+serde_json.workspace = true
 spiderland-phrases-build.workspace = true
 
 [lints]
