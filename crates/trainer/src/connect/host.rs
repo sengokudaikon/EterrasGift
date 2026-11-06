@@ -198,7 +198,7 @@ mod tests {
         let executable = std::env::current_exe().unwrap();
         let name = executable.file_name().unwrap().to_string_lossy().into_owned();
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        let mut find = |installed| runtime.block_on(GameProcesses::new(name.clone(), installed).find()).unwrap();
+        let find = |installed| runtime.block_on(GameProcesses::new(name.clone(), installed).find()).unwrap();
         let ours = |found: Vec<ProcessIdentity>| found.iter().any(|identity| identity.pid == std::process::id());
         assert!(ours(find(None)));
         assert!(ours(find(Some(executable.clone()))));

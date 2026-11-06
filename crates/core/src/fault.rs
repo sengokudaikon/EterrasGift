@@ -82,7 +82,9 @@ impl FaultLog {
                 "version": env!("CARGO_PKG_VERSION"),
             }),
         );
-        let text = serde_json::to_string_pretty(&Value::Object(report)).ok()?;
+        let mut report = Value::Object(report);
+        mask_strings(&mut report);
+        let text = serde_json::to_string_pretty(&report).ok()?;
         let name = format!("fault-{}-{}.json", now.strftime("%Y%m%d-%H%M%S"), uuid::Uuid::new_v4().simple());
         self.directories().find_map(|directory| {
             std::fs::create_dir_all(&directory).ok()?;
@@ -92,6 +94,16 @@ impl FaultLog {
             file.sync_all().ok()?;
             Some(path)
         })
+    }
+}
+
+/// Every string in a report, the executable's path, errors and backtraces among them, with the profile folder masked.
+fn mask_strings(value: &mut Value) {
+    match value {
+        Value::String(text) => *text = paths::mask_profile(text),
+        Value::Array(items) => items.iter_mut().for_each(mask_strings),
+        Value::Object(fields) => fields.values_mut().for_each(mask_strings),
+        _ => {}
     }
 }
 
@@ -114,5 +126,9 @@ mod tests {
         assert_eq!(report["recovery"], "Eterra's Gift runs without it.");
         assert!(report.get("code").is_none());
         assert!(path.file_name().unwrap().to_string_lossy().starts_with("fault-"));
+        let profile = std::env::var("USERPROFILE").unwrap();
+        let path = log.write("Startup", Some(&format!(r"{profile}\AppData\x.dll is missing")), None, None).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains(&profile.replace('\\', "\\\\")) && text.contains(r"%USERPROFILE%\\AppData\\x.dll"), "{text}");
     }
 }

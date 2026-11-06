@@ -180,3 +180,6 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 strip = true
+# Panic locations and debug strings name files relative to their package, not the build machine's folders (its user
+# name among them). The helper is built under these profiles too.
+trim-paths = "all"

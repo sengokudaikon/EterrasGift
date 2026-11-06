@@ -87,6 +87,43 @@ pub fn local_directory() -> PathBuf {
     local.join(LOCAL_FOLDER)
 }
 
+/// `text` with this user's profile folder written as `%USERPROFILE%`, so a report, or a log shown for copying, doesn't carry
+/// the account's name. The folder is matched with either separator and without ASCII case, and only as a whole name:
+/// `C:\Users\ana` is not found in `C:\Users\anabel`.
+pub fn mask_profile(text: &str) -> String {
+    match std::env::var_os("USERPROFILE") {
+        Some(profile) => mask_folder(text, profile.to_string_lossy().trim_end_matches(['\\', '/']), "%USERPROFILE%"),
+        None => text.to_owned(),
+    }
+}
+
+fn mask_folder(text: &str, folder: &str, name: &str) -> String {
+    // A folder shorter than `C:\x` would match a drive root, which says nothing about the user.
+    if folder.len() < 4 {
+        return text.to_owned();
+    }
+    let fold = |byte: u8| if byte == b'/' { b'\\' } else { byte.to_ascii_lowercase() };
+    let wanted: Vec<u8> = folder.bytes().map(fold).collect();
+    let bytes = text.as_bytes();
+    let mut masked = String::with_capacity(text.len());
+    let (mut copied, mut at) = (0, 0);
+    while at + wanted.len() <= bytes.len() {
+        let end = at + wanted.len();
+        let whole = bytes.get(end).is_none_or(|next| !(next.is_ascii_alphanumeric() || matches!(next, b'_' | b'-' | b'.' | b' ') || *next >= 0x80));
+        if whole && bytes[at..end].iter().zip(&wanted).all(|(byte, wanted)| fold(*byte) == *wanted) {
+            // The folder starts with an ASCII drive letter and ends before an ASCII byte, so both cuts are char boundaries.
+            masked.push_str(&text[copied..at]);
+            masked.push_str(name);
+            copied = end;
+            at = end;
+        } else {
+            at += 1;
+        }
+    }
+    masked.push_str(&text[copied..]);
+    masked
+}
+
 /// The app's folders for `root`: development mode in a source checkout, and user data beside it, or in the app's local
 /// folder for an installed app (an install's own folder may not be writable).
 pub fn app_paths(root: &Path, user_data: Option<&Path>, mod_library: Option<&Path>) -> AppPaths {
@@ -103,6 +140,17 @@ pub fn app_paths(root: &Path, user_data: Option<&Path>, mod_library: Option<&Pat
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_profile_folder_is_masked_wherever_it_appears_as_a_whole_folder() {
+        let mask = |text| mask_folder(text, r"C:\Users\ana", "%USERPROFILE%");
+        assert_eq!(mask(r"C:\Users\ana\AppData\x.dll and c:/users/ANA/y"), r"%USERPROFILE%\AppData\x.dll and %USERPROFILE%/y");
+        assert_eq!(mask(r"\\?\C:\Users\ana"), r"\\?\%USERPROFILE%");
+        for other in [r"C:\Users\anabel\x", r"C:\Users\ana.old\x", r"C:\Users\ana Smith", r"C:\Users\anaé\x", "nothing here"] {
+            assert_eq!(mask(other), other);
+        }
+        assert_eq!(mask_folder(r"C:\x", r"C:\", "%USERPROFILE%"), r"C:\x");
+    }
 
     #[test]
     fn the_root_is_the_nearest_checkout_else_the_programs_own_folder() {

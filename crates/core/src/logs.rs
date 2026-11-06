@@ -91,8 +91,8 @@ impl LogFiles {
             Err(error) => (String::new(), read_error(&self.game, &error)),
         };
         Contents {
-            location: self.game.display().to_string(),
-            text,
+            location: crate::paths::mask_profile(&self.game.display().to_string()),
+            text: crate::paths::mask_profile(&text),
             notice,
         }
     }
@@ -146,8 +146,8 @@ impl LogFiles {
         }
         sections.extend(problems);
         Contents {
-            location: directories.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join("\n"),
-            text: sections.join("\n\n"),
+            location: crate::paths::mask_profile(&directories.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join("\n")),
+            text: crate::paths::mask_profile(&sections.join("\n\n")),
             notice: RecentReports.get().to_owned(),
         }
     }

@@ -18,7 +18,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             write_outcome: Some(outcome.into()),
             expected: Some(json!({
                 "process": {"pid": before.process().pid, "created": before.process().created, "executable": before.process().executable},
-                "generation": before.generation(), "manager": plan.manager(), "item": forge_record(before.snapshot()),
+                "generation": before.generation(), "item": forge_record(before.snapshot()),
             })),
             edit: Some(edit(plan.edit_intent())),
             readback: Some(json!({
@@ -41,11 +41,12 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     }
 }
 
-/// The item as the game reported it, as fault reports record it.
+/// The item as the game reported it, as fault reports record it. Where it lies in the game's memory is left out: it
+/// means nothing outside that run.
 pub fn forge_record(value: &ForgeSnapshot) -> Value {
     let status = &value.status;
     json!({
-        "item": value.item, "individualId": value.individual_id, "fingerprint": value.fingerprint, "name": value.name,
+        "individualId": value.individual_id, "fingerprint": value.fingerprint, "name": value.name,
         "itemType": value.item_type, "subType": value.sub_type, "rarity": value.rarity, "classRequirement": value.class_requirement,
         "affixes": value.affixes.iter().map(|a| json!({"slot": a.slot, "id": a.id, "tier": a.tier, "roll": a.roll, "kind": a.kind, "seal": a.seal, "name": a.name, "special": a.special})).collect::<Vec<_>>(),
         "implicitRolls": value.implicit_rolls, "identity": value.identity.as_ref().map(|i| json!({"id": i.id, "rolls": i.rolls})),

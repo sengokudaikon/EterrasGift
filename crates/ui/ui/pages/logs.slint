@@ -55,7 +55,8 @@ export component LogsView inherits Rectangle {
             }
             Button {
                 text: LogsText.copy;
-                tip: LogsText.copy-tip;
+                // In LogsText.sources' order: 1 is the game's log.
+                tip: root.source == 1 ? LogsText.copy-game-tip : LogsText.copy-tip;
                 enabled: root.text != "" && !root.loading;
                 clicked => { contents.copy-all(); }
             }

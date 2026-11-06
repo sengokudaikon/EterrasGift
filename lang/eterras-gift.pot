@@ -4195,6 +4195,10 @@ msgstr ""
 msgid "Copy the displayed log"
 msgstr ""
 
+#: crates/ui/ui/strings/logs.slint
+msgid "Copy the displayed log, which names your characters"
+msgstr ""
+
 #: crates/ui/ui/strings/logs.slint crates/ui/ui/strings/shell.slint
 msgid "Eterra's Gift"
 msgstr ""
