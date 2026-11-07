@@ -5,5 +5,7 @@
     <Version>0.7.3</Version>
     <InformationalVersion>0.7.3+fixture</InformationalVersion>
     <Nullable>enable</Nullable>
+    <!-- No PDB, so the DLL names no build folder. -->
+    <DebugType>none</DebugType>
   </PropertyGroup>
 </Project>

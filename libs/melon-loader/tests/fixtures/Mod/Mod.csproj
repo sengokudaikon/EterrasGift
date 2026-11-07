@@ -6,6 +6,8 @@
     <InformationalVersion>2.3.4+fixture</InformationalVersion>
     <Description>A metadata-only fixture.</Description>
     <Nullable>enable</Nullable>
+    <!-- No PDB, so the DLL names no build folder. -->
+    <DebugType>none</DebugType>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Loader/Loader.csproj" />

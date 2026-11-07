@@ -6,6 +6,8 @@
     <DefineConstants>$(Sample)</DefineConstants>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <Nullable>enable</Nullable>
+    <!-- No PDB, so the DLL names no build folder. -->
+    <DebugType>none</DebugType>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../../../../../libs/melon-loader/tests/fixtures/Loader/Loader.csproj" />
