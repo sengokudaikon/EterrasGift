@@ -4965,7 +4965,7 @@ dependencies = [
 [[package]]
 name = "spiderland"
 version = "0.1.0"
-source = "git+https://github.com/sengokudaikon/spiderland?rev=7d5daf7ac82cd8633351446a2b3da31e3db2c496#7d5daf7ac82cd8633351446a2b3da31e3db2c496"
+source = "git+https://github.com/sengokudaikon/spiderland?rev=51ff537b75346ebc09849b0ea4e07c29c036aeb7#51ff537b75346ebc09849b0ea4e07c29c036aeb7"
 dependencies = [
  "tokio",
 ]
@@ -4973,23 +4973,27 @@ dependencies = [
 [[package]]
 name = "spiderland-phrases"
 version = "0.1.0"
-source = "git+https://github.com/sengokudaikon/spiderland?rev=7d5daf7ac82cd8633351446a2b3da31e3db2c496#7d5daf7ac82cd8633351446a2b3da31e3db2c496"
+source = "git+https://github.com/sengokudaikon/spiderland?rev=51ff537b75346ebc09849b0ea4e07c29c036aeb7#51ff537b75346ebc09849b0ea4e07c29c036aeb7"
 dependencies = [
+ "thiserror 2.0.21",
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "spiderland-phrases-build"
 version = "0.1.0"
-source = "git+https://github.com/sengokudaikon/spiderland?rev=7d5daf7ac82cd8633351446a2b3da31e3db2c496#7d5daf7ac82cd8633351446a2b3da31e3db2c496"
+source = "git+https://github.com/sengokudaikon/spiderland?rev=51ff537b75346ebc09849b0ea4e07c29c036aeb7#51ff537b75346ebc09849b0ea4e07c29c036aeb7"
 dependencies = [
+ "proc-macro2",
  "rspolib",
+ "syn 3.0.9",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "spiderland-slint"
 version = "0.1.0"
-source = "git+https://github.com/sengokudaikon/spiderland?rev=7d5daf7ac82cd8633351446a2b3da31e3db2c496#7d5daf7ac82cd8633351446a2b3da31e3db2c496"
+source = "git+https://github.com/sengokudaikon/spiderland?rev=51ff537b75346ebc09849b0ea4e07c29c036aeb7#51ff537b75346ebc09849b0ea4e07c29c036aeb7"
 dependencies = [
  "slint",
  "spiderland",
@@ -6525,7 +6529,6 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
- "serde_json",
  "spiderland-phrases-build",
 ]
 

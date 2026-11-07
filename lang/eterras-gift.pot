@@ -551,6 +551,31 @@ msgstr ""
 msgid "The mod library is closing."
 msgstr ""
 
+#: crates/core/src/lists.rs
+msgctxt "a list of two"
+msgid "{first} and {second}"
+msgstr ""
+
+#: crates/core/src/lists.rs
+msgctxt "a list of two"
+msgid "{first} or {second}"
+msgstr ""
+
+#: crates/core/src/lists.rs
+msgctxt "a longer list, before its last item"
+msgid "{list}, {item}"
+msgstr ""
+
+#: crates/core/src/lists.rs
+msgctxt "a longer list, its last item"
+msgid "{list} and {last}"
+msgstr ""
+
+#: crates/core/src/lists.rs
+msgctxt "a longer list, its last item"
+msgid "{list} or {last}"
+msgstr ""
+
 #: crates/core/src/logs.rs
 msgid "Could not read the logs. Details are in the fault log."
 msgstr ""
@@ -4490,29 +4515,4 @@ msgstr ""
 
 #: crates/ui/ui/strings/trainer.slint
 msgid "Write the changes to the game and read them back"
-msgstr ""
-
-#: target/phrases/spiderland-phrases/src/phrase.rs
-msgctxt "a list of two"
-msgid "{first} and {second}"
-msgstr ""
-
-#: target/phrases/spiderland-phrases/src/phrase.rs
-msgctxt "a list of two"
-msgid "{first} or {second}"
-msgstr ""
-
-#: target/phrases/spiderland-phrases/src/phrase.rs
-msgctxt "a longer list, before its last item"
-msgid "{list}, {item}"
-msgstr ""
-
-#: target/phrases/spiderland-phrases/src/phrase.rs
-msgctxt "a longer list, its last item"
-msgid "{list} and {last}"
-msgstr ""
-
-#: target/phrases/spiderland-phrases/src/phrase.rs
-msgctxt "a longer list, its last item"
-msgid "{list} or {last}"
 msgstr ""

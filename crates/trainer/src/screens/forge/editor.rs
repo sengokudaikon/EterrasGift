@@ -10,8 +10,9 @@ use super::picker::{self, Chip, Filters, Index, KindFilter, LevelChoice, PICKER_
 use super::rows::{AffixRow, FieldDraft, FieldKind, FieldOption, RollRow, ValueEditor, base_key, base_of};
 use crate::backend::BackendSnapshot;
 use crate::item::template::{ItemTemplate, TemplateAffix, TemplateItem, TemplateStatus};
+use eg_core::lists::{Conjunction, list};
 use spiderland::Tracked;
-use spiderland_phrases::{Conjunction, Phrase, list, phrases};
+use spiderland_phrases::{Phrase, phrases};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;

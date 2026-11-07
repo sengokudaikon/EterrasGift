@@ -3,8 +3,9 @@
 
 use super::registry::{self, Area, Feature, FeatureField, FeatureKind, FeatureValue};
 use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameField, HookState, TrainerSession};
+use eg_core::lists::{Conjunction, list};
 use spiderland_phrases::locale::numbers;
-use spiderland_phrases::{Conjunction, Phrase, list, phrases};
+use spiderland_phrases::{Phrase, phrases};
 
 phrases! {
     TurnsOnWhen: "Turns on when {name} enters play."

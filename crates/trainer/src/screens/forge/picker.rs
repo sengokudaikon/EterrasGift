@@ -12,7 +12,8 @@
 
 use super::game::Catalog;
 use super::item::{AffixDefinition, AffixKind, Category, effects_said};
-use spiderland_phrases::{Conjunction, Phrase, list, phrases};
+use eg_core::lists::{Conjunction, list};
+use spiderland_phrases::{Phrase, phrases};
 use std::collections::BTreeMap;
 
 /// A search this long may bring in a unique's modifiers by the unique's name; a shorter one would match too many names.

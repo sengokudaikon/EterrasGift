@@ -8,11 +8,12 @@ use super::{
 };
 use crate::game::install::{GameInstall, LAST_EPOCH_DEVELOPER, LAST_EPOCH_PRODUCT};
 use crate::launch::loader::{ModLoaderState, ModLoaderSwitch, melon_paths};
+use eg_core::lists::{Conjunction, list};
 use melon_loader::assembly::{GameIdentity, LoaderVersion};
 use melon_loader::loader_state::{self, LoaderInstall, LoaderPreparation};
 use melon_loader::log::{LogProblem, MelonLog, ModLogRun};
 use melon_loader::preferences::{MelonPreferences, PreferenceKind, PreferenceValue};
-use spiderland_phrases::{Conjunction, list, phrases};
+use spiderland_phrases::phrases;
 use std::path::{Path, PathBuf};
 
 phrases! {

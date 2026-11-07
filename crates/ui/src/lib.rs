@@ -55,7 +55,7 @@ pub struct App {
 /// Shows the app in the user's language when a translation has it, else in English. Call it as soon as the first window
 /// exists, before any page or message is built.
 pub fn select_language() {
-    spiderland_slint::select_language(translations::CATALOGS);
+    spiderland_slint::select_language(translations::CATALOGS).expect("a bundled catalog's plural rule can't be read");
 }
 
 /// What a window was bound to: captures set up the forge's states through it.
