@@ -144,14 +144,14 @@ impl WindowHost<Shell> for Window {
             nav.set_pane_open(navigation.pane_open());
             nav.set_tab_row(navigation.tab_row() as i32);
         });
-        let (row, serial) = state.focus();
-        if serial > 0 {
-            self.focused.update(serial, || {
-                nav.set_focus_row(row as i32);
-                nav.set_focus_serial(serial);
-            });
-        }
-        self.entrance.update(state.page_serial(), || nav.set_page_serial(state.page_serial()));
+        // A pulse's value goes first, so the view acts on it when its serial moves.
+        let focus = state.focus();
+        self.focused.update(focus.serial(), || {
+            nav.set_focus_row(*focus.value() as i32);
+            nav.set_focus_serial(focus.serial());
+        });
+        let entrance = state.entrance().serial();
+        self.entrance.update(entrance, || nav.set_page_serial(entrance));
     }
 
     fn perform(&mut self, _: Option<&MainWindow>, effect: Never, _: &Intents<Intent>) {

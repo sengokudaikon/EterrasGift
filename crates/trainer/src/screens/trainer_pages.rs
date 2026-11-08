@@ -11,7 +11,7 @@ use super::registry::{self, Area, Feature, FeatureKind, FeatureValue};
 use super::session::{FieldRequest, FieldResult, FieldWrite, HookState, TrainerSession};
 use phrases::locale::numbers;
 use phrases::phrases;
-use spiderland::{Effects, Feature as SpiderlandFeature, Tracked, Version};
+use spiderland::{Effects, Feature as SpiderlandFeature, Pulse, Tracked, Version};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
@@ -307,8 +307,8 @@ pub struct State {
     current: Option<Area>,
     facts: Tracked<Rc<Facts>>,
     layout: Tracked<Layout>,
-    /// Changes when another page or section opens: the rows are new ones, and the list starts at its top.
-    serial: i32,
+    /// Fires when another page or section opens: the rows are new ones, and the list starts at its top.
+    opened: Pulse,
     /// The profiles as last shown, the last played first, and the character whose hooks the rows are.
     listed: Vec<Profile>,
     shown: Option<Profile>,
@@ -328,7 +328,7 @@ impl State {
             current: None,
             facts: Tracked::new(Rc::new(Facts { kept: true, ..Facts::default() })),
             layout: Tracked::new(Layout::new(section_spacing)),
-            serial: 0,
+            opened: Pulse::default(),
             listed: Vec::new(),
             shown: None,
             live: false,
@@ -347,13 +347,14 @@ impl State {
         }
     }
 
+    /// Moves each time another page or section opens.
     pub fn serial(&self) -> i32 {
-        self.serial
+        self.opened.serial()
     }
 
     /// What the rows read.
     pub fn rows_version(&self) -> (Version, Version, i32) {
-        (self.pages.version(), self.facts.version(), self.serial)
+        (self.pages.version(), self.facts.version(), self.opened.serial())
     }
 
     /// What the profile band reads.
@@ -621,7 +622,7 @@ fn show_section(state: &mut State, effects: &mut Effects<Effect>) {
             headings.push(matches!(row, Row::Heading(_)));
         }
     }
-    state.serial += 1;
+    state.opened.fire(());
     let layout = &mut *state.layout;
     layout.heights = vec![None; headings.len()];
     layout.headings = headings;

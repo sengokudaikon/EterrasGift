@@ -11,10 +11,10 @@ use eg_core::fault::{FaultDetails, FaultLog};
 use eg_trainer::backend::{BackendHandle, Command, ForgeSnapshot, forge_record};
 use eg_trainer::item::template::TemplateStore;
 use eg_trainer::screens::forge::editor::ForgeEditor;
-use eg_trainer::screens::forge::feature::{Effect, FocusTarget, Forge, Intent, State, Subscription};
+use eg_trainer::screens::forge::feature::{Effect, Focus, FocusTarget, Forge, Intent, State, Subscription};
 use eg_trainer::screens::forge::game::{PREVIEW_DELAY, Request};
 use slint::{ComponentHandle, Timer};
-use spiderland::{Dropping, Intents, Store};
+use spiderland::{Dropping, Intents, Slice, Store};
 use spiderland_slint::{Background, WindowHost, Windowed, after, on_watch};
 use std::any::Any;
 use std::collections::HashMap;
@@ -55,7 +55,7 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, background: Background,
         faults,
         templates,
         view: show::View::new(&window.global::<ForgeState>()),
-        focus_serial: 0,
+        focused: Slice::default(),
         batch_refused: false,
         mappings: HashMap::new(),
         preview: Timer::default(),
@@ -73,7 +73,7 @@ struct ForgeHost {
     /// Where the user's item templates are kept; the reducer asks for this only in a run that has it.
     templates: Option<TemplateStore>,
     view: show::View,
-    focus_serial: i32,
+    focused: Slice<i32>,
     /// The worker couldn't take the batch that the next write opens, in the effects of this render.
     batch_refused: bool,
     /// The value reads still out, by id. Dropping one drops the read.
@@ -96,8 +96,24 @@ impl WindowHost<Forge> for ForgeHost {
 
     fn render(&mut self, window: &MainWindow, state: &State, _: &Intents<Intent>) {
         self.batch_refused = false;
-        self.view.show(&window.global::<ForgeState>(), state);
+        let forge = window.global::<ForgeState>();
+        self.view.show(&forge, state);
         window.global::<TrainerState>().set_item_unavailable(state.item_unavailable().as_str().into());
+        // After the rows, which the focus lands in; a pulse's value goes first, so the view acts on it when its serial moves.
+        let focus = state.focus();
+        self.focused.update(focus.serial(), || {
+            let Focus { target, part } = *focus.value();
+            forge.set_focus_cell(match target {
+                FocusTarget::Cell(cell) => show::reference_of(cell),
+                FocusTarget::Header => CellRef {
+                    kind: CellKind::Field,
+                    row: -1,
+                    roll: -1,
+                },
+            });
+            forge.set_focus_part(part);
+            forge.set_focus_serial(focus.serial());
+        });
     }
 
     fn subscribe(&mut self, Subscription::Worker: &Subscription, intents: &Intents<Intent>) -> Box<dyn Any> {
@@ -105,28 +121,10 @@ impl WindowHost<Forge> for ForgeHost {
         Box::new(on_watch(self.backend.subscribe(), intents, move || observed(&backend)))
     }
 
-    fn perform(&mut self, window: Option<&MainWindow>, effect: Effect, intents: &Intents<Intent>) {
+    fn perform(&mut self, _: Option<&MainWindow>, effect: Effect, intents: &Intents<Intent>) {
         match effect {
             Effect::Worker(request) => self.request(request, intents),
             Effect::Observe => intents.send(observed(&self.backend)),
-            Effect::Focus { target, part } => {
-                let Some(window) = window else {
-                    return;
-                };
-                let cell = match target {
-                    FocusTarget::Cell(cell) => show::reference_of(cell),
-                    FocusTarget::Header => CellRef {
-                        kind: CellKind::Field,
-                        row: -1,
-                        roll: -1,
-                    },
-                };
-                let forge = window.global::<ForgeState>();
-                forge.set_focus_cell(cell);
-                forge.set_focus_part(part);
-                self.focus_serial += 1;
-                forge.set_focus_serial(self.focus_serial);
-            }
             Effect::ReadTemplates => {
                 if let Some(store) = self.templates.clone() {
                     self.background.run(intents, move || store.list(), Intent::TemplatesRead);

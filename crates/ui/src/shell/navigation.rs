@@ -2,7 +2,7 @@
 //! shows it in the `Nav` global.
 
 use phrases::phrases;
-use spiderland::{Effects, Feature, Never, Tracked};
+use spiderland::{Effects, Feature, Never, Pulse, Tracked};
 
 phrases! {
     Home: "Home"
@@ -334,10 +334,10 @@ pub struct State {
     navigation: Tracked<Navigation>,
     /// What the last click or key did, for the view that asked.
     answer: Outcome,
-    /// The row to move keyboard focus to, and how many times that has been asked, so the same row can be asked for again.
-    focus: (usize, i32),
-    /// Counts pages that came to show after the first, for the view's entrance (the first page never fades in).
-    page_serial: i32,
+    /// The row to move keyboard focus to; the same row can be asked for again.
+    focus: Pulse<usize>,
+    /// Fires for each page that comes to show after the first, for the view's entrance (the first page never fades in).
+    entrance: Pulse,
     /// The page last shown, to tell when another one comes to show.
     shown: Page,
 }
@@ -348,8 +348,8 @@ impl State {
             shown: navigation.current(),
             navigation: Tracked::new(navigation),
             answer: Outcome::Ignored,
-            focus: (0, 0),
-            page_serial: 0,
+            focus: Pulse::new(0),
+            entrance: Pulse::default(),
         }
     }
 
@@ -361,12 +361,12 @@ impl State {
         self.answer
     }
 
-    pub fn focus(&self) -> (usize, i32) {
+    pub fn focus(&self) -> Pulse<usize> {
         self.focus
     }
 
-    pub fn page_serial(&self) -> i32 {
-        self.page_serial
+    pub fn entrance(&self) -> Pulse {
+        self.entrance
     }
 }
 
@@ -407,12 +407,12 @@ impl Feature for Shell {
             }
         };
         if let Outcome::Handled { focus: Some(row) } = state.answer {
-            state.focus = (row, state.focus.1 + 1);
+            state.focus.fire(row);
         }
         let current = state.navigation.current();
         if state.shown != current {
             state.shown = current;
-            state.page_serial += 1;
+            state.entrance.fire(());
             effects.emit(Entered(current));
         }
     }
@@ -427,9 +427,9 @@ mod tests {
     fn a_page_coming_to_show_says_so_once_and_counts() {
         let mut state = State::new(navigation());
         assert_eq!(step::<Shell>(&mut state, Intent::Navigate(Page::Logs)).outputs, [Entered(Page::Logs)]);
-        assert_eq!(state.page_serial(), 1);
+        assert_eq!(state.entrance().serial(), 1);
         assert!(step::<Shell>(&mut state, Intent::Navigate(Page::Logs)).outputs.is_empty(), "it shows already");
-        assert_eq!(state.page_serial(), 1);
+        assert_eq!(state.entrance().serial(), 1);
     }
 
     #[test]
@@ -442,11 +442,12 @@ mod tests {
         step::<Shell>(&mut state, Intent::Click(999));
         assert_eq!(state.answer(), Outcome::Ignored);
         step::<Shell>(&mut state, Intent::Key(0, NavKey::Down));
-        let (row, first) = state.focus();
-        assert_eq!(row, 1);
+        let first = state.focus();
+        assert_eq!(*first.value(), 1);
         assert_eq!(state.answer(), Outcome::Handled { focus: Some(1) });
         step::<Shell>(&mut state, Intent::Key(0, NavKey::Down));
-        assert_eq!(state.focus(), (1, first + 1), "the same row again still moves focus");
+        assert_ne!(state.focus(), first, "the same row again still moves focus");
+        assert_eq!(*state.focus().value(), 1);
     }
 
     fn navigation() -> Navigation {

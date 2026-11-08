@@ -12,7 +12,7 @@ use crate::backend::{BackendError, BackendSnapshot, ForgeSnapshot, ForgeState, P
 use crate::definitions::catalog::GameCatalog;
 use crate::item::template::ItemTemplate;
 use phrases::phrases;
-use spiderland::{Effects, Feature, Panicked, Tracked};
+use spiderland::{Effects, Feature, Panicked, Pulse, Tracked};
 use std::sync::Arc;
 
 phrases! {
@@ -29,6 +29,13 @@ pub enum FocusTarget {
     Cell(Cell),
     /// A field of the header: the base or the identity, by its part.
     Header,
+}
+
+/// Where the keyboard's focus goes: `target`, as its `part`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Focus {
+    pub target: FocusTarget,
+    pub part: i32,
 }
 
 pub enum Intent {
@@ -151,11 +158,6 @@ pub enum Effect {
     /// Look at what the worker has now, answered with [`Intent::Observed`]: it may have published before the forge began
     /// following it.
     Observe,
-    /// Give the keyboard's focus to `target`, as its `part`.
-    Focus {
-        target: FocusTarget,
-        part: i32,
-    },
     /// Read the kept templates from their folder.
     ReadTemplates,
     /// Keep `template`, in place of the kept one named `replaced` if any.
@@ -190,6 +192,8 @@ pub struct State {
     answer: bool,
     /// The cell a typing popover last opened on, moving each time one opens.
     opened_input: Tracked<Option<Cell>>,
+    /// Where the keyboard's focus was last sent; the same cell can be asked for again.
+    focus: Pulse<Focus>,
 }
 
 impl State {
@@ -205,6 +209,10 @@ impl State {
             item_unavailable: Tracked::default(),
             answer: false,
             opened_input: Tracked::default(),
+            focus: Pulse::new(Focus {
+                target: FocusTarget::Header,
+                part: 0,
+            }),
         }
     }
 
@@ -219,6 +227,10 @@ impl State {
 
     pub fn opened_input(&self) -> &Tracked<Option<Cell>> {
         &self.opened_input
+    }
+
+    pub fn focus(&self) -> &Pulse<Focus> {
+        &self.focus
     }
 
     pub fn item_unavailable(&self) -> &Tracked<String> {
@@ -493,7 +505,7 @@ impl Feature for Forge {
                 let count = editor.affixes.len() as i32;
                 let next = (row as i32 + delta).clamp(0, (count - 1).max(0)) as usize;
                 editor.select_affix(Some(next));
-                effects.push(Effect::Focus {
+                state.focus.fire(Focus {
                     target: FocusTarget::Cell(Cell::Affix(next)),
                     part,
                 });
@@ -510,7 +522,7 @@ impl Feature for Forge {
                 );
                 if let Some((line, roll)) = target {
                     editor.select_unique(Some(line));
-                    effects.push(Effect::Focus {
+                    state.focus.fire(Focus {
                         target: FocusTarget::Cell(Cell::Unique(line, roll)),
                         part: 0,
                     });
@@ -518,7 +530,7 @@ impl Feature for Forge {
             }
             Intent::MoveImplicit { row, delta, roll } => {
                 if let Some((line, roll)) = next_with_rolls(row, delta, editor.implicits.len(), |line| Some(editor.implicits[line].rolls.len()), roll) {
-                    effects.push(Effect::Focus {
+                    state.focus.fire(Focus {
                         target: FocusTarget::Cell(Cell::Implicit(line, roll)),
                         part: 0,
                     });
@@ -543,7 +555,7 @@ impl Feature for Forge {
                     _ => None,
                 });
                 if let Some((target, part)) = focus {
-                    effects.push(Effect::Focus { target, part });
+                    state.focus.fire(Focus { target, part });
                 }
             }
             Intent::Settle => {}
@@ -738,13 +750,16 @@ mod tests {
     #[test]
     fn keys_on_a_cell_move_the_selection_and_ask_for_focus() {
         let mut state = state(true);
-        let effects = step::<Forge>(&mut state, Intent::MoveRow { row: 0, delta: 1, part: 2 }).effects;
-        assert!(matches!(
-            effects.as_slice(),
-            [Effect::Focus {
-                target: FocusTarget::Cell(Cell::Affix(0)),
-                part: 2
-            }]
-        ));
+        let asked = state.focus().serial();
+        step::<Forge>(&mut state, Intent::MoveRow { row: 0, delta: 1, part: 2 });
+        let focus = Focus {
+            target: FocusTarget::Cell(Cell::Affix(0)),
+            part: 2,
+        };
+        assert_eq!(*state.focus().value(), focus);
+        assert_ne!(state.focus().serial(), asked);
+        let asked = state.focus().serial();
+        step::<Forge>(&mut state, Intent::MoveRow { row: 0, delta: 1, part: 2 });
+        assert_ne!(state.focus().serial(), asked, "the same cell again still moves focus");
     }
 }
