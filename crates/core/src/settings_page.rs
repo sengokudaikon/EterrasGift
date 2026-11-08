@@ -969,9 +969,7 @@ fn begin_close(state: &mut State, effects: &mut Effects<Effect, Output>) {
 mod tests {
     use super::*;
     use crate::settings::SettingsStore;
-    use spiderland::step;
-    use std::cell::RefCell;
-    use std::collections::VecDeque;
+    use spiderland::{TestStore, step};
     use std::fs;
 
     fn trainer(default_on: bool) -> ModuleChoice {
@@ -1024,12 +1022,13 @@ mod tests {
         }
     }
 
-    /// The feature against a real settings service, performing effects as the window's host does, in the same order.
+    /// The feature on a real store over a real settings service, its effects performed as the window's host performs them,
+    /// those it starts with included.
     struct Page {
-        state: State,
+        store: TestStore<SettingsPage>,
         service: SettingsService,
         /// What a linked module was told.
-        switched: RefCell<Vec<(String, bool)>>,
+        switched: Vec<(String, bool)>,
         closed: bool,
         shown: bool,
         restart: bool,
@@ -1037,35 +1036,48 @@ mod tests {
 
     impl Page {
         fn new(service: SettingsService, modules: Vec<ModuleChoice>) -> Self {
-            Page {
-                state: State::new(service.snapshot(), modules, None, None),
+            let mut page = Page {
+                store: TestStore::new(State::new(service.snapshot(), modules, None, None)),
                 service,
-                switched: RefCell::default(),
+                switched: Vec::new(),
                 closed: false,
                 shown: false,
                 restart: false,
-            }
+            };
+            page.perform();
+            page
         }
 
         fn send(&mut self, intent: Intent) {
-            let mut queue = VecDeque::from([intent]);
-            while let Some(intent) = queue.pop_front() {
-                let told = step::<SettingsPage>(&mut self.state, intent);
-                // No page goes first in these tests' closes.
-                self.shown |= told.outputs.contains(&Output::ShowPage);
-                for effect in told.effects {
-                    match effect {
-                        Effect::Switched { key, on, .. } => self.switched.borrow_mut().push((key.into(), on)),
-                        Effect::Submit(save, submission) => queue.extend(submit(&self.service, save, submission)),
-                        Effect::Observe => queue.push_back(Intent::Observed(Box::new(self.service.snapshot()))),
-                        Effect::TryPause => queue.push_back(try_pause(&self.service)),
-                        Effect::Resume => self.service.resume(),
-                        Effect::Close => self.closed = true,
-                        Effect::RequestRestart(on) => self.restart = on,
-                        Effect::ReadStatus { .. } | Effect::Act { .. } | Effect::Browse(_) | Effect::Quit => {}
-                    }
+            self.store.send(intent);
+            self.perform();
+        }
+
+        /// Performs what the page asked for, and what that leads to, until it asks for nothing more.
+        fn perform(&mut self) {
+            let Page {
+                store,
+                service,
+                switched,
+                closed,
+                shown,
+                restart,
+            } = self;
+            store.answer(|effect| -> Vec<Intent> {
+                match effect {
+                    Effect::Switched { key, on, .. } => switched.push((key.into(), on)),
+                    Effect::Submit(save, submission) => return submit(service, save, submission).into(),
+                    Effect::Observe => return vec![Intent::Observed(Box::new(service.snapshot()))],
+                    Effect::TryPause => return vec![try_pause(service)],
+                    Effect::Resume => service.resume(),
+                    Effect::Close => *closed = true,
+                    Effect::RequestRestart(on) => *restart = on,
+                    Effect::ReadStatus { .. } | Effect::Act { .. } | Effect::Browse(_) | Effect::Quit => {}
                 }
-            }
+                Vec::new()
+            });
+            // No page goes first in these tests' closes.
+            *shown |= store.take_outputs().contains(&Output::ShowPage);
         }
 
         fn refresh(&mut self) {
@@ -1076,20 +1088,42 @@ mod tests {
         fn edit(&mut self, location: Location, text: &str) {
             self.send(Intent::Edit(location, text.to_owned()));
         }
-    }
 
-    impl std::ops::Deref for Page {
-        type Target = State;
-        fn deref(&self) -> &State {
-            &self.state
+        fn read<T>(&self, read: impl FnOnce(&State) -> T) -> T {
+            self.store.read(read)
+        }
+
+        /// Sets up what no intent reaches, behind the reducer's back.
+        fn change(&self, change: impl FnOnce(&mut State)) {
+            self.store.store().with_state(change);
+        }
+
+        fn kind(&self) -> MessageKind {
+            self.read(State::kind)
+        }
+
+        fn message(&self) -> String {
+            self.read(|state| state.message().to_owned())
+        }
+
+        fn location(&self, location: Location) -> String {
+            self.read(|state| state.location(location).to_owned())
+        }
+
+        fn placeholder(&self, location: Location) -> String {
+            self.read(|state| state.placeholder(location).to_owned())
         }
     }
 
-    fn page(temp: &Path) -> Page {
+    /// A service saving on the spot to a settings file in `temp`.
+    fn inline(temp: &Path) -> SettingsService {
         let root = temp.join("app");
         fs::create_dir_all(&root).unwrap();
-        let store = SettingsStore::open(&root, &temp.join("settings.json"), &[]);
-        Page::new(SettingsService::inline(store), vec![trainer(true)])
+        SettingsService::inline(SettingsStore::open(&root, &temp.join("settings.json"), &[]))
+    }
+
+    fn page(temp: &Path) -> Page {
+        Page::new(inline(temp), vec![trainer(true)])
     }
 
     #[test]
@@ -1099,16 +1133,16 @@ mod tests {
         let store = SettingsStore::open(&temp.path().join("app"), &file, &[]);
         let mut page = Page::new(SettingsService::inline(store), vec![with_sections("trainer", true)]);
         page.send(Intent::ToggleSetting(0, 1, false));
-        assert_eq!(*page.switched.borrow(), [("autoConnect".to_owned(), false)]);
+        assert_eq!(page.switched, [("autoConnect".to_owned(), false)]);
         // A save that fails still leaves the session with the choice: the session takes it before the save.
         fs::remove_file(&file).unwrap();
         fs::create_dir(&file).unwrap();
         page.send(Intent::ToggleSetting(0, 2, true));
         assert_eq!(page.kind(), MessageKind::Error);
-        assert_eq!(page.switched.borrow().last(), Some(&("iKnowWhatImDoing".to_owned(), true)));
+        assert_eq!(page.switched.last(), Some(&("iKnowWhatImDoing".to_owned(), true)));
         // A status section is not a switch.
         page.send(Intent::ToggleSetting(0, 0, true));
-        assert_eq!(page.switched.borrow().len(), 2);
+        assert_eq!(page.switched.len(), 2);
     }
 
     #[test]
@@ -1117,7 +1151,7 @@ mod tests {
         let store = SettingsStore::open(&temp.path().join("app"), &temp.path().join("settings.json"), &[]);
         let mut page = Page::new(SettingsService::inline(store), vec![with_sections("trainer", false)]);
         page.send(Intent::ToggleSetting(0, 1, false));
-        assert!(page.switched.borrow().is_empty());
+        assert!(page.switched.is_empty());
     }
 
     #[test]
@@ -1125,7 +1159,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let store = SettingsStore::open(&temp.path().join("app"), &temp.path().join("settings.json"), &[]);
         let mut page = Page::new(SettingsService::inline(store), vec![with_sections("trainer", true)]);
-        let status = |page: &Page| match &page.sections()[0].body {
+        let status = |page: &Page| match &page.read(State::sections)[0].body {
             SectionBody::Status {
                 status,
                 action_enabled,
@@ -1145,9 +1179,9 @@ mod tests {
         assert_eq!(status(&page), ("42 affixes".to_owned(), true, "Read it again", ""));
         page.send(Intent::Status(0, 0, Some(live(true, true))));
         assert_eq!(status(&page), ("42 affixes".to_owned(), false, "", ""), "a running action waits without a reason");
-        let version = page.rows_version();
+        let version = page.read(State::rows_version);
         page.send(Intent::Status(0, 0, Some(live(true, true))));
-        assert_eq!(page.rows_version(), version, "the same status leaves the rows alone");
+        assert_eq!(page.read(State::rows_version), version, "the same status leaves the rows alone");
     }
 
     #[test]
@@ -1158,10 +1192,10 @@ mod tests {
         fs::create_dir(&sources).unwrap();
         page.edit(Location::ModSources, &sources.display().to_string());
         page.send(Intent::SaveLocations);
-        assert_eq!((page.kind(), page.message()), (MessageKind::Saved, "Locations saved."));
+        assert_eq!((page.kind(), page.message().as_str()), (MessageKind::Saved, "Locations saved."));
         page.send(Intent::ToggleModule(0, false));
         page.send(Intent::ToggleModule(0, true));
-        assert_eq!((page.kind(), page.message()), (MessageKind::Saved, ""));
+        assert_eq!((page.kind(), page.message().as_str()), (MessageKind::Saved, ""));
     }
 
     fn tasks() -> task_runtime::Tasks {
@@ -1178,7 +1212,7 @@ mod tests {
         page.send(Intent::ToggleModule(0, false));
         service.wait(service.snapshot().submitted);
         page.refresh();
-        assert!(page.can_restart());
+        assert!(page.read(State::can_restart));
         let (release, waiting) = std::sync::mpsc::channel::<()>();
         service
             .module("fixture")
@@ -1188,7 +1222,7 @@ mod tests {
             })
             .unwrap();
         page.refresh();
-        assert!(page.saving() && page.can_restart());
+        assert!(page.read(|state| state.saving() && state.can_restart()));
         release.send(()).unwrap();
         service.wait(service.snapshot().submitted);
     }
@@ -1220,10 +1254,10 @@ mod tests {
     fn a_switch_saves_as_it_flips_and_waits_for_a_restart() {
         let temp = tempfile::tempdir().unwrap();
         let mut page = page(temp.path());
-        assert!(page.module_enabled(0));
+        assert!(page.read(|state| state.module_enabled(0)));
         page.send(Intent::ToggleModule(0, false));
         assert_eq!(page.message(), "Saved. Restart Eterra's Gift to turn the trainer off.");
-        assert!(page.can_restart());
+        assert!(page.read(State::can_restart));
         let saved: serde_json::Value = serde_json::from_slice(&fs::read(temp.path().join("settings.json")).unwrap()).unwrap();
         assert_eq!(saved["modules"]["trainer"], false);
         // Back to the default: the choice leaves the file, and nothing waits any more.
@@ -1238,9 +1272,9 @@ mod tests {
     fn locations_save_on_request_and_show_as_saved() {
         let temp = tempfile::tempdir().unwrap();
         let mut page = page(temp.path());
-        assert!(!page.can_save_locations());
+        assert!(!page.read(State::can_save_locations));
         page.edit(Location::UserData, "data");
-        assert!(page.can_save_locations());
+        assert!(page.read(State::can_save_locations));
         page.send(Intent::SaveLocations);
         assert_eq!(page.kind(), MessageKind::Error);
         assert!(page.message().starts_with("Locations were not saved: Enter the full path of the user-data folder"));
@@ -1249,10 +1283,10 @@ mod tests {
         page.send(Intent::SaveLocations);
         assert_eq!(page.message(), "Saved. Restart Eterra's Gift to use the new locations.");
         assert_eq!(page.location(Location::UserData), moved.display().to_string());
-        assert!(!page.can_save_locations());
+        assert!(!page.read(State::can_save_locations));
         // Upper or lower case, a box that says what is saved is not a change.
         page.edit(Location::UserData, &moved.display().to_string().to_uppercase());
-        assert!(!page.can_save_locations());
+        assert!(!page.read(State::can_save_locations));
     }
 
     #[test]
@@ -1321,8 +1355,8 @@ mod tests {
         page.edit(Location::UserData, &first.display().to_string());
         page.send(Intent::SaveLocations);
         // No transient message: what was said before stays while the save runs.
-        assert_eq!((page.kind(), page.message()), (MessageKind::Saved, ""));
-        assert!(page.saving());
+        assert_eq!((page.kind(), page.message().as_str()), (MessageKind::Saved, ""));
+        assert!(page.read(State::saving));
         page.edit(Location::UserData, &later.display().to_string());
         // A newer switch is queued too; neither acknowledgement may erase the newer location edit.
         page.send(Intent::ToggleModule(0, false));
@@ -1331,9 +1365,9 @@ mod tests {
         service.wait(ticket);
         page.refresh();
         assert_eq!(page.location(Location::UserData), later.display().to_string());
-        assert!(page.can_save_locations());
+        assert!(page.read(State::can_save_locations));
         assert_eq!(service.snapshot().store.saved().user_data_directory, Some(first));
-        assert!(!page.module_enabled(0));
+        assert!(!page.read(|state| state.module_enabled(0)));
     }
 
     #[test]
@@ -1346,13 +1380,13 @@ mod tests {
         page.edit(Location::UserData, &format!(" {}\\ ", moved.display()));
         page.send(Intent::SaveLocations);
         assert_eq!(page.kind(), MessageKind::Error);
-        assert!(page.can_retry());
+        assert!(page.read(State::can_retry));
         fs::remove_dir(&file).unwrap();
         page.send(Intent::Retry);
         assert_eq!(page.kind(), MessageKind::RestartRequired);
         assert_eq!(page.location(Location::UserData), moved.display().to_string());
-        assert!(!page.can_retry());
-        assert!(!page.can_save_locations());
+        assert!(!page.read(State::can_retry));
+        assert!(!page.read(State::can_save_locations));
     }
 
     #[test]
@@ -1369,9 +1403,9 @@ mod tests {
         .unwrap();
         let service = SettingsService::inline(SettingsStore::open(&temp.path().join("app"), &file, &[]));
         let mut page = Page::new(service.clone(), vec![with_sections("trainer", true), with_sections("second", true)]);
-        assert!(page.module_problem(0).is_some());
-        assert!(!page.state.modules[0].enabled_at_start);
-        assert!(page.state.modules[1].enabled_at_start);
+        assert!(page.read(|state| state.module_problem(0).is_some()));
+        assert!(!page.read(|state| state.modules[0].enabled_at_start));
+        assert!(page.read(|state| state.modules[1].enabled_at_start));
         page.send(Intent::ToggleSetting(0, 1, false)); // Invalid module cannot overwrite its malformed slice.
         page.send(Intent::ToggleSetting(1, 1, false));
         let saved = service.snapshot();
@@ -1389,10 +1423,10 @@ mod tests {
         assert!(!startup.is_empty());
         // The startup error stays first, as a save that did not cause it never clears it.
         page.send(Intent::ToggleModule(0, false));
-        assert_eq!((page.kind(), page.message()), (MessageKind::Error, startup.as_str()));
-        assert!(!page.can_restart());
+        assert_eq!((page.kind(), page.message().as_str()), (MessageKind::Error, startup.as_str()));
+        assert!(!page.read(State::can_restart));
         // Once nothing else is said, the switch is said to hold for this run only.
-        page.state.external_error = None;
+        page.change(|state| state.external_error = None);
         page.send(Intent::ToggleModule(0, true));
         assert_eq!(page.kind(), MessageKind::MemoryOnly);
         assert!(page.message().contains("this run only"));
@@ -1436,32 +1470,32 @@ mod tests {
     #[test]
     fn the_page_starts_by_reading_the_saves_and_what_started_modules_say() {
         let temp = tempfile::tempdir().unwrap();
-        let store = SettingsStore::open(&temp.path().join("app"), &temp.path().join("settings.json"), &[]);
-        let mut page = Page::new(SettingsService::inline(store), vec![with_sections("trainer", true), with_sections("off", false)]);
-        let effects = spiderland::start::<SettingsPage>(&mut page.state);
+        let modules = vec![with_sections("trainer", true), with_sections("off", false)];
+        let store = TestStore::<SettingsPage>::new(State::new(inline(temp.path()).snapshot(), modules, None, None));
+        let effects = store.take_effects();
         assert!(matches!(effects[..], [Effect::Observe, Effect::ReadStatus { module: 0, section: 0 }]), "{effects:?}");
     }
 
     #[test]
     fn a_close_waits_for_the_pages_that_go_first() {
         let temp = tempfile::tempdir().unwrap();
-        let mut page = page(temp.path());
-        page.state.set_close_first(1);
-        let told = step::<SettingsPage>(&mut page.state, Intent::CloseRequested);
+        let mut state = State::new(inline(temp.path()).snapshot(), vec![trainer(true)], None, None);
+        state.set_close_first(1);
+        let told = step::<SettingsPage>(&mut state, Intent::CloseRequested);
         assert_eq!(told.outputs, [Output::Lifecycle(Lifecycle::CloseRequested)]);
         assert!(told.effects.is_empty(), "saves pause only once the page before has closed");
         assert!(
-            step::<SettingsPage>(&mut page.state, Intent::CloseRequested).outputs.is_empty(),
+            step::<SettingsPage>(&mut state, Intent::CloseRequested).outputs.is_empty(),
             "a second click asks no one again"
         );
-        page.state.restart_requested = true;
-        let told = step::<SettingsPage>(&mut page.state, Intent::CloseAnswered(CloseAnswer::StayingOpen));
+        state.restart_requested = true;
+        let told = step::<SettingsPage>(&mut state, Intent::CloseAnswered(CloseAnswer::StayingOpen));
         assert!(matches!(told.effects[..], [Effect::RequestRestart(false)]), "the window stays, and nothing restarts");
         assert!(told.outputs.is_empty());
-        step::<SettingsPage>(&mut page.state, Intent::CloseRequested);
-        let told = step::<SettingsPage>(&mut page.state, Intent::CloseAnswered(CloseAnswer::Closed));
+        step::<SettingsPage>(&mut state, Intent::CloseRequested);
+        let told = step::<SettingsPage>(&mut state, Intent::CloseAnswered(CloseAnswer::Closed));
         assert!(matches!(told.effects[..], [Effect::TryPause]), "{:?}", told.effects);
-        let late = step::<SettingsPage>(&mut page.state, Intent::CloseAnswered(CloseAnswer::Closed));
+        let late = step::<SettingsPage>(&mut state, Intent::CloseAnswered(CloseAnswer::Closed));
         assert!(late.effects.is_empty(), "an answer nothing asked for");
     }
 
@@ -1481,7 +1515,7 @@ mod tests {
             })
             .unwrap();
         page.send(Intent::CloseRequested);
-        page.state.restart_requested = true;
+        page.change(|state| state.restart_requested = true);
         page.restart = true;
         let revision = service.snapshot().submitted;
         release.send(()).unwrap();
@@ -1495,13 +1529,13 @@ mod tests {
     fn rows_change_version_only_when_they_could_have_changed() {
         let temp = tempfile::tempdir().unwrap();
         let mut page = page(temp.path());
-        let (rows, boxes) = (page.rows_version(), page.boxes_version());
+        let (rows, boxes) = (page.read(State::rows_version), page.read(State::boxes_version));
         page.edit(Location::Dotnet, "typing");
-        assert_eq!(page.rows_version(), rows, "a keystroke leaves the module rows alone");
-        assert_ne!(page.boxes_version(), boxes);
-        let boxes = page.boxes_version();
+        assert_eq!(page.read(State::rows_version), rows, "a keystroke leaves the module rows alone");
+        assert_ne!(page.read(State::boxes_version), boxes);
+        let boxes = page.read(State::boxes_version);
         page.send(Intent::ToggleModule(0, false));
-        assert_ne!(page.rows_version(), rows);
-        assert_eq!(page.boxes_version(), boxes, "a switch leaves the boxes alone");
+        assert_ne!(page.read(State::rows_version), rows);
+        assert_eq!(page.read(State::boxes_version), boxes, "a switch leaves the boxes alone");
     }
 }
