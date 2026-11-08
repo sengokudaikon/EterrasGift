@@ -264,8 +264,8 @@ pub enum Intent {
     Restart,
     /// The window's close was asked for: the pages that go first finish, and then saves pause.
     CloseRequested,
-    /// A page that goes first in the window's close answered [`Lifecycle::CloseRequested`].
-    CloseAnswered(CloseAnswer),
+    /// A page that goes first in the window's close, by its index among them, answered [`Lifecycle::CloseRequested`].
+    CloseAnswered(usize, CloseAnswer),
     /// The answer to [`Effect::TryPause`]: saves are paused for closing, or are still running.
     Paused {
         paused: bool,
@@ -321,8 +321,9 @@ pub enum Effect {
 pub enum Output {
     /// Bring the Settings page into view, to show a failed save.
     ShowPage,
-    /// What the pages that go first in the window's close hear. Only [`Lifecycle::CloseRequested`] is sent: they finish
-    /// their work and keep what they must, through saves that this page then waits for, before it closes the window.
+    /// What the pages that go first in the window's close hear. [`Lifecycle::CloseRequested`]: they finish their work and
+    /// keep what they must, through saves that this page then waits for, before it closes the window.
+    /// [`Lifecycle::CloseCalledOff`]: the window stays after they were asked, so they start again what they stopped.
     Lifecycle(Lifecycle),
 }
 
@@ -877,8 +878,8 @@ impl Feature for SettingsPage {
                 restart_when_saved(state, effects);
             }
             Intent::CloseRequested => request_close(state, effects),
-            Intent::CloseAnswered(answer) => {
-                let Some(answer) = state.asking.as_mut().and_then(|asking| asking.hear(answer)) else {
+            Intent::CloseAnswered(page, answer) => {
+                let Some(answer) = state.asking.as_mut().and_then(|asking| asking.hear(page, answer)) else {
                     return;
                 };
                 state.asking = None;
@@ -889,6 +890,7 @@ impl Feature for SettingsPage {
                         if std::mem::take(&mut state.restart_requested) {
                             effects.push(Effect::RequestRestart(false));
                         }
+                        effects.emit(Output::Lifecycle(Lifecycle::CloseCalledOff));
                     }
                 }
             }
@@ -906,6 +908,10 @@ impl Feature for SettingsPage {
                 if state.snapshot.completed > observed && matches!(state.snapshot.outcome, SaveOutcome::Failed(_)) {
                     effects.push(Effect::Resume);
                     effects.emit(Output::ShowPage);
+                    // The pages that went first closed for nothing.
+                    if state.close_first > 0 {
+                        effects.emit(Output::Lifecycle(Lifecycle::CloseCalledOff));
+                    }
                     // The failure is shown instead; nothing restarts.
                     if std::mem::take(&mut state.restart_requested) {
                         effects.push(Effect::RequestRestart(false));
@@ -954,7 +960,7 @@ fn request_close(state: &mut State, effects: &mut Effects<Effect, Output>) {
         begin_close(state, effects);
         return;
     }
-    state.asking = Some(Closing::asking(state.close_first));
+    state.asking = Some(Closing::asking(0..state.close_first));
     effects.emit(Output::Lifecycle(Lifecycle::CloseRequested));
 }
 
@@ -1489,13 +1495,17 @@ mod tests {
             "a second click asks no one again"
         );
         state.restart_requested = true;
-        let told = step::<SettingsPage>(&mut state, Intent::CloseAnswered(CloseAnswer::StayingOpen));
+        let told = step::<SettingsPage>(&mut state, Intent::CloseAnswered(0, CloseAnswer::StayingOpen));
         assert!(matches!(told.effects[..], [Effect::RequestRestart(false)]), "the window stays, and nothing restarts");
-        assert!(told.outputs.is_empty());
+        assert_eq!(told.outputs, [Output::Lifecycle(Lifecycle::CloseCalledOff)], "the pages that went first hear it");
         step::<SettingsPage>(&mut state, Intent::CloseRequested);
-        let told = step::<SettingsPage>(&mut state, Intent::CloseAnswered(CloseAnswer::Closed));
+        assert!(
+            step::<SettingsPage>(&mut state, Intent::CloseAnswered(1, CloseAnswer::Closed)).effects.is_empty(),
+            "a page not asked"
+        );
+        let told = step::<SettingsPage>(&mut state, Intent::CloseAnswered(0, CloseAnswer::Closed));
         assert!(matches!(told.effects[..], [Effect::TryPause]), "{:?}", told.effects);
-        let late = step::<SettingsPage>(&mut state, Intent::CloseAnswered(CloseAnswer::Closed));
+        let late = step::<SettingsPage>(&mut state, Intent::CloseAnswered(0, CloseAnswer::Closed));
         assert!(late.effects.is_empty(), "an answer nothing asked for");
     }
 

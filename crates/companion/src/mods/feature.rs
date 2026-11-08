@@ -319,6 +319,8 @@ pub enum Intent {
     Built(Result<Result<PathBuf, String>, Panicked>),
     StopWork,
     CloseRequested,
+    /// The window stays after the page closed for it: a build the close stopped starts again.
+    CloseCalledOff,
 }
 
 #[derive(Debug)]
@@ -412,6 +414,10 @@ pub struct State {
     starting: bool,
     building: Option<String>,
     build_job: Option<BuildJob>,
+    /// What the build under way was asked as: its row, whether from sources, and whether it only installs.
+    build_request: Option<(i32, bool, bool)>,
+    /// The build a close stopped, to start again if the close is called off.
+    stopped_build: Option<(i32, bool, bool)>,
     sdk_said: bool,
     watch_pending: bool,
     watch_generation: u64,
@@ -450,6 +456,8 @@ impl State {
             starting: false,
             building: None,
             build_job: None,
+            build_request: None,
+            stopped_build: None,
             sdk_said: false,
             watch_pending: false,
             watch_generation: 0,
@@ -539,6 +547,7 @@ fn refresh(state: &mut State, effects: &mut Effects<Effect, Output>) {
 fn finish_build(state: &mut State) {
     state.building = None;
     state.build_job = None;
+    state.build_request = None;
 }
 
 fn retain_failed_settings(state: &mut State, settings: Vec<SettingKey>) {
@@ -717,6 +726,7 @@ fn build(state: &mut State, effects: &mut Effects<Effect, Output>, index: i32, s
     if state.building.is_some() {
         return;
     }
+    let request = (index, source, install_only);
     commit_settings(state, effects);
     let Ok(index) = usize::try_from(index) else {
         return;
@@ -748,6 +758,7 @@ fn build(state: &mut State, effects: &mut Effects<Effect, Output>, index: i32, s
     };
     state.building = Some(project.file());
     state.build_job = Some(BuildJob { keep_on: !source, before });
+    state.build_request = Some(request);
     // An install only reads the mods again; a build says what it builds while the compiler runs.
     if !install_only {
         say(state, BuildingName.with(&[("name", &name)]), false);
@@ -1037,10 +1048,16 @@ impl Feature for Mods {
             Intent::StopWork => effects.push(Effect::CancelBuild),
             Intent::CloseRequested => {
                 if !std::mem::replace(&mut state.closing, true) {
+                    state.stopped_build = state.build_request.filter(|_| state.building.is_some());
                     effects.push(Effect::CancelBuild);
                     commit_settings(state, effects);
                 }
                 finish_close(state, effects);
+            }
+            Intent::CloseCalledOff => {
+                if let Some((index, source, install_only)) = state.stopped_build.take() {
+                    build(state, effects, index, source, install_only);
+                }
             }
         }
     }
@@ -1783,6 +1800,28 @@ mod tests {
         assert_eq!(told.outputs, [Output::ShowPage, Output::Closed(CloseAnswer::StayingOpen)]);
         // The failure was shown: the next close goes ahead.
         assert_eq!(step::<Mods>(&mut state, Intent::CloseRequested).outputs, [Output::Closed(CloseAnswer::Closed)]);
+    }
+
+    #[test]
+    fn a_build_a_close_stopped_starts_again_when_the_close_is_called_off() {
+        let mut state = state();
+        state.inventory.mods_folder = Some(PathBuf::from(r"C:\Game\Mods"));
+        state.sources.not_installed = vec![ModProject {
+            project_file: PathBuf::from(r"C:\Sources\Fixture\Fixture.csproj"),
+            target_path: PathBuf::from(r"C:\Sources\Fixture\bin\Fixture.dll"),
+            name: "Fixture".into(),
+            version: None,
+            is_mod: true,
+        }];
+        let builds = |effects: &[Effect]| effects.iter().filter(|effect| matches!(effect, Effect::Build { .. })).count();
+        assert_eq!(builds(&send(&mut state, Intent::BuildSource(0))), 1);
+        assert!(step::<Mods>(&mut state, Intent::CloseRequested).outputs.is_empty(), "the compiler is still running");
+        assert_eq!(
+            step::<Mods>(&mut state, Intent::Built(Ok(Err("cancelled".into())))).outputs,
+            [Output::Closed(CloseAnswer::Closed)]
+        );
+        assert_eq!(builds(&send(&mut state, Intent::CloseCalledOff)), 1, "the build starts again");
+        assert!(send(&mut state, Intent::CloseCalledOff).is_empty(), "once");
     }
 
     #[test]

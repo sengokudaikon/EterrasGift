@@ -5,6 +5,7 @@ code and its tests, and what is still to build in [the helper's backlog](crates/
 
 ## 2026-11-08
 
+- Mods: a build the window's close stopped starts again when the window stays after all.
 - Logs: a fault report lists what the window did last, each page's intents by name.
 - Forge: a drafted unique roll always shows what it was, and an affix's tier menu is rescaled by a drafted base.
 - Forge: a write's, read's or preview's answer is shown in one redraw with the worker's state it was judged on.

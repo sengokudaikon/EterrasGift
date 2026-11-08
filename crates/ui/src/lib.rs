@@ -68,6 +68,9 @@ pub fn select_language() {
     let _ = slint::select_bundled_translation(language.unwrap_or(""));
 }
 
+/// Mods' index among the pages that go first in the window's close: the only one.
+const MODS_CLOSE: usize = 0;
+
 /// What a window was bound to: captures set up the forge's states through it, and the app's shutdown stops the Mods page's
 /// work.
 pub struct Installed {
@@ -106,10 +109,14 @@ pub fn install(window: &MainWindow, app: App) -> Installed {
     // for saves. Either one can keep the window open to show what failed.
     let settings = settings::bind(window, settings_page, usize::from(mods.is_some()), &shell);
     if let Some(mods) = &mods {
-        let asked = |output: &SettingsOutput| (*output == SettingsOutput::Lifecycle(Lifecycle::CloseRequested)).then_some(ModsIntent::CloseRequested);
-        settings.forward(&mods.intents(), asked);
+        let told = |output: &SettingsOutput| match output {
+            SettingsOutput::Lifecycle(Lifecycle::CloseRequested) => Some(ModsIntent::CloseRequested),
+            SettingsOutput::Lifecycle(Lifecycle::CloseCalledOff) => Some(ModsIntent::CloseCalledOff),
+            _ => None,
+        };
+        settings.forward(&mods.intents(), told);
         mods.forward(&settings.intents(), |output| match output {
-            ModsOutput::Closed(answer) => Some(SettingsIntent::CloseAnswered(*answer)),
+            ModsOutput::Closed(answer) => Some(SettingsIntent::CloseAnswered(MODS_CLOSE, *answer)),
             ModsOutput::ShowPage => None,
         });
     }
