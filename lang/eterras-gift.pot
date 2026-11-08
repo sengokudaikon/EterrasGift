@@ -518,10 +518,6 @@ msgid "Reading build output failed."
 msgstr ""
 
 #: crates/companion/src/mods/sources.rs
-msgid "Reading mod projects could not start: {error}"
-msgstr ""
-
-#: crates/companion/src/mods/sources.rs
 msgid "Reading mod projects panicked."
 msgstr ""
 

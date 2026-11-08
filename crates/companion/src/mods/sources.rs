@@ -9,11 +9,12 @@ use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, SystemTime};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 use task_runtime::CancellationToken;
 use task_runtime::{Closed, Tasks, process};
+use tokio::sync::{Semaphore, watch};
 
 use phrases::phrases;
 
@@ -23,7 +24,6 @@ phrases! {
     OutputFailed: "Reading build output failed."
     Exited: "{program} exited with {code}.\n{output}"
     ScanPanicked: "Reading mod projects panicked."
-    ScanNotStarted: "Reading mod projects could not start: {error}"
     NotBuilt: "{project} did not build. {message}"
     NotBuiltErrors: "{project} did not build: {errors}"
     NoOutput: "{project} built, but {target} is not there."
@@ -31,7 +31,6 @@ phrases! {
 
 const PROJECT_DEPTH: usize = 3;
 const OUTPUT_LIMIT: usize = 1024 * 1024;
-const POLL: Duration = Duration::from_millis(20);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModProject {
@@ -207,30 +206,40 @@ struct CachedProject {
     project: Option<ModProject>,
 }
 
-#[derive(Default)]
-struct Flight {
-    result: Mutex<Option<Result<Vec<ModProject>, SourceError>>>,
-    ready: Condvar,
-}
+/// One look at a folder, shared by everyone who asks for it while it runs: None until it has found the projects. A sender
+/// gone without a value is a look that panicked.
+type Flight = watch::Receiver<Option<Result<Vec<ModProject>, SourceError>>>;
 
+/// Local mod projects, found by evaluating each with the .NET SDK. Its work is a scope of its own on the runtime:
+/// [`ModSources::close`] cancels it and waits for it, and a panic in it counts as the runtime's.
 pub struct ModSources {
     runner: Arc<dyn ProcessRunner>,
     projects: Mutex<BTreeMap<String, CachedProject>>,
-    finding: Mutex<BTreeMap<String, Arc<Flight>>>,
+    finding: Mutex<BTreeMap<String, Flight>>,
+    tasks: Tasks,
+    /// Cancelled by the close: every look and evaluation stops.
     lifetime: CancellationToken,
     sdk_missing: AtomicBool,
-    evaluations: usize,
+    /// Held by each evaluation: at most [`evaluations`] run at once, across every look.
+    running: Arc<Semaphore>,
+}
+
+/// How many projects are evaluated at once: half the processors, at most four.
+fn evaluations() -> usize {
+    (std::thread::available_parallelism().map_or(1, usize::from) / 2).clamp(1, 4)
 }
 
 impl ModSources {
-    pub fn new(runner: Arc<dyn ProcessRunner>) -> Self {
+    pub fn new(runner: Arc<dyn ProcessRunner>, tasks: &Tasks) -> Self {
+        let tasks = tasks.scope();
         Self {
             runner,
             projects: Mutex::default(),
             finding: Mutex::default(),
-            lifetime: CancellationToken::default(),
+            lifetime: tasks.token(),
+            tasks,
             sdk_missing: AtomicBool::new(false),
-            evaluations: (std::thread::available_parallelism().map_or(1, usize::from) / 2).clamp(1, 4),
+            running: Arc::new(Semaphore::new(evaluations())),
         }
     }
 
@@ -238,22 +247,14 @@ impl ModSources {
         self.sdk_missing.load(Ordering::Acquire)
     }
 
-    /// Call during application shutdown: ordinary callers may stop waiting without cancelling a shared evaluation.
+    /// Call during application shutdown, off the reactor: ordinary callers may stop waiting without cancelling a shared
+    /// evaluation. It cancels every look and waits for them.
     pub fn close(&self) {
-        let flights: Vec<_> = {
-            let finding = self.finding.lock().unwrap();
-            self.lifetime.cancel();
-            finding.values().cloned().collect()
-        };
-        for flight in flights {
-            let mut result = flight.result.lock().unwrap();
-            while result.is_none() {
-                result = flight.ready.wait(result).unwrap();
-            }
-        }
+        self.tasks.block_on(self.tasks.close());
     }
 
-    /// Folder and SDK are the current settings, not the settings from when this service was constructed.
+    /// Folder and SDK are the current settings, not the settings from when this service was constructed. It waits on this
+    /// thread, so call it off the UI thread and the reactor.
     pub fn find(self: &Arc<Self>, folder: Option<&Path>, sdk: Option<&Path>, cancel: &CancellationToken) -> Result<Vec<ModProject>, SourceError> {
         cancelled(cancel)?;
         let Some(folder) = folder.filter(|folder| folder.is_dir()) else {
@@ -263,80 +264,92 @@ impl ModSources {
         let folder = file_ops::paths::normalized(folder);
         let executable = dotnet::executable(sdk);
         let key = format!("{}|{}", path_key(&folder), path_key(&executable));
-        let flight = {
+        let mut flight = {
             let mut finding = self.finding.lock().unwrap();
             cancelled(&self.lifetime)?;
             // Completed looks are replaced, but overlapping callers share even uncached project evaluations.
-            finding.retain(|_, flight| flight.result.lock().unwrap().is_none());
+            finding.retain(|_, flight| flight.borrow().is_none());
             if let Some(flight) = finding.get(&key) {
                 flight.clone()
             } else {
-                let flight = Arc::new(Flight::default());
-                finding.insert(key, flight.clone());
+                let (found, flight) = watch::channel(None);
                 let owner = self.clone();
-                let answer = flight.clone();
-                if let Err(error) = std::thread::Builder::new().name("mod-source-scan".into()).spawn(move || {
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| owner.find_in(&folder, &executable, &owner.lifetime)))
-                        .unwrap_or_else(|_| Err(SourceError::Failed(ScanPanicked.into())));
-                    *answer.result.lock().unwrap() = Some(result);
-                    answer.ready.notify_all();
-                }) {
-                    *flight.result.lock().unwrap() = Some(Err(SourceError::Failed(ScanNotStarted.with(&[("error", &error)]))));
-                }
+                // Refused only once the close has begun.
+                self.tasks
+                    .spawn(async move {
+                        let result = owner.find_in(folder, executable).await;
+                        found.send_replace(Some(result));
+                    })
+                    .map_err(|Closed| SourceError::Cancelled)?;
+                finding.insert(key, flight.clone());
                 flight
             }
         };
-        let mut result = flight.result.lock().unwrap();
-        loop {
-            cancelled(cancel)?;
-            if let Some(result) = result.as_ref() {
-                return result.clone();
+        self.tasks.block_on(async {
+            tokio::select! {
+                biased;
+                () = cancel.cancelled() => Err(SourceError::Cancelled),
+                found = flight.wait_for(Option::is_some) => match found {
+                    Ok(found) => found.clone().expect("waited for a value"),
+                    Err(_) => Err(SourceError::Failed(ScanPanicked.into())),
+                },
             }
-            result = flight.ready.wait_timeout(result, POLL).unwrap().0;
-        }
+        })
     }
 
-    fn find_in(&self, folder: &Path, executable: &Path, cancel: &CancellationToken) -> Result<Vec<ModProject>, SourceError> {
-        let files = project_files(folder, PROJECT_DEPTH)?;
-        let next = AtomicUsize::new(0);
-        let missing = AtomicBool::new(false);
-        let found = Mutex::new(Vec::new());
-        let failure = Mutex::new(None);
-        std::thread::scope(|scope| {
-            for _ in 0..self.evaluations.min(files.len()) {
-                scope.spawn(|| {
-                    loop {
-                        if cancel.is_cancelled() {
-                            *failure.lock().unwrap() = Some(SourceError::Cancelled);
-                            break;
-                        }
-                        let index = next.fetch_add(1, Ordering::Relaxed);
-                        let Some(file) = files.get(index) else { break };
-                        match self.evaluate(file, folder, executable, cancel) {
-                            Ok((project, started)) => {
-                                if !started {
-                                    missing.store(true, Ordering::Relaxed);
-                                }
-                                if let Some(project) = project {
-                                    found.lock().unwrap().push((index, project));
-                                }
-                            }
-                            Err(error) => *failure.lock().unwrap() = Some(error),
-                        }
-                    }
-                });
+    /// Evaluates every project under `folder`, at most [`evaluations`] at once, each on the blocking pool.
+    async fn find_in(self: Arc<Self>, folder: PathBuf, executable: PathBuf) -> Result<Vec<ModProject>, SourceError> {
+        let files = {
+            let folder = folder.clone();
+            match self.tasks.spawn_blocking(move || project_files(&folder, PROJECT_DEPTH)) {
+                Ok(files) => files.await.map_err(|_| SourceError::Failed(ScanPanicked.into()))??,
+                Err(Closed) => return Err(SourceError::Cancelled),
             }
-        });
-        self.sdk_missing.store(missing.load(Ordering::Relaxed), Ordering::Release);
-        if let Some(error) = failure.into_inner().unwrap() {
-            return Err(error);
+        };
+        let (folder, executable) = (Arc::new(folder), Arc::new(executable));
+        let mut evaluations = Vec::with_capacity(files.len());
+        let mut failure = None;
+        for file in files {
+            let permit = tokio::select! {
+                biased;
+                () = self.lifetime.cancelled() => None,
+                permit = self.running.clone().acquire_owned() => permit.ok(),
+            };
+            let Some(permit) = permit else {
+                failure = Some(SourceError::Cancelled);
+                break;
+            };
+            let (owner, folder, executable) = (self.clone(), folder.clone(), executable.clone());
+            match self.tasks.spawn_blocking(move || {
+                let _permit = permit;
+                owner.evaluate(&file, &folder, &executable, &owner.lifetime)
+            }) {
+                Ok(evaluation) => evaluations.push(evaluation),
+                Err(Closed) => {
+                    failure = Some(SourceError::Cancelled);
+                    break;
+                }
+            }
         }
-        let mut found = found.into_inner().unwrap();
-        found.sort_by_key(|(index, _)| *index);
-        Ok(found.into_iter().map(|(_, project)| project).collect())
+        let mut found = Vec::new();
+        let mut missing = false;
+        // Every evaluation started is awaited, even after a failure, so none outlives the look.
+        for evaluation in evaluations {
+            match evaluation.await {
+                Ok(Ok((project, started))) => {
+                    missing |= !started;
+                    found.extend(project);
+                }
+                Ok(Err(error)) => failure = Some(error),
+                Err(_) => failure = Some(SourceError::Failed(ScanPanicked.into())),
+            }
+        }
+        self.sdk_missing.store(missing, Ordering::Release);
+        failure.map_or(Ok(found), Err)
     }
 
     fn evaluate(&self, file: &Path, folder: &Path, executable: &Path, cancel: &CancellationToken) -> Result<(Option<ModProject>, bool), SourceError> {
+        cancelled(cancel)?;
         let key = format!("{}|{}|{}", path_key(file), path_key(folder), path_key(executable));
         let known = self.projects.lock().unwrap().get(&key).cloned();
         let imports = known.as_ref().map_or(&[][..], |known| known.imports.as_slice());

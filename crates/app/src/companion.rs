@@ -23,7 +23,7 @@ pub struct Companion {
 impl Companion {
     pub fn new(store: &SettingsStore, tasks: Tasks) -> Self {
         let mods = ModWorker::new(ModLibrary::new(store.paths().mod_library_directory.clone()), &tasks);
-        let sources = Arc::new(ModSources::new(Arc::new(SystemProcessRunner::new(tasks))));
+        let sources = Arc::new(ModSources::new(Arc::new(SystemProcessRunner::new(tasks.clone())), &tasks));
         // Locations are read once: new choices wait for a restart.
         let host = FileGameHost::new(store.active_game_executable(), &folders::player_log(), store.active_melon_loader_directory()).with_mod_worker(mods.clone());
         let launcher = Arc::new(GameLauncher::new(Arc::new(host)));

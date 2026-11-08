@@ -105,7 +105,7 @@ impl Session {
             settings,
             root,
             library,
-            sources: Arc::new(ModSources::new(Arc::new(NoExternalProcess))),
+            sources: Arc::new(ModSources::new(Arc::new(NoExternalProcess), &self.tasks)),
         }
     }
 
@@ -267,7 +267,7 @@ fn mods_sources(session: &Session) {
         target: project.join("bin/Release/NearbyMarkers.dll"),
         builds: Default::default(),
     });
-    fixture.sources = Arc::new(ModSources::new(runner.clone()));
+    fixture.sources = Arc::new(ModSources::new(runner.clone(), &session.tasks));
     let settings_file = folder.join("sources-settings.json");
     std::fs::write(&settings_file, serde_json::json!({"schemaVersion":2,"modSourcesDirectory":sources}).to_string()).unwrap();
     fixture.settings = SettingsService::inline(SettingsStore::open(&folder.join("app"), &settings_file, &[]));
@@ -652,7 +652,7 @@ pub(super) fn mods_captures(session: &Session) {
             settings: SettingsService::inline(SettingsStore::open(&folder.join("app"), &settings_file, &[])),
             root,
             library,
-            sources: Arc::new(ModSources::new(runner)),
+            sources: Arc::new(ModSources::new(runner, &session.tasks)),
         }
     };
     fn state(ui: &MainWindow) -> ModsState<'_> {
@@ -788,7 +788,7 @@ pub(super) fn mods_captures(session: &Session) {
         settings: SettingsService::inline(SettingsStore::open(&folder.join("app"), &folder.join("settings.json"), &[])),
         root: root.clone(),
         library: folder.join("Library"),
-        sources: Arc::new(ModSources::new(Arc::new(NoExternalProcess))),
+        sources: Arc::new(ModSources::new(Arc::new(NoExternalProcess), &session.tasks)),
     };
     let ui = session.open_mods(&fixture, 1100, 700);
     assert_eq!(state(&ui).get_installed_count(), 0);

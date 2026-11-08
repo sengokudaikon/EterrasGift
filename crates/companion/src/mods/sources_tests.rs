@@ -1,7 +1,14 @@
 use super::*;
 use serde_json::json;
-use std::sync::mpsc;
-use std::time::Instant;
+use std::sync::atomic::AtomicUsize;
+use std::sync::{LazyLock, mpsc};
+use std::time::{Duration, Instant};
+use task_runtime::Runtime;
+
+fn tasks() -> Tasks {
+    static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::start().unwrap());
+    RUNTIME.tasks()
+}
 
 #[derive(Default)]
 struct Runner {
@@ -83,7 +90,7 @@ fn modified_at(file: &Path, seconds: u64) {
 }
 
 fn service(runner: &Arc<Runner>) -> Arc<ModSources> {
-    Arc::new(ModSources::new(runner.clone()))
+    Arc::new(ModSources::new(runner.clone(), &tasks()))
 }
 
 fn wait_until(mut condition: impl FnMut() -> bool) {
@@ -237,12 +244,12 @@ fn parallel_evaluations_are_bounded_and_shutdown_cancels_and_drains_them() {
     let sources = service(&runner);
     std::thread::scope(|scope| {
         let result = scope.spawn(|| sources.find(Some(temp.path()), None, &CancellationToken::default()));
-        wait_until(|| runner.active.load(Ordering::Acquire) == sources.evaluations);
+        wait_until(|| runner.active.load(Ordering::Acquire) == evaluations());
         sources.close();
         assert_eq!(result.join().unwrap(), Err(SourceError::Cancelled));
     });
     assert_eq!(runner.active.load(Ordering::Acquire), 0);
-    assert_eq!(runner.maximum.load(Ordering::Relaxed), sources.evaluations);
+    assert_eq!(runner.maximum.load(Ordering::Relaxed), evaluations());
     assert!(runner.started.load(Ordering::Relaxed) <= 4);
     assert_eq!(sources.find(Some(temp.path()), None, &CancellationToken::default()), Err(SourceError::Cancelled));
 }
@@ -408,7 +415,7 @@ fn process_runner_says_cancelled_once_the_runtime_has_closed() {
 }
 
 #[test]
-fn an_evaluator_panic_is_reported_and_releases_all_waiters() {
+fn an_evaluator_panic_is_reported_releases_all_waiters_and_counts_as_the_runtimes() {
     struct Panicking;
     impl ProcessRunner for Panicking {
         fn run(&self, _: &ProcessRequest, _: &CancellationToken) -> Result<String, ProcessError> {
@@ -417,11 +424,13 @@ fn an_evaluator_panic_is_reported_and_releases_all_waiters() {
     }
     let temp = tempfile::tempdir().unwrap();
     project(temp.path(), "Loom.csproj");
-    let sources = Arc::new(ModSources::new(Arc::new(Panicking)));
+    let runtime = Runtime::start().unwrap();
+    let sources = Arc::new(ModSources::new(Arc::new(Panicking), &runtime.tasks()));
     let (tx, rx) = mpsc::channel();
     std::thread::scope(|scope| {
         scope.spawn(|| tx.send(sources.find(Some(temp.path()), None, &CancellationToken::default())).unwrap());
         assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap_err().to_string().contains("panicked"));
     });
     sources.close();
+    assert!(runtime.shutdown(), "the app's exit code hears of it");
 }
