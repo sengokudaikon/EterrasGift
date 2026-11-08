@@ -32,3 +32,7 @@ refuses the operation.
 - Closed `List<T>` calls use `CheckedMethod` with an explicit allowlist of concrete reference classes, keeping the receiver,
   argument and result checks. Ordinary binding refuses generics.
 - Virtual dispatch must use the exact resolved override. Direct lookups reject virtual, abstract and native replacements.
+- Every method lookup is a `MethodQuery` for `find_method`: its name and parameters choose the candidates, and the rest is a
+  contract the one chosen must meet. What another method of the name does is the query's: it fails the lookup, or one of
+  another count is passed over, or any overload is. `nearest_declaring` finds the parent that declares a method, and
+  `InvocationApi::dispatched` the override a receiver runs.
