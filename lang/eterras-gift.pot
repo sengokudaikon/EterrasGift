@@ -579,60 +579,8 @@ msgstr ""
 msgid "The mod library is closing."
 msgstr ""
 
-#: crates/companion/src/settings.rs crates/core/src/settings.rs
-msgid ".NET SDK folder"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Browse for the .NET SDK folder"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Browse for the MelonLoader folder"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Browse for the game executable"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Browse for the mod library folder"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Browse for the mod sources folder"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Browse for the user-data folder"
-msgstr ""
-
 #: crates/companion/src/settings.rs
 msgid "Changes last for this run only. Save locations replaces the unreadable file."
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Choose a folder with MelonLoader in it (a copy of the game's MelonLoader folder), or leave it empty for the game folder."
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Choose the folder that holds dotnet.exe, or leave it empty to find the .NET SDK automatically."
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Every mod version you install, and which mods are on. A new folder takes effect after a restart."
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Fault reports, trainer labels, game definitions and, unless it has its own folder, the mod library. A new folder takes effect after a restart."
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Game executable"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Leave empty to find the game automatically."
 msgstr ""
 
 #: crates/companion/src/settings.rs
@@ -641,22 +589,6 @@ msgstr ""
 
 #: crates/companion/src/settings.rs
 msgid "Locations were not saved: {error}"
-msgstr ""
-
-#: crates/companion/src/settings.rs crates/core/src/settings.rs
-msgid "MelonLoader folder"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Mod library"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Mod library folder"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Mod sources folder"
 msgstr ""
 
 #: crates/companion/src/settings.rs
@@ -680,51 +612,11 @@ msgid "Saved. Restart Eterra's Gift to use the new locations."
 msgstr ""
 
 #: crates/companion/src/settings.rs
-msgid "Select the Last Epoch executable"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Select the folder MelonLoader runs from"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Select the folder with dotnet.exe"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Select the mod library folder"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Select the mod sources folder"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Select user-data folder"
-msgstr ""
-
-#: crates/companion/src/settings.rs
 msgid "Settings were not saved: {reason}"
 msgstr ""
 
 #: crates/companion/src/settings.rs
-msgid "The folder with dotnet.exe, which builds mod projects. Leave empty to find it automatically."
-msgstr ""
-
-#: crates/companion/src/settings.rs
 msgid "The game folder"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "User-data folder"
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Where games with mods run MelonLoader from. Leave empty for the game folder. Another folder needs a copy of MelonLoader 0.6.6 or later. Takes effect after a restart."
-msgstr ""
-
-#: crates/companion/src/settings.rs
-msgid "Your own mod projects, for the Mods page to build and install. The .NET SDK reads every project here, so keep only projects you trust."
 msgstr ""
 
 #: crates/companion/src/settings.rs
@@ -737,6 +629,114 @@ msgstr ""
 
 #: crates/companion/src/settings.rs
 msgid "{module} on"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs crates/core/src/settings.rs
+msgid ".NET SDK folder"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Browse for the .NET SDK folder"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Browse for the MelonLoader folder"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Browse for the game executable"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Browse for the mod library folder"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Browse for the mod sources folder"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Browse for the user-data folder"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Choose a folder with MelonLoader in it (a copy of the game's MelonLoader folder), or leave it empty for the game folder."
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Choose the folder that holds dotnet.exe, or leave it empty to find the .NET SDK automatically."
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Every mod version you install, and which mods are on. A new folder takes effect after a restart."
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Fault reports, trainer labels, game definitions and, unless it has its own folder, the mod library. A new folder takes effect after a restart."
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Game executable"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Leave empty to find the game automatically."
+msgstr ""
+
+#: crates/companion/src/settings/location.rs crates/core/src/settings.rs
+msgid "MelonLoader folder"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Mod library"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Mod library folder"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Mod sources folder"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Select the Last Epoch executable"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Select the folder MelonLoader runs from"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Select the folder with dotnet.exe"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Select the mod library folder"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Select the mod sources folder"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Select user-data folder"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "The folder with dotnet.exe, which builds mod projects. Leave empty to find it automatically."
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "User-data folder"
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Where games with mods run MelonLoader from. Leave empty for the game folder. Another folder needs a copy of MelonLoader 0.6.6 or later. Takes effect after a restart."
+msgstr ""
+
+#: crates/companion/src/settings/location.rs
+msgid "Your own mod projects, for the Mods page to build and install. The .NET SDK reads every project here, so keep only projects you trust."
 msgstr ""
 
 #: crates/core/src/lists.rs
