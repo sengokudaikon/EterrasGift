@@ -13,9 +13,9 @@ use eg_trainer::item::template::TemplateStore;
 use eg_trainer::screens::forge::editor::ForgeEditor;
 use eg_trainer::screens::forge::feature::{Effect, FocusTarget, Forge, Intent, State, Subscription};
 use eg_trainer::screens::forge::game::{PREVIEW_DELAY, Request};
-use slint::{ComponentHandle, Timer, Weak};
-use spiderland::{Dropping, Host, Intents, Store};
-use spiderland_slint::{Background, after, on_watch};
+use slint::{ComponentHandle, Timer};
+use spiderland::{Dropping, Intents, Store};
+use spiderland_slint::{Background, WindowHost, Windowed, after, on_watch};
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -51,7 +51,6 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, background: Background,
     state.editor_mut().keeps_templates = templates.is_some();
     let first = observed(&backend);
     let host = ForgeHost {
-        window: window.as_weak(),
         backend,
         background,
         faults,
@@ -62,7 +61,7 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, background: Background,
         mappings: HashMap::new(),
         preview: Timer::default(),
     };
-    let store = Store::new(state, host);
+    let store = Store::new(state, Windowed::new(window, host));
     connect::connect(&window.global::<ForgeState>(), &store);
     let intents = store.intents();
     shell.on_page_entered(move |page| intents.send(Intent::PageChanged { forge: page == Page::Forge }));
@@ -73,7 +72,6 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, background: Background,
 }
 
 struct ForgeHost {
-    window: Weak<MainWindow>,
     backend: BackendHandle,
     background: Background,
     faults: Option<FaultLog>,
@@ -98,12 +96,11 @@ fn observed(backend: &BackendHandle) -> Intent {
     }
 }
 
-impl Host<Forge> for ForgeHost {
-    fn render(&mut self, state: &State, _: &Intents<Intent>) {
+impl WindowHost<Forge> for ForgeHost {
+    type Window = MainWindow;
+
+    fn render(&mut self, window: &MainWindow, state: &State, _: &Intents<Intent>) {
         self.batch_refused = false;
-        let Some(window) = self.window.upgrade() else {
-            return;
-        };
         self.view.show(&window.global::<ForgeState>(), state);
         window.global::<TrainerState>().set_item_unavailable(state.item_unavailable().as_str().into());
     }
@@ -113,11 +110,11 @@ impl Host<Forge> for ForgeHost {
         Box::new(on_watch(self.backend.subscribe(), intents, move || observed(&backend)))
     }
 
-    fn perform(&mut self, effect: Effect, intents: &Intents<Intent>) {
+    fn perform(&mut self, window: Option<&MainWindow>, effect: Effect, intents: &Intents<Intent>) {
         match effect {
             Effect::Worker(request) => self.request(request, intents),
             Effect::Focus { target, part } => {
-                let Some(window) = self.window.upgrade() else {
+                let Some(window) = window else {
                     return;
                 };
                 let cell = match target {

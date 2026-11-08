@@ -7,9 +7,9 @@ pub use navigation::{Effect, Intent, NavKey, Navigation, Node, Outcome, Page, Sh
 
 use crate::{MainWindow, Nav, NavOutcome, NavRow, Tokens};
 use slint::platform::Key;
-use slint::{ComponentHandle, Image, Weak};
-use spiderland::{Host, Intents, Slice, Store, Version, callbacks};
-use spiderland_slint::Rows;
+use slint::{ComponentHandle, Image};
+use spiderland::{Intents, Slice, Store, Version, callbacks};
+use spiderland_slint::{Rows, WindowHost, Windowed};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -38,7 +38,6 @@ fn key_of(text: &str) -> Option<NavKey> {
 type PageEntered = Box<dyn Fn(Page)>;
 
 struct Window {
-    window: Weak<MainWindow>,
     rows: Rows<NavRow>,
     footer: Rows<NavRow>,
     /// The rail's flyout of trainer pages.
@@ -53,7 +52,6 @@ struct Window {
 pub fn bind(window: &MainWindow, navigation: Navigation) -> ShellHandle {
     let entered = Rc::default();
     let host = Window {
-        window: window.as_weak(),
         rows: Rows::default(),
         footer: Rows::default(),
         flyout: Rows::default(),
@@ -66,7 +64,7 @@ pub fn bind(window: &MainWindow, navigation: Navigation) -> ShellHandle {
     nav.set_rows(host.rows.model());
     nav.set_footer(host.footer.model());
     nav.set_flyout_pages(host.flyout.model());
-    let store = Store::<Shell>::new(State::new(navigation), host);
+    let store = Store::<Shell>::new(State::new(navigation), Windowed::new(window, host));
 
     callbacks!(nav, store, {
         on_toggle_pane: || Intent::TogglePane,
@@ -133,11 +131,10 @@ impl ShellHandle {
     }
 }
 
-impl Host<Shell> for Window {
-    fn render(&mut self, state: &State, _: &Intents<Intent>) {
-        let Some(window) = self.window.upgrade() else {
-            return;
-        };
+impl WindowHost<Shell> for Window {
+    type Window = MainWindow;
+
+    fn render(&mut self, window: &MainWindow, state: &State, _: &Intents<Intent>) {
         let tokens = window.global::<Tokens>();
         let nav = window.global::<Nav>();
         let navigation = state.navigation();
@@ -164,7 +161,7 @@ impl Host<Shell> for Window {
         self.entrance.update(state.page_serial(), || nav.set_page_serial(state.page_serial()));
     }
 
-    fn perform(&mut self, Effect::Entered(page): Effect, _: &Intents<Intent>) {
+    fn perform(&mut self, _: Option<&MainWindow>, Effect::Entered(page): Effect, _: &Intents<Intent>) {
         for entered in self.entered.borrow().iter() {
             entered(page);
         }

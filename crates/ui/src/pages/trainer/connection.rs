@@ -9,9 +9,9 @@ use crate::{
 };
 use eg_trainer::backend::{BackendHandle, Command, Phase};
 use eg_trainer::screens::connection::{Access, ConnectionFeature, ConnectionView, Effect, Intent, State, Subscription, connect_command, unbound as unbound_view};
-use slint::{ComponentHandle, Weak};
-use spiderland::{Host, Intents, Slice, Store, Version, callbacks};
-use spiderland_slint::on_watch;
+use slint::ComponentHandle;
+use spiderland::{Intents, Slice, Store, Version, callbacks};
+use spiderland_slint::{WindowHost, Windowed, on_watch};
 use std::any::Any;
 use std::rc::Rc;
 
@@ -43,7 +43,6 @@ pub fn unbound(window: &MainWindow, trainer: bool) {
 
 struct Window {
     backend: BackendHandle,
-    window: Weak<MainWindow>,
     decorations: Rc<Decorations<MainWindow>>,
     shown: Slice<Version>,
 }
@@ -61,12 +60,14 @@ fn observed(backend: &BackendHandle) -> Intent {
 pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, decorations: Rc<Decorations<MainWindow>>) {
     let store = Store::<ConnectionFeature>::new(
         State::new(shell.current().is_trainer()),
-        Window {
-            backend: backend.clone(),
-            window: window.as_weak(),
-            decorations,
-            shown: Slice::default(),
-        },
+        Windowed::new(
+            window,
+            Window {
+                backend: backend.clone(),
+                decorations,
+                shown: Slice::default(),
+            },
+        ),
     );
     store.send(observed(&backend));
     callbacks!(window.global::<Connection>(), store, {
@@ -75,12 +76,11 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, de
     shell.on_page_entered(move |page| store.send(if page.is_trainer() { Intent::TrainerPageEntered } else { Intent::OtherPageEntered }));
 }
 
-impl Host<ConnectionFeature> for Window {
-    fn render(&mut self, state: &State, _: &Intents<Intent>) {
-        let Some(window) = self.window.upgrade() else {
-            return;
-        };
-        self.shown.update(state.view().version(), || show(&window, state.view()));
+impl WindowHost<ConnectionFeature> for Window {
+    type Window = MainWindow;
+
+    fn render(&mut self, window: &MainWindow, state: &State, _: &Intents<Intent>) {
+        self.shown.update(state.view().version(), || show(window, state.view()));
     }
 
     fn subscribe(&mut self, Subscription::Worker: &Subscription, intents: &Intents<Intent>) -> Box<dyn Any> {
@@ -88,7 +88,7 @@ impl Host<ConnectionFeature> for Window {
         Box::new(on_watch(self.backend.subscribe(), intents, move || observed(&backend)))
     }
 
-    fn perform(&mut self, effect: Effect, intents: &Intents<Intent>) {
+    fn perform(&mut self, window: Option<&MainWindow>, effect: Effect, intents: &Intents<Intent>) {
         match effect {
             Effect::Connect => {
                 // By the phase the worker is in now, not the last one shown.
@@ -103,7 +103,7 @@ impl Host<ConnectionFeature> for Window {
                 }
             }
             Effect::WorkerChanged => {
-                if let Some(window) = self.window.upgrade() {
+                if let Some(window) = window {
                     window.global::<SettingsState>().invoke_backend_updated();
                 }
             }

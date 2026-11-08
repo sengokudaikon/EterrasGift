@@ -6,9 +6,9 @@ use crate::{LogsState, MainWindow};
 use eg_core::logs::{Effect, Intent, LogFiles, Logs, Source, State, Subscription, WATCH_INTERVAL, read};
 use eg_trainer::backend::BackendHandle;
 use phrases::phrases;
-use slint::{ComponentHandle, Weak};
-use spiderland::{Host, Intents, Slice, Store, Version, callbacks};
-use spiderland_slint::{Background, every};
+use slint::ComponentHandle;
+use spiderland::{Intents, Slice, Store, Version, callbacks};
+use spiderland_slint::{Background, WindowHost, Windowed, every};
 use std::any::Any;
 
 phrases! {
@@ -37,20 +37,21 @@ struct Window {
     files: Option<LogFiles>,
     backend: Option<BackendHandle>,
     background: Background,
-    window: Weak<MainWindow>,
     contents: Slice<Version>,
 }
 
 pub(crate) fn bind(window: &MainWindow, files: Option<LogFiles>, backend: Option<BackendHandle>, background: Background, shell: &ShellHandle) {
     let store = Store::<Logs>::new(
         State::default(),
-        Window {
-            files,
-            backend,
-            background,
-            window: window.as_weak(),
-            contents: Slice::default(),
-        },
+        Windowed::new(
+            window,
+            Window {
+                files,
+                backend,
+                background,
+                contents: Slice::default(),
+            },
+        ),
     );
     let state = window.global::<LogsState>();
     callbacks!(state, store, {
@@ -75,11 +76,10 @@ fn source_of(index: i32) -> Option<Source> {
     }
 }
 
-impl Host<Logs> for Window {
-    fn render(&mut self, state: &State, _: &Intents<Intent>) {
-        let Some(window) = self.window.upgrade() else {
-            return;
-        };
+impl WindowHost<Logs> for Window {
+    type Window = MainWindow;
+
+    fn render(&mut self, window: &MainWindow, state: &State, _: &Intents<Intent>) {
         let view = window.global::<LogsState>();
         view.set_source(match state.source() {
             Source::App => 0,
@@ -99,7 +99,7 @@ impl Host<Logs> for Window {
         Box::new(every(WATCH_INTERVAL, intents, || Intent::Watch))
     }
 
-    fn perform(&mut self, effect: Effect, intents: &Intents<Intent>) {
+    fn perform(&mut self, _: Option<&MainWindow>, effect: Effect, intents: &Intents<Intent>) {
         let Effect::Read { generation, source } = effect;
         let files = self.files.clone();
         let status = status(self.backend.as_ref());

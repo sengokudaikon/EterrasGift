@@ -9,9 +9,9 @@ pub use eg_core::settings_page::{LiveStatus, ModuleChoice, ModuleLink, ModuleSec
 use crate::{LocationSetting, MainWindow, MessageTone, ModuleRow, Nav, SettingsSectionRow, SettingsState};
 use eg_core::settings_page::{Effect, Intent, Location, LocationView, MessageKind, ModuleRowView, SectionBody, SectionView, SettingsPage, State, Subscription, submit, try_pause};
 use eg_core::settings_service::SettingsService;
-use slint::{ComponentHandle, Timer, Weak};
-use spiderland::{Host, Intents, Slice, Store, Version, callbacks};
-use spiderland_slint::{Rows, on_wake};
+use slint::{ComponentHandle, Timer};
+use spiderland::{Intents, Slice, Store, Version, callbacks};
+use spiderland_slint::{Rows, WindowHost, Windowed, on_wake};
 use std::any::Any;
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -74,7 +74,6 @@ struct Window {
     close_first: Option<Rc<dyn Fn()>>,
     links: BTreeMap<usize, Rc<dyn ModuleLink>>,
     restart: RestartRequest,
-    window: Weak<MainWindow>,
     modules: Rows<ModuleRow>,
     sections: Rows<SettingsSectionRow>,
     locations: Rows<LocationSetting>,
@@ -92,7 +91,6 @@ pub(crate) fn bind(window: &MainWindow, settings: Settings, close_first: Option<
         close_first,
         links,
         restart,
-        window: window.as_weak(),
         modules: Rows::default(),
         sections: Rows::default(),
         locations: Rows::default(),
@@ -104,7 +102,7 @@ pub(crate) fn bind(window: &MainWindow, settings: Settings, close_first: Option<
     view.set_modules(host.modules.model());
     view.set_sections(host.sections.model());
     view.set_locations(host.locations.model());
-    let store = Store::<SettingsPage>::new(state, host);
+    let store = Store::<SettingsPage>::new(state, Windowed::new(window, host));
     // A save that finished before the listener was there, and what linked modules say to begin with.
     store.send(Intent::Observed(Box::new(service.snapshot())));
     store.send(Intent::LinkChanged);
@@ -209,11 +207,10 @@ fn location_row(view: LocationView) -> LocationSetting {
     }
 }
 
-impl Host<SettingsPage> for Window {
-    fn render(&mut self, state: &State, _: &Intents<Intent>) {
-        let Some(window) = self.window.upgrade() else {
-            return;
-        };
+impl WindowHost<SettingsPage> for Window {
+    type Window = MainWindow;
+
+    fn render(&mut self, window: &MainWindow, state: &State, _: &Intents<Intent>) {
         let (modules, sections, locations) = (&self.modules, &self.sections, &self.locations);
         self.shown_rows.update(state.rows_version(), || {
             modules.sync(state.rows().into_iter().map(module_row));
@@ -245,7 +242,7 @@ impl Host<SettingsPage> for Window {
         Box::new(listening)
     }
 
-    fn perform(&mut self, effect: Effect, intents: &Intents<Intent>) {
+    fn perform(&mut self, window: Option<&MainWindow>, effect: Effect, intents: &Intents<Intent>) {
         match effect {
             Effect::Switched { module, key, on } => {
                 if let Some(link) = self.links.get(&module) {
@@ -267,7 +264,7 @@ impl Host<SettingsPage> for Window {
                     link.act(section);
                 }
             }
-            Effect::Browse(location) => self.browse(location, intents),
+            Effect::Browse(location) => self.browse(window, location, intents),
             Effect::StartClose => match &self.close_first {
                 Some(first) => first(),
                 None => intents.send(Intent::CloseRequested),
@@ -275,13 +272,15 @@ impl Host<SettingsPage> for Window {
             Effect::TryPause => intents.send(try_pause(&self.service)),
             Effect::Resume => self.service.resume(),
             Effect::ShowPage => {
-                if let Some(window) = self.window.upgrade() {
+                if let Some(window) = window {
                     window.global::<Nav>().invoke_navigate("settings".into());
                 }
             }
             Effect::Close => {
                 // Not from inside the window's own close callback, which is where this can be running.
-                let window = self.window.clone();
+                let Some(window) = window.map(ComponentHandle::as_weak) else {
+                    return;
+                };
                 Timer::single_shot(Duration::ZERO, move || {
                     if let Some(window) = window.upgrade() {
                         let _ = window.hide();
@@ -297,9 +296,9 @@ impl Host<SettingsPage> for Window {
 }
 
 impl Window {
-    /// Opens a picker, parented to the window, and puts the chosen path in its box.
-    fn browse(&self, location: Location, intents: &Intents<Intent>) {
-        let Some(window) = self.window.upgrade() else {
+    /// Opens a picker, parented to the window, and puts the chosen path in its box. With no window there is nothing to pick for.
+    fn browse(&self, window: Option<&MainWindow>, location: Location, intents: &Intents<Intent>) {
+        let Some(window) = window else {
             return;
         };
         let dialog = rfd::AsyncFileDialog::new().set_title(location.picker_title()).set_parent(&window.window().window_handle());

@@ -14,9 +14,9 @@ use eg_companion::mods::{
 };
 use eg_core::settings_service::SettingsService;
 use phrases::phrases;
-use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
-use spiderland::{Host, Intents, Slice, Store, Version, callbacks};
-use spiderland_slint::{Background, Rows, every};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
+use spiderland::{Intents, Slice, Store, Version, callbacks};
+use spiderland_slint::{Background, Rows, WindowHost, Windowed, every};
 use std::any::Any;
 use std::cell::RefCell;
 use task_runtime::CancellationToken;
@@ -69,7 +69,6 @@ type OnClosed = Rc<RefCell<Option<Box<dyn Fn(bool)>>>>;
 struct Window {
     services: ModsPage,
     background: Background,
-    window: Weak<MainWindow>,
     closed: OnClosed,
     build_cancel: Option<CancellationToken>,
     rows: Rows<ModRow>,
@@ -87,7 +86,6 @@ pub(crate) fn bind(window: &MainWindow, page: ModsPage, background: Background, 
     let host = Window {
         services: page,
         background,
-        window: window.as_weak(),
         closed: closed.clone(),
         build_cancel: None,
         rows: Rows::default(),
@@ -105,7 +103,7 @@ pub(crate) fn bind(window: &MainWindow, page: ModsPage, background: Background, 
     view.set_settings(host.setting_rows.model());
     view.set_log_lines(host.log_rows.model());
     view.set_readiness_facts(host.facts.model());
-    let store = Store::<Mods>::new(State::new(jiff::Timestamp::now()), host);
+    let store = Store::<Mods>::new(State::new(jiff::Timestamp::now()), Windowed::new(window, host));
     callbacks!(view, store, {
         on_stop_work: || Intent::StopWork,
         on_refresh: || Intent::Refresh,
@@ -228,11 +226,10 @@ fn show_selected(view: &ModsState<'_>, selected: &SelectedView) {
     view.set_selected_build_status(selected.build_status.as_str().into());
 }
 
-impl Host<Mods> for Window {
-    fn render(&mut self, state: &State, _: &Intents<Intent>) {
-        let Some(window) = self.window.upgrade() else {
-            return;
-        };
+impl WindowHost<Mods> for Window {
+    type Window = MainWindow;
+
+    fn render(&mut self, window: &MainWindow, state: &State, _: &Intents<Intent>) {
         let view = window.global::<ModsState>();
         let status = state.status();
         view.set_readiness(status.readiness.into());
@@ -279,7 +276,7 @@ impl Host<Mods> for Window {
         Box::new(every(GameLauncher::WATCH_INTERVAL, intents, || Intent::Watch(jiff::Timestamp::now())))
     }
 
-    fn perform(&mut self, effect: Effect, intents: &Intents<Intent>) {
+    fn perform(&mut self, window: Option<&MainWindow>, effect: Effect, intents: &Intents<Intent>) {
         match effect {
             Effect::Enqueue { revision, change, undo } => {
                 let launcher = self.services.launcher.clone();
@@ -332,7 +329,7 @@ impl Host<Mods> for Window {
                 Err(error) => intents.send(Intent::Located(Err(error.to_string()))),
             },
             Effect::Open { path, reveal, create } => self.open(path, reveal, create, intents),
-            Effect::PickMod => self.pick_mod(intents),
+            Effect::PickMod => self.pick_mod(window, intents),
             Effect::Launch(mode) => {
                 let launcher = self.services.launcher.clone();
                 self.background.run(intents, move || launcher.play(mode), Intent::Launched);
@@ -359,7 +356,7 @@ impl Host<Mods> for Window {
                 }
             }
             Effect::ShowPage => {
-                if let Some(window) = self.window.upgrade() {
+                if let Some(window) = window {
                     window.global::<crate::Nav>().invoke_navigate("mods".into());
                 }
             }
@@ -384,8 +381,9 @@ impl Window {
         );
     }
 
-    fn pick_mod(&self, intents: &Intents<Intent>) {
-        let Some(window) = self.window.upgrade() else {
+    /// Opens a picker, parented to the window; with no window there is nothing to pick for.
+    fn pick_mod(&self, window: Option<&MainWindow>, intents: &Intents<Intent>) {
+        let Some(window) = window else {
             return;
         };
         let dialog = rfd::AsyncFileDialog::new()

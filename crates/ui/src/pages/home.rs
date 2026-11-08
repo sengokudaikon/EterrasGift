@@ -10,9 +10,9 @@ use eg_companion::home::{Effect, Home, HomeView, Intent, State, Subscription, pr
 use eg_companion::launch::host::LaunchMode;
 use eg_companion::launch::launcher::GameLauncher;
 use eg_core::bloom::BloomPhase;
-use slint::{ComponentHandle, Weak};
-use spiderland::{Host, Intents, Slice, Store, Version, callbacks};
-use spiderland_slint::{Background, on_watch};
+use slint::ComponentHandle;
+use spiderland::{Intents, Slice, Store, Version, callbacks};
+use spiderland_slint::{Background, WindowHost, Windowed, on_watch};
 use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -21,7 +21,6 @@ struct Window {
     launcher: Arc<GameLauncher>,
     game: GameWatch,
     background: Background,
-    window: Weak<MainWindow>,
     decorations: Rc<Decorations<MainWindow>>,
     view: Slice<Version>,
 }
@@ -43,14 +42,16 @@ pub fn bind(
     };
     let store = Store::<Home>::new(
         State::default(),
-        Window {
-            game: game.unwrap_or_else(|| GameWatch::inline(launcher.clone())),
-            launcher,
-            background,
-            window: window.as_weak(),
-            decorations,
-            view: Slice::default(),
-        },
+        Windowed::new(
+            window,
+            Window {
+                game: game.unwrap_or_else(|| GameWatch::inline(launcher.clone())),
+                launcher,
+                background,
+                decorations,
+                view: Slice::default(),
+            },
+        ),
     );
     // The window's callback keeps the store alive, for as long as the window lasts.
     callbacks!(state, store, {
@@ -88,14 +89,11 @@ fn show(state: &HomeState<'_>, view: HomeView) {
     state.set_message_is_error(view.message_is_error);
 }
 
-impl Host<Home> for Window {
-    fn render(&mut self, state: &State, _: &Intents<Intent>) {
-        let window = self.window.clone();
-        self.view.update(state.model().version(), || {
-            if let Some(window) = window.upgrade() {
-                show(&window.global::<HomeState>(), present(state.model()));
-            }
-        });
+impl WindowHost<Home> for Window {
+    type Window = MainWindow;
+
+    fn render(&mut self, window: &MainWindow, state: &State, _: &Intents<Intent>) {
+        self.view.update(state.model().version(), || show(&window.global::<HomeState>(), present(state.model())));
     }
 
     fn subscribe(&mut self, subscription: &Subscription, intents: &Intents<Intent>) -> Box<dyn Any> {
@@ -109,7 +107,7 @@ impl Host<Home> for Window {
         }
     }
 
-    fn perform(&mut self, effect: Effect, intents: &Intents<Intent>) {
+    fn perform(&mut self, _: Option<&MainWindow>, effect: Effect, intents: &Intents<Intent>) {
         match effect {
             Effect::Refresh => self.game.refresh(),
             Effect::Launch(mode) => {

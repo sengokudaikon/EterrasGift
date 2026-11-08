@@ -10,9 +10,9 @@ use eg_trainer::screens::pages::Tone;
 use eg_trainer::screens::registry::{Area, Feature};
 use eg_trainer::screens::session::{FieldRequest, TrainerSession};
 use eg_trainer::screens::trainer_pages::{Effect, FieldRowView, Intent, PlaceView, REVEAL, RowKind, RowView, State, Subscription, TrainerPages, ValueView, read_facts};
-use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, VecModel, Weak};
-use spiderland::{Host, Intents, Slice, Store, Version, callbacks};
-use spiderland_slint::{Background, Rows, after, on_watch};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, VecModel};
+use spiderland::{Intents, Slice, Store, Version, callbacks};
+use spiderland_slint::{Background, Rows, WindowHost, Windowed, after, on_watch};
 use std::any::Any;
 use std::rc::Rc;
 use std::time::Duration;
@@ -173,7 +173,6 @@ fn place_view(place: PlaceView) -> FeatureRowPlace {
 }
 
 struct Window {
-    window: Weak<MainWindow>,
     session: Rc<dyn TrainerSession>,
     features: Rc<Vec<Feature>>,
     backend: Option<BackendHandle>,
@@ -200,7 +199,6 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
     let features = Rc::new(features);
     let spacing = window.global::<Tokens>().get_feature_section_spacing();
     let host = Window {
-        window: window.as_weak(),
         session: session.clone(),
         features: features.clone(),
         backend,
@@ -224,7 +222,7 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
     view.set_sections(host.sections.model());
     view.set_profiles(host.profiles.model());
     view.set_item_forge(false);
-    let store = Store::<TrainerPages>::new(State::new((*features).clone(), planned, spacing), host);
+    let store = Store::<TrainerPages>::new(State::new((*features).clone(), planned, spacing), Windowed::new(window, host));
     let pages = Pages {
         store: store.clone(),
         session,
@@ -268,11 +266,10 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
     pages
 }
 
-impl Host<TrainerPages> for Window {
-    fn render(&mut self, state: &State, _: &Intents<Intent>) {
-        let Some(window) = self.window.upgrade() else {
-            return;
-        };
+impl WindowHost<TrainerPages> for Window {
+    type Window = MainWindow;
+
+    fn render(&mut self, window: &MainWindow, state: &State, _: &Intents<Intent>) {
         let view = window.global::<TrainerState>();
         self.show_rows(state, &view);
         let profiles = &self.profiles;
@@ -304,7 +301,7 @@ impl Host<TrainerPages> for Window {
         Box::new(on_watch(backend.subscribe(), intents, move || Intent::Facts(Box::new(read_facts(&*session, &features)))))
     }
 
-    fn perform(&mut self, effect: Effect, intents: &Intents<Intent>) {
+    fn perform(&mut self, _: Option<&MainWindow>, effect: Effect, intents: &Intents<Intent>) {
         match effect {
             Effect::SelectProfile(profile) => self.session.select_profile(&profile),
             Effect::KeepProfile => self.session.keep_profile(),
