@@ -1,21 +1,17 @@
 //! Real worker/queue/watch/UI integration with an owned fake connection. No native
 //! preparer, process lookup, real settings, game host or pipe can be reached here.
 use super::*;
-use eg_core::game_log::GameLogStatus;
 use eg_trainer::backend::GameplayHook;
 use eg_trainer::definitions::files::FileCatalog;
 use eg_trainer::definitions::service::{GameData, GameDataHandle};
 use eg_trainer::{
-    backend::{
-        self, BackendConnection, BackendError, BackendHandle, BackendOptions, Command, Connector, ForgeSnapshot, ItemStatus, Phase, ProcessIdentity, ProcessLocator, RuntimeStatus,
-        SystemClock,
-    },
-    connect::gate::LogSource,
+    backend::{self, BackendConnection, BackendError, BackendHandle, BackendOptions, Command, ForgeSnapshot, ItemStatus, Phase, ProcessIdentity, RuntimeStatus, SystemClock},
     definitions::catalog::{
         AffixDefinition, Availability, CatalogIdentity, DefinitionName, DefinitionNameSource, EXTRACTION_VERSION, GameCatalog, GameLocale, ImplicitDefinition, ItemLimits,
         ItemTypeDefinition, SubTypeDefinition, UniqueDefinition, ValueRange,
     },
     session::Cleanup,
+    testing::{self, Connects, Games, Log, Unreached},
 };
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -25,7 +21,8 @@ pub(super) use world::{item_captures, picker_captures};
 struct Data {
     target: ProcessIdentity,
     item: Mutex<Option<ForgeSnapshot>>,
-    online: AtomicBool,
+    /// What the game's log says.
+    log: Log,
     loading: AtomicBool,
     reads: AtomicUsize,
     connects: AtomicUsize,
@@ -40,45 +37,10 @@ struct Data {
     refuse_at: AtomicUsize,
     expected: Mutex<Vec<ForgeSnapshot>>,
     /// How many matching game processes run.
-    games: AtomicUsize,
+    games: Arc<AtomicUsize>,
     gameplay_hooks: [AtomicBool; 3],
     damage_percent: AtomicUsize,
     rift_choice: AtomicUsize,
-}
-struct Locator(Arc<Data>);
-impl ProcessLocator for Locator {
-    async fn find(&mut self) -> Result<Vec<ProcessIdentity>, BackendError> {
-        Ok(vec![self.0.target.clone(); self.0.games.load(Ordering::SeqCst)])
-    }
-}
-struct Logs(Arc<Data>);
-impl LogSource for Logs {
-    fn read(&mut self, _: jiff::Timestamp) -> GameLogState {
-        let online = self.0.online.load(Ordering::SeqCst);
-        GameLogState {
-            status: GameLogStatus::Current,
-            readiness: if online { GameReadiness::Online } else { GameReadiness::Offline },
-            shell_state: Some("None".into()),
-            offline_mode: Some(!online),
-            character: Some(eg_core::game_log::LoggedCharacter {
-                name: "Owned fixture".into(),
-                level: Some(12),
-                online,
-                cycle: "Legacy".into(),
-                class: "Primalist".into(),
-            }),
-            problem: None,
-        }
-    }
-}
-struct Connect(Arc<Data>);
-impl Connector for Connect {
-    type Connection = OwnedConnection;
-    async fn connect(&mut self, _: ProcessIdentity, _: jiff::Timestamp) -> Result<OwnedConnection, BackendError> {
-        self.0.connects.fetch_add(1, Ordering::SeqCst);
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        Ok(OwnedConnection(self.0.clone()))
-    }
 }
 struct OwnedConnection(Arc<Data>);
 impl BackendConnection for OwnedConnection {
@@ -502,7 +464,7 @@ pub(super) fn capture(session: &Session) {
             executable: folder.join("owned-never-opened.exe"),
         },
         item: Mutex::new(None),
-        online: AtomicBool::new(false),
+        log: Log::new(testing::character(false)),
         loading: AtomicBool::new(false),
         reads: AtomicUsize::new(0),
         connects: AtomicUsize::new(0),
@@ -516,16 +478,23 @@ pub(super) fn capture(session: &Session) {
         mapping_release: AtomicBool::new(false),
         refuse_at: AtomicUsize::new(0),
         expected: Mutex::new(Vec::new()),
-        games: AtomicUsize::new(1),
+        games: Arc::new(AtomicUsize::new(1)),
         gameplay_hooks: [AtomicBool::new(false), AtomicBool::new(false), AtomicBool::new(false)],
         damage_percent: AtomicUsize::new(50),
         rift_choice: AtomicUsize::new(0),
     });
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let (handle, worker) = backend::service(
-        Locator(data.clone()),
-        Connect(data.clone()),
-        Logs(data.clone()),
+        Games::counted(data.target.clone(), data.games.clone()),
+        // A connect takes a moment, as preparing the game does.
+        Connects::after(Duration::from_millis(100), {
+            let data = data.clone();
+            move |_| {
+                data.connects.fetch_add(1, Ordering::SeqCst);
+                OwnedConnection(data.clone())
+            }
+        }),
+        data.log.clone(),
         SystemClock,
         BackendOptions {
             auto_connect: false,
@@ -1158,7 +1127,7 @@ pub(super) fn capture(session: &Session) {
     data.loading.store(false, Ordering::SeqCst);
     command(&handle, Command::ReadForge, || handle.snapshot().phase == Phase::Ready);
     wait(|| ui.global::<eg_ui::ForgeState>().get_has_item());
-    data.online.store(true, Ordering::SeqCst);
+    data.log.set(testing::character(true));
     let before = data.reads.load(Ordering::SeqCst);
     command(&handle, Command::ReadForge, || handle.snapshot().attached.is_none());
     wait(|| !ui.global::<eg_ui::ForgeState>().get_has_item());
@@ -1182,7 +1151,7 @@ pub(super) fn capture(session: &Session) {
     session.resize(1100, 700);
     ui.global::<Nav>().invoke_navigate("forge".into());
     settle();
-    data.online.store(false, Ordering::SeqCst);
+    data.log.set(testing::character(false));
     command(&handle, Command::Connect, || handle.snapshot().phase == Phase::Ready);
     wait(|| ui.global::<eg_ui::ForgeState>().get_has_item());
     *data.item.lock().unwrap() = None;
@@ -1266,33 +1235,6 @@ fn gameplay_hooks(session: &Session, ui: &MainWindow, handle: &BackendHandle, da
 /// Epoch, at three window classes (`forge-waiting`, `-compact`, `-maximized`), then for an offline character once a game
 /// runs whose log says no character is loaded (`forge-waiting-character`). The gate stops both before any connect.
 pub(super) fn capture_waiting(session: &Session) {
-    struct Games(Arc<AtomicUsize>, ProcessIdentity);
-    impl ProcessLocator for Games {
-        async fn find(&mut self) -> Result<Vec<ProcessIdentity>, BackendError> {
-            Ok(vec![self.1.clone(); self.0.load(Ordering::SeqCst)])
-        }
-    }
-    struct NoCharacter;
-    impl LogSource for NoCharacter {
-        fn read(&mut self, _: jiff::Timestamp) -> GameLogState {
-            GameLogState {
-                status: GameLogStatus::Current,
-                readiness: GameReadiness::NoCharacter,
-                shell_state: Some("None".into()),
-                offline_mode: None,
-                character: None,
-                problem: None,
-            }
-        }
-    }
-    struct Unreached;
-    impl Connector for Unreached {
-        type Connection = OwnedConnection;
-        async fn connect(&mut self, _: ProcessIdentity, _: jiff::Timestamp) -> Result<OwnedConnection, BackendError> {
-            Err(BackendError::blocked(backend::ErrorKind::Identity, "the waiting captures never connect"))
-        }
-    }
-
     let folder = session.folder();
     let games = Arc::new(AtomicUsize::new(0));
     let target = ProcessIdentity {
@@ -1302,9 +1244,9 @@ pub(super) fn capture_waiting(session: &Session) {
     };
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let (handle, worker) = backend::service(
-        Games(games.clone(), target),
-        Unreached,
-        NoCharacter,
+        Games::counted(target, games.clone()),
+        Unreached::<OwnedConnection>::new(),
+        Log::new(testing::no_character()),
         SystemClock,
         BackendOptions {
             auto_connect: true,
@@ -1361,32 +1303,6 @@ pub(super) fn capture_waiting(session: &Session) {
 
 /// The bug button, connection evidence and file viewer use only explicit files and a gate that never reaches a game.
 pub(super) fn capture_logs(session: &Session) {
-    struct Games(ProcessIdentity);
-    impl ProcessLocator for Games {
-        async fn find(&mut self) -> Result<Vec<ProcessIdentity>, BackendError> {
-            Ok(vec![self.0.clone()])
-        }
-    }
-    struct Unrecognized;
-    impl LogSource for Unrecognized {
-        fn read(&mut self, _: jiff::Timestamp) -> GameLogState {
-            GameLogState {
-                status: GameLogStatus::Unrecognized,
-                readiness: GameReadiness::NoCharacter,
-                shell_state: Some("None".into()),
-                character: None,
-                offline_mode: Some(false),
-                problem: None,
-            }
-        }
-    }
-    struct Unreached;
-    impl Connector for Unreached {
-        type Connection = OwnedConnection;
-        async fn connect(&mut self, _: ProcessIdentity, _: jiff::Timestamp) -> Result<OwnedConnection, BackendError> {
-            panic!("the log viewer's unrecognized character must stop before connecting")
-        }
-    }
     let folder = session.folder();
     let faults = eg_core::fault::FaultLog::with_fallbacks(&folder, Some(&folder.join("logs")), vec![]);
     faults
@@ -1406,13 +1322,13 @@ pub(super) fn capture_logs(session: &Session) {
     .unwrap();
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let (handle, worker) = backend::service(
-        Games(ProcessIdentity {
+        Games::one(ProcessIdentity {
             pid: 42,
             created: 134_369_000_000_000_000,
             executable: folder.join("owned-never-opened.exe"),
         }),
-        Unreached,
-        Unrecognized,
+        Unreached::<OwnedConnection>::new(),
+        Log::new(testing::unrecognized()),
         SystemClock,
         BackendOptions {
             poll_interval: Duration::from_secs(60),
@@ -1510,33 +1426,6 @@ pub(super) fn capture_logs(session: &Session) {
 pub(super) fn capture_profiles(session: &Session) {
     use eg_trainer::features::profiles::{ProfileBook, ProfileSaver};
 
-    struct Games(Arc<AtomicUsize>, ProcessIdentity);
-    impl ProcessLocator for Games {
-        async fn find(&mut self) -> Result<Vec<ProcessIdentity>, BackendError> {
-            Ok(vec![self.1.clone(); self.0.load(Ordering::SeqCst)])
-        }
-    }
-    struct NoLog;
-    impl LogSource for NoLog {
-        fn read(&mut self, _: jiff::Timestamp) -> GameLogState {
-            GameLogState {
-                status: GameLogStatus::Current,
-                readiness: GameReadiness::NoCharacter,
-                shell_state: Some("None".into()),
-                offline_mode: None,
-                character: None,
-                problem: None,
-            }
-        }
-    }
-    struct Unreached;
-    impl Connector for Unreached {
-        type Connection = OwnedConnection;
-        async fn connect(&mut self, _: ProcessIdentity, _: jiff::Timestamp) -> Result<OwnedConnection, BackendError> {
-            Err(BackendError::blocked(backend::ErrorKind::Identity, "the profile captures never connect"))
-        }
-    }
-
     let folder = session.folder();
     let games = Arc::new(AtomicUsize::new(0));
     let target = ProcessIdentity {
@@ -1551,9 +1440,9 @@ pub(super) fn capture_profiles(session: &Session) {
     let saves = Arc::new(Mutex::new(Vec::<ProfileBook>::new()));
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let (handle, worker) = backend::service(
-        Games(games.clone(), target),
-        Unreached,
-        NoLog,
+        Games::counted(target, games.clone()),
+        Unreached::<OwnedConnection>::new(),
+        Log::new(testing::no_character()),
         SystemClock,
         BackendOptions {
             auto_connect: false,

@@ -23,6 +23,10 @@ jiff.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
 
+[features]
+# Stand-ins for the game's processes, its log and the connector (`eg_trainer::testing`), for tests and captures.
+testing = []
+
 [dev-dependencies]
 tempfile.workspace = true
 

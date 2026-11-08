@@ -34,6 +34,8 @@ phrases = { workspace = true, features = ["build"] }
 # The tests and captures check every CheckedSlice key against the value it stands for; the build doesn't.
 spiderland = { workspace = true, features = ["testing"] }
 spiderland-slint = { workspace = true, features = ["testing"] }
+# Stand-ins for the game the trainer's worker looks at.
+eg-trainer = { path = "../trainer", features = ["testing"] }
 image.workspace = true
 jiff.workspace = true
 melon-loader.workspace = true

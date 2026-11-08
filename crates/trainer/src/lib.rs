@@ -13,4 +13,6 @@ pub mod features;
 pub mod item;
 pub mod screens;
 pub mod session;
+#[cfg(feature = "testing")]
+pub mod testing;
 pub mod write;

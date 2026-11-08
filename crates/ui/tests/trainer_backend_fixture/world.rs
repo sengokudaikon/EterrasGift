@@ -437,41 +437,6 @@ struct WorldData {
     writes: AtomicUsize,
 }
 
-struct WorldLocator(Arc<WorldData>);
-impl ProcessLocator for WorldLocator {
-    async fn find(&mut self) -> Result<Vec<ProcessIdentity>, BackendError> {
-        Ok(vec![self.0.target.clone()])
-    }
-}
-
-struct WorldLogs;
-impl LogSource for WorldLogs {
-    fn read(&mut self, _: jiff::Timestamp) -> GameLogState {
-        GameLogState {
-            status: GameLogStatus::Current,
-            readiness: GameReadiness::Offline,
-            shell_state: Some("None".into()),
-            offline_mode: Some(true),
-            character: Some(eg_core::game_log::LoggedCharacter {
-                name: "Owned fixture".into(),
-                level: Some(12),
-                online: false,
-                cycle: "Legacy".into(),
-                class: "Primalist".into(),
-            }),
-            problem: None,
-        }
-    }
-}
-
-struct WorldConnect(Arc<WorldData>);
-impl Connector for WorldConnect {
-    type Connection = WorldConnection;
-    async fn connect(&mut self, _: ProcessIdentity, _: jiff::Timestamp) -> Result<WorldConnection, BackendError> {
-        Ok(WorldConnection(self.0.clone()))
-    }
-}
-
 /// Answers from the world's ranges: value = round(min + (max - min) × roll / 255), half to even as .NET rounds, shown as
 /// `format` with the unit it ends in.
 struct Range {
@@ -712,9 +677,12 @@ impl Forge {
         });
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let (backend, worker) = backend::service(
-            WorldLocator(data.clone()),
-            WorldConnect(data.clone()),
-            WorldLogs,
+            Games::one(data.target.clone()),
+            Connects::new({
+                let data = data.clone();
+                move |_| WorldConnection(data.clone())
+            }),
+            Log::new(testing::character(false)),
             SystemClock,
             BackendOptions {
                 auto_connect: false,
