@@ -743,7 +743,7 @@ impl Forge {
                 faults: None,
                 logs: None,
                 templates,
-                settings: Settings::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
+                settings: Settings::new(SettingsService::inline(store), vec![eg_trainer::screens::settings::descriptor(true)], None, None),
                 start: Page::Forge,
             },
         );

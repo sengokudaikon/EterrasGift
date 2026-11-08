@@ -2065,7 +2065,7 @@ msgstr ""
 msgid "Online mode"
 msgstr ""
 
-#: crates/trainer/src/screens/connection.rs crates/ui/src/pages/settings/trainer.rs
+#: crates/trainer/src/screens/connection.rs crates/trainer/src/screens/settings.rs
 msgid "Reading the game files…"
 msgstr ""
 
@@ -2706,7 +2706,7 @@ msgstr ""
 msgid "{name}: {problem}"
 msgstr ""
 
-#: crates/trainer/src/screens/forge/editor/tr.rs crates/trainer/src/screens/forge/picker.rs crates/ui/src/pages/settings/trainer.rs
+#: crates/trainer/src/screens/forge/editor/tr.rs crates/trainer/src/screens/forge/picker.rs crates/trainer/src/screens/settings.rs
 msgid "{n} affix"
 msgid_plural "{n} affixes"
 msgstr[0] ""
@@ -3664,6 +3664,98 @@ msgstr ""
 msgid "Not available in this version yet."
 msgstr ""
 
+#: crates/trainer/src/screens/settings.rs
+msgid "Affixes and uniques read from the game's files, read again when the game updates."
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "Allows edits the game wouldn't make: incompatible affixes and bases, Weaver, enchantment and corrupted affixes in any fitting slot, other idol sizes, Weaver's Will on any unique and Weaver's Touch on any idol."
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "Automatic"
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "Checked: {time}"
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "Connect automatically"
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "Connect when an offline character is loaded."
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "Edit offline characters and their items in the running game. A helper loads into Last Epoch and leaves when you disconnect or the character leaves play."
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "Game definitions"
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "I know what I'm doing"
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "Last Epoch wasn't found"
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "Last Epoch wasn't found."
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "Manual"
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs crates/ui/ui/strings/shell.slint
+msgid "Off"
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs crates/ui/ui/strings/shell.slint
+msgid "On"
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs crates/ui/ui/strings/trainer.slint
+msgid "Read again"
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "Read the game's files again"
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "The game files could not be read: {reason}"
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs crates/ui/src/shell/navigation.rs
+msgid "Trainer"
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "Trainer connection"
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "Updated: {time}"
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "Use expendable items. The game may drop or rearrange what it doesn't support."
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "not recorded"
+msgstr ""
+
+#: crates/trainer/src/screens/settings.rs
+msgid "the trainer"
+msgstr ""
+
 #: crates/trainer/src/screens/trainer_pages.rs
 msgid "{name}: one-hit kills"
 msgstr ""
@@ -3703,98 +3795,6 @@ msgstr ""
 
 #: crates/ui/src/pages/settings.rs
 msgid "Windows executable"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "Affixes and uniques read from the game's files, read again when the game updates."
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "Allows edits the game wouldn't make: incompatible affixes and bases, Weaver, enchantment and corrupted affixes in any fitting slot, other idol sizes, Weaver's Will on any unique and Weaver's Touch on any idol."
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "Automatic"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "Checked: {time}"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "Connect automatically"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "Connect when an offline character is loaded."
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "Edit offline characters and their items in the running game. A helper loads into Last Epoch and leaves when you disconnect or the character leaves play."
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "Game definitions"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "I know what I'm doing"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "Last Epoch wasn't found"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "Last Epoch wasn't found."
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "Manual"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs crates/ui/ui/strings/shell.slint
-msgid "Off"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs crates/ui/ui/strings/shell.slint
-msgid "On"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs crates/ui/ui/strings/trainer.slint
-msgid "Read again"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "Read the game's files again"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "The game files could not be read: {reason}"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs crates/ui/src/shell/navigation.rs
-msgid "Trainer"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "Trainer connection"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "Updated: {time}"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "Use expendable items. The game may drop or rearrange what it doesn't support."
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "not recorded"
-msgstr ""
-
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "the trainer"
 msgstr ""
 
 #: crates/ui/src/shell/navigation.rs crates/ui/ui/strings/home.slint

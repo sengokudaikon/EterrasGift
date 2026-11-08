@@ -2,8 +2,6 @@
 //! `SettingsState` global, and saves, picks files, tells linked modules and closes the window when the feature says to.
 use phrases::phrases;
 
-pub mod trainer;
-
 pub use eg_core::settings_page::{LiveStatus, ModuleChoice, ModuleLink, ModuleSection};
 
 use crate::shell::{Intent as ShellIntent, Page, ShellHandle};

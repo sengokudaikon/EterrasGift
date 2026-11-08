@@ -23,6 +23,7 @@ use eg_companion::launch::launcher::GameLauncher;
 use eg_companion::mods::feature::{Intent as ModsIntent, Mods, Output as ModsOutput};
 use eg_core::settings_page::{Intent as SettingsIntent, Output as SettingsOutput};
 use eg_trainer::screens::connection::WorkerChanged;
+use eg_trainer::screens::settings as trainer_settings;
 use pages::{forge, home, logs, mods, settings, trainer};
 use shell::{Navigation, Page};
 use slint::ComponentHandle;
@@ -98,7 +99,7 @@ pub fn install(window: &MainWindow, app: App) -> Installed {
     logs::bind(window, app.logs, trainer_backend.clone(), background.clone(), &shell);
     // The trainer's switches reach its session as they flip; Game definitions follows its game data.
     let settings_page = match &trainer_backend {
-        Some(backend) => app.settings.link(settings::trainer::ID, settings::trainer::link(backend.clone())),
+        Some(backend) => app.settings.link(trainer_settings::ID, trainer_settings::link(backend.clone())),
         None => app.settings,
     };
     // Settings takes the window's close. Mods goes first, keeping its drafts and finishing its work, and then Settings waits

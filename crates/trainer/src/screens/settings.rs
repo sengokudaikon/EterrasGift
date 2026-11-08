@@ -2,9 +2,9 @@
 //! composition can omit it. A run that has the trainer links its backend (`link`): the switches reach the session the
 //! moment they flip, and Game definitions follows the session's catalog.
 
-use crate::pages::settings::{LiveStatus, ModuleChoice, ModuleLink, ModuleSection};
+use crate::backend::{Activity, BackendHandle, BackendSnapshot, CatalogState, Command, GameFiles};
 use eg_core::settings::LegacyModuleSettings;
-use eg_trainer::backend::{Activity, BackendHandle, BackendSnapshot, CatalogState, Command, GameFiles};
+use eg_core::settings_page::{LiveStatus, ModuleChoice, ModuleLink, ModuleSection};
 use phrases::phrases;
 use std::rc::Rc;
 
