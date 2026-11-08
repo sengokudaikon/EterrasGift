@@ -6,8 +6,11 @@ pub mod trainer;
 
 pub use eg_core::settings_page::{LiveStatus, ModuleChoice, ModuleLink, ModuleSection};
 
-use crate::{LocationSetting, MainWindow, MessageTone, ModuleRow, Nav, SettingsSectionRow, SettingsState};
-use eg_core::settings_page::{Effect, Intent, Location, LocationView, MessageKind, ModuleRowView, SectionBody, SectionView, SettingsPage, State, Subscription, submit, try_pause};
+use crate::shell::{Intent as ShellIntent, Page, ShellHandle};
+use crate::{LocationSetting, MainWindow, MessageTone, ModuleRow, SettingsSectionRow, SettingsState};
+use eg_core::settings_page::{
+    Effect, Intent, Location, LocationView, MessageKind, ModuleRowView, Output, SectionBody, SectionView, SettingsPage, State, Subscription, submit, try_pause,
+};
 use eg_core::settings_service::SettingsService;
 use slint::{ComponentHandle, Timer};
 use spiderland::{Intents, Slice, Store, Version, callbacks};
@@ -70,8 +73,6 @@ impl Settings {
 
 struct Window {
     service: SettingsService,
-    /// What goes first in the window's close, and tells this page when it's done; without it, this page's turn is at once.
-    close_first: Option<Rc<dyn Fn()>>,
     links: BTreeMap<usize, Rc<dyn ModuleLink>>,
     restart: RestartRequest,
     modules: Rows<ModuleRow>,
@@ -81,14 +82,19 @@ struct Window {
     shown_locations: Slice<Version>,
 }
 
-/// Puts the page and module-supplied sections behind the window's `SettingsState`. Returns where to tell the page how what
-/// goes first in the window's close came out.
-pub(crate) fn bind(window: &MainWindow, settings: Settings, close_first: Option<Rc<dyn Fn()>>) -> Intents<Intent> {
-    let Settings { service, state, links, restart } = settings;
-    let start_close = close_first.clone();
+/// Puts the page and module-supplied sections behind the window's `SettingsState`, and takes the window's close: the
+/// `close_first` pages that go first hear of it through [`Output::Lifecycle`], and answer with [`Intent::CloseAnswered`].
+/// Returns the store, for them to be wired to.
+pub(crate) fn bind(window: &MainWindow, settings: Settings, close_first: usize, shell: &ShellHandle) -> Store<SettingsPage> {
+    let Settings {
+        service,
+        mut state,
+        links,
+        restart,
+    } = settings;
+    state.set_close_first(close_first);
     let host = Window {
         service: service.clone(),
-        close_first,
         links,
         restart,
         modules: Rows::default(),
@@ -111,19 +117,15 @@ pub(crate) fn bind(window: &MainWindow, settings: Settings, close_first: Option<
     window.window().on_close_requested({
         let store = store.clone();
         move || {
-            match &start_close {
-                Some(first) => first(),
-                None => store.send(Intent::CloseRequested),
-            }
+            store.send(Intent::CloseRequested);
             slint::CloseRequestResponse::KeepWindowShown
         }
     });
+    store.forward(&shell.intents(), |output| (*output == Output::ShowPage).then_some(ShellIntent::Navigate(Page::Settings)));
     callbacks!(view, store, {
         on_save_locations: || Intent::SaveLocations,
         on_retry: || Intent::Retry,
         on_restart: || Intent::Restart,
-        // A linked module's state moved on (the trainer's binding says so on each new backend snapshot).
-        on_backend_updated: || Intent::LinkChanged,
         on_module_toggled: |index, on| Intent::ToggleModule(index as usize, on),
         on_setting_toggled: |module, section, on| Intent::ToggleSetting(module as usize, section as usize, on),
         on_section_action: |module, section| Intent::Act(module as usize, section as usize),
@@ -144,7 +146,7 @@ pub(crate) fn bind(window: &MainWindow, settings: Settings, close_first: Option<
             }
         }
     });
-    store.intents()
+    store
 }
 
 fn module_row(row: ModuleRowView) -> ModuleRow {
@@ -265,17 +267,8 @@ impl WindowHost<SettingsPage> for Window {
                 }
             }
             Effect::Browse(location) => self.browse(window, location, intents),
-            Effect::StartClose => match &self.close_first {
-                Some(first) => first(),
-                None => intents.send(Intent::CloseRequested),
-            },
             Effect::TryPause => intents.send(try_pause(&self.service)),
             Effect::Resume => self.service.resume(),
-            Effect::ShowPage => {
-                if let Some(window) = window {
-                    window.global::<Nav>().invoke_navigate("settings".into());
-                }
-            }
             Effect::Close => {
                 // Not from inside the window's own close callback, which is where this can be running.
                 let Some(window) = window.map(ComponentHandle::as_weak) else {

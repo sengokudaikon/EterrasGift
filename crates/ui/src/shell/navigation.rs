@@ -2,7 +2,7 @@
 //! shows it in the `Nav` global.
 
 use phrases::phrases;
-use spiderland::{Effects, Feature, Tracked};
+use spiderland::{Effects, Feature, Never, Tracked};
 
 phrases! {
     Home: "Home"
@@ -378,19 +378,17 @@ pub enum Intent {
     Wide(bool),
 }
 
+/// What the shell tells the pages: another page came to show.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Effect {
-    /// Another page came to show.
-    Entered(Page),
-}
+pub struct Entered(pub Page);
 
 impl Feature for Shell {
     type State = State;
     type Intent = Intent;
-    type Effect = Effect;
-    type Output = spiderland::Never;
+    type Effect = Never;
+    type Output = Entered;
 
-    fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
+    fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Never, Entered>) {
         let handled = Outcome::Handled { focus: None };
         state.answer = match intent {
             Intent::Click(index) => state.navigation.click(index),
@@ -415,7 +413,7 @@ impl Feature for Shell {
         if state.shown != current {
             state.shown = current;
             state.page_serial += 1;
-            effects.push(Effect::Entered(current));
+            effects.emit(Entered(current));
         }
     }
 }
@@ -428,9 +426,9 @@ mod tests {
     #[test]
     fn a_page_coming_to_show_says_so_once_and_counts() {
         let mut state = State::new(navigation());
-        assert_eq!(step::<Shell>(&mut state, Intent::Navigate(Page::Logs)).effects, [Effect::Entered(Page::Logs)]);
+        assert_eq!(step::<Shell>(&mut state, Intent::Navigate(Page::Logs)).outputs, [Entered(Page::Logs)]);
         assert_eq!(state.page_serial(), 1);
-        assert!(step::<Shell>(&mut state, Intent::Navigate(Page::Logs)).effects.is_empty(), "it shows already");
+        assert!(step::<Shell>(&mut state, Intent::Navigate(Page::Logs)).outputs.is_empty(), "it shows already");
         assert_eq!(state.page_serial(), 1);
     }
 

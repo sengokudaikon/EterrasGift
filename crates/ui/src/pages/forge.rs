@@ -63,8 +63,7 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, background: Background,
     };
     let store = Store::new(state, Windowed::new(window, host));
     connect::connect(&window.global::<ForgeState>(), &store);
-    let intents = store.intents();
-    shell.on_page_entered(move |page| intents.send(Intent::PageChanged { forge: page == Page::Forge }));
+    shell.forward(&store.intents(), |page| Intent::PageChanged { forge: page == Page::Forge });
     // The worker may have published everything already: nothing wakes the forge until its next change.
     store.send(first);
     store.send(Intent::ReadTemplates);

@@ -19,12 +19,14 @@ mod translations {
 
 use eg_companion::game::watch::GameWatch;
 use eg_companion::launch::launcher::GameLauncher;
-use eg_core::settings_page::Intent as SettingsIntent;
+use eg_companion::mods::feature::{Intent as ModsIntent, Output as ModsOutput};
+use eg_core::settings_page::{Intent as SettingsIntent, Output as SettingsOutput};
+use eg_trainer::screens::connection::WorkerChanged;
 use pages::{forge, home, logs, mods, settings, trainer};
 use shell::{Navigation, Page};
 use slint::ComponentHandle;
+use spiderland::Lifecycle;
 use spiderland_slint::Background;
-use std::rc::Rc;
 use std::sync::Arc;
 
 /// What a window shows in this run.
@@ -87,17 +89,23 @@ pub fn install(window: &MainWindow, app: App) -> Installed {
         Some(backend) => app.settings.link(settings::trainer::ID, settings::trainer::link(backend.clone())),
         None => app.settings,
     };
-    // The window's close goes through Mods first, which keeps its drafts and finishes its work, and then through Settings,
-    // which waits for saves. Either one can keep the window open to show what failed.
-    let close_first = mods.clone().map(|mods| Rc::new(move || mods.close()) as Rc<dyn Fn()>);
-    let settings = settings::bind(window, settings_page, close_first);
-    if let Some(mods) = mods {
-        mods.on_closed(move |closed| settings.send(if closed { SettingsIntent::CloseRequested } else { SettingsIntent::CloseAbandoned }));
+    // Settings takes the window's close. Mods goes first, keeping its drafts and finishing its work, and then Settings waits
+    // for saves. Either one can keep the window open to show what failed.
+    let settings = settings::bind(window, settings_page, usize::from(mods.is_some()), &shell);
+    if let Some(mods) = &mods {
+        let asked = |output: &SettingsOutput| (*output == SettingsOutput::Lifecycle(Lifecycle::CloseRequested)).then_some(ModsIntent::CloseRequested);
+        settings.forward(&mods.intents(), asked);
+        mods.forward(&settings.intents(), |output| match output {
+            ModsOutput::Closed(answer) => Some(SettingsIntent::CloseAnswered(*answer)),
+            ModsOutput::ShowPage => None,
+        });
     }
     trainer::connection::unbound(window, app.trainer);
     trainer::install(window, trainer_backend.clone(), app.planned, background.clone());
     let forge = trainer_backend.map(|backend| {
-        trainer::connection::bind(window, backend.clone(), &shell, decorations);
+        // A linked module's state moves on with the worker's, so Settings reads its status sections again.
+        let connection = trainer::connection::bind(window, backend.clone(), &shell, decorations);
+        connection.forward(&settings.intents(), |_: &WorkerChanged| SettingsIntent::LinkChanged);
         forge::bind(window, backend, background, &shell, app.faults, app.templates)
     });
     apply_system_settings(window);

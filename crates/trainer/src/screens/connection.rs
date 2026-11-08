@@ -110,11 +110,13 @@ pub enum Intent {
 pub enum Effect {
     /// Ask the worker to connect, as its phase then allows.
     Connect,
-    /// The worker's state moved on, for what else follows it.
-    WorkerChanged,
     /// Move the window's decorations to where the wait has come. `entering` puts them there at once.
     Drift { phase: BloomPhase, entering: bool },
 }
+
+/// What the connection tells the rest of the window: the worker's state moved on, for what else follows it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WorkerChanged;
 
 pub struct State {
     view: Tracked<ConnectionView>,
@@ -152,21 +154,21 @@ impl Feature for ConnectionFeature {
     type State = State;
     type Intent = Intent;
     type Effect = Effect;
-    type Output = spiderland::Never;
+    type Output = WorkerChanged;
     type Subscription = Subscription;
 
     fn subscriptions(_: &State) -> impl IntoIterator<Item = Subscription> {
         [Subscription::Worker]
     }
 
-    fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
+    fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect, WorkerChanged>) {
         match intent {
             Intent::Observed(snapshot) => {
                 if state.revision == Some(snapshot.revision) {
                     return;
                 }
                 state.revision = Some(snapshot.revision);
-                effects.push(Effect::WorkerChanged);
+                effects.emit(WorkerChanged);
                 let status = status(&snapshot);
                 state.wait = status.waiting;
                 state.view.set(ConnectionView {
@@ -218,7 +220,7 @@ impl Feature for ConnectionFeature {
 
 /// Drives the window's ash while a trainer page shows and the connection waits; Home takes the decorations back when it
 /// shows.
-fn drift(state: &State, entering: bool, effects: &mut Effects<Effect>) {
+fn drift(state: &State, entering: bool, effects: &mut Effects<Effect, WorkerChanged>) {
     if state.on_trainer_page
         && let Some(phase) = state.wait
     {

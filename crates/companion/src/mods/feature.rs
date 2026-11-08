@@ -17,7 +17,7 @@ use melon_loader::loader_state::LoaderPreparation;
 use melon_loader::preferences::PreferenceKind;
 use phrases::phrases;
 use serde_json::Value as JsonValue;
-use spiderland::{Effects, Feature, Panicked, Tracked, Version};
+use spiderland::{CloseAnswer, Effects, Feature, Panicked, Tracked, Version};
 use std::collections::{BTreeSet, VecDeque};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -354,11 +354,16 @@ pub enum Effect {
         install_only: bool,
     },
     CancelBuild,
+}
+
+/// What the page tells the rest of the window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Output {
+    /// Bring the page into view, to show what kept the window open.
     ShowPage,
-    /// The page has nothing left to wait for: the window may go on closing.
-    Closed,
-    /// The page has a failure to show: the window stays.
-    CloseAbandoned,
+    /// The answer to [`Intent::CloseRequested`]: nothing is left to wait for, or the page has a failure to show and the window
+    /// stays.
+    Closed(CloseAnswer),
 }
 
 struct Pending {
@@ -493,7 +498,7 @@ fn say(state: &mut State, text: impl Into<String>, error: bool) {
     }
 }
 
-fn enqueue(state: &mut State, effects: &mut Effects<Effect>, change: Change, settings: Vec<SettingKey>, clears_build: bool, mutation: bool, failure: Failure) {
+fn enqueue(state: &mut State, effects: &mut Effects<Effect, Output>, change: Change, settings: Vec<SettingKey>, clears_build: bool, mutation: bool, failure: Failure) {
     state.revision += 1;
     let revision = state.revision;
     if mutation {
@@ -514,15 +519,15 @@ fn enqueue(state: &mut State, effects: &mut Effects<Effect>, change: Change, set
     });
 }
 
-fn edit(state: &mut State, effects: &mut Effects<Effect>, change: Change) {
+fn edit(state: &mut State, effects: &mut Effects<Effect, Output>, change: Change) {
     enqueue(state, effects, change, Vec::new(), false, true, Failure::Kept);
 }
 
-fn read_again(state: &mut State, effects: &mut Effects<Effect>) {
+fn read_again(state: &mut State, effects: &mut Effects<Effect, Output>) {
     enqueue(state, effects, Change::Read, Vec::new(), false, false, Failure::Kept);
 }
 
-fn refresh(state: &mut State, effects: &mut Effects<Effect>) {
+fn refresh(state: &mut State, effects: &mut Effects<Effect, Output>) {
     commit_settings(state, effects);
     state.editing.clear();
     read_again(state, effects);
@@ -538,7 +543,7 @@ fn retain_failed_settings(state: &mut State, settings: Vec<SettingKey>) {
     state.unsaved.extend(settings);
 }
 
-fn commit_settings(state: &mut State, effects: &mut Effects<Effect>) {
+fn commit_settings(state: &mut State, effects: &mut Effects<Effect, Output>) {
     // Nothing can keep them now; asking would only be refused, and a close would wait on that each time.
     if state.stopped {
         return;
@@ -580,7 +585,7 @@ fn edit_setting(state: &mut State, index: i32, value: String, toggle: Option<boo
 }
 
 /// Handles the worker's answers strictly in the order asked: an answer waits for those before it.
-fn settle(state: &mut State, effects: &mut Effects<Effect>) {
+fn settle(state: &mut State, effects: &mut Effects<Effect, Output>) {
     let mut read = false;
     while state.pending.front().is_some_and(|job| job.answer.is_some()) {
         let Some(job) = state.pending.pop_front() else {
@@ -619,7 +624,7 @@ fn settle(state: &mut State, effects: &mut Effects<Effect>) {
     }
 }
 
-fn take_observation(state: &mut State, effects: &mut Effects<Effect>, revision: u64, observation: Observation) {
+fn take_observation(state: &mut State, effects: &mut Effects<Effect, Output>, revision: u64, observation: Observation) {
     // What any read found changed in the Mods folder is said once, by the read that is shown.
     state.adopted.extend(observation.inventory.changes.adopted.iter().cloned());
     state.deleted.extend(observation.inventory.changes.removed.iter().cloned());
@@ -692,20 +697,20 @@ fn take_observation(state: &mut State, effects: &mut Effects<Effect>, revision: 
 }
 
 /// With nothing left to wait for, a close goes ahead, unless what it waited for failed: then the page shows that first.
-fn finish_close(state: &mut State, effects: &mut Effects<Effect>) {
+fn finish_close(state: &mut State, effects: &mut Effects<Effect, Output>) {
     if !state.pending.is_empty() || state.building.is_some() {
         return;
     }
     state.closing = false;
     if std::mem::take(&mut state.close_error) {
-        effects.push(Effect::ShowPage);
-        effects.push(Effect::CloseAbandoned);
+        effects.emit(Output::ShowPage);
+        effects.emit(Output::Closed(CloseAnswer::StayingOpen));
     } else {
-        effects.push(Effect::Closed);
+        effects.emit(Output::Closed(CloseAnswer::Closed));
     }
 }
 
-fn build(state: &mut State, effects: &mut Effects<Effect>, index: i32, source: bool, install_only: bool) {
+fn build(state: &mut State, effects: &mut Effects<Effect, Output>, index: i32, source: bool, install_only: bool) {
     if state.building.is_some() {
         return;
     }
@@ -764,14 +769,14 @@ impl Feature for Mods {
     type State = State;
     type Intent = Intent;
     type Effect = Effect;
-    type Output = spiderland::Never;
+    type Output = Output;
     type Subscription = Subscription;
 
     fn subscriptions(state: &State) -> impl IntoIterator<Item = Subscription> {
         state.visible.then_some(Subscription::Tick)
     }
 
-    fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
+    fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect, Output>) {
         match intent {
             Intent::PageChanged { shown, now } => {
                 state.now = now;
@@ -1559,9 +1564,9 @@ mod tests {
             },
         );
         state.unsaved.insert(("Category".into(), "Key".into()));
-        let effects = send(&mut state, Intent::CloseRequested);
-        assert!(revisions(&effects).is_empty(), "a setting nothing can keep isn't asked for again");
-        assert!(effects.iter().any(|effect| matches!(effect, Effect::Closed)), "{effects:?}");
+        let told = step::<Mods>(&mut state, Intent::CloseRequested);
+        assert!(revisions(&told.effects).is_empty(), "a setting nothing can keep isn't asked for again");
+        assert_eq!(told.outputs, [Output::Closed(CloseAnswer::Closed)]);
     }
 
     #[test]
@@ -1577,15 +1582,15 @@ mod tests {
                 answer: Answer::library_stopped(),
             },
         );
-        let effects = send(
+        let told = step::<Mods>(
             &mut state,
             Intent::Answered {
                 revision: second,
                 answer: Answer::library_stopped(),
             },
         );
-        assert!(effects.iter().any(|effect| matches!(effect, Effect::CloseAbandoned)), "the page shows it once");
-        assert!(send(&mut state, Intent::CloseRequested).iter().any(|effect| matches!(effect, Effect::Closed)));
+        assert_eq!(told.outputs, [Output::ShowPage, Output::Closed(CloseAnswer::StayingOpen)], "the page shows it once");
+        assert_eq!(step::<Mods>(&mut state, Intent::CloseRequested).outputs, [Output::Closed(CloseAnswer::Closed)]);
     }
 
     #[test]
@@ -1720,19 +1725,20 @@ mod tests {
     fn closing_cancels_the_build_and_waits_for_the_worker() {
         let mut state = state();
         let revision = shown(&mut state);
-        let effects = send(&mut state, Intent::CloseRequested);
-        assert!(effects.iter().any(|effect| matches!(effect, Effect::CancelBuild)));
-        assert!(!effects.iter().any(|effect| matches!(effect, Effect::Closed)), "a read is still out");
+        let told = step::<Mods>(&mut state, Intent::CloseRequested);
+        assert!(told.effects.iter().any(|effect| matches!(effect, Effect::CancelBuild)));
+        assert!(told.outputs.is_empty(), "a read is still out");
         assert!(!state.status().can_play, "Play goes while the page closes");
-        let effects = send(&mut state, Intent::Answered { revision, answer: observed() });
-        assert!(effects.iter().any(|effect| matches!(effect, Effect::Closed)));
+        assert_eq!(
+            step::<Mods>(&mut state, Intent::Answered { revision, answer: observed() }).outputs,
+            [Output::Closed(CloseAnswer::Closed)]
+        );
     }
 
     #[test]
     fn closing_with_nothing_out_goes_ahead_at_once() {
         let mut state = state();
-        let effects = send(&mut state, Intent::CloseRequested);
-        assert!(effects.iter().any(|effect| matches!(effect, Effect::Closed)));
+        assert_eq!(step::<Mods>(&mut state, Intent::CloseRequested).outputs, [Output::Closed(CloseAnswer::Closed)]);
     }
 
     #[test]
@@ -1740,7 +1746,7 @@ mod tests {
         let mut state = state();
         let revision = shown(&mut state);
         send(&mut state, Intent::CloseRequested);
-        let effects = send(
+        let told = step::<Mods>(
             &mut state,
             Intent::Answered {
                 revision,
@@ -1748,30 +1754,29 @@ mod tests {
             },
         );
         // The failed change reads again first, so the close waits for that read too.
-        let reread = revisions(&effects)[0];
-        assert!(!effects.iter().any(|effect| matches!(effect, Effect::Closed | Effect::CloseAbandoned)));
-        let effects = send(
+        let reread = revisions(&told.effects)[0];
+        assert!(told.outputs.is_empty());
+        let told = step::<Mods>(
             &mut state,
             Intent::Answered {
                 revision: reread,
                 answer: observed(),
             },
         );
-        assert!(effects.iter().any(|effect| matches!(effect, Effect::CloseAbandoned)));
-        assert!(effects.iter().any(|effect| matches!(effect, Effect::ShowPage)));
-        assert!(!effects.iter().any(|effect| matches!(effect, Effect::Closed)));
+        assert_eq!(told.outputs, [Output::ShowPage, Output::Closed(CloseAnswer::StayingOpen)]);
         // The failure was shown: the next close goes ahead.
-        assert!(send(&mut state, Intent::CloseRequested).iter().any(|effect| matches!(effect, Effect::Closed)));
+        assert_eq!(step::<Mods>(&mut state, Intent::CloseRequested).outputs, [Output::Closed(CloseAnswer::Closed)]);
     }
 
     #[test]
     fn a_build_cancelled_by_closing_says_nothing_and_lets_the_close_finish() {
         let mut state = state();
         state.building = Some("Fixture.dll".into());
-        let effects = send(&mut state, Intent::CloseRequested);
-        assert!(!effects.iter().any(|effect| matches!(effect, Effect::Closed)), "the compiler is still running");
-        let effects = send(&mut state, Intent::Built(Ok(Err("cancelled".into()))));
-        assert!(effects.iter().any(|effect| matches!(effect, Effect::Closed)));
+        assert!(step::<Mods>(&mut state, Intent::CloseRequested).outputs.is_empty(), "the compiler is still running");
+        assert_eq!(
+            step::<Mods>(&mut state, Intent::Built(Ok(Err("cancelled".into())))).outputs,
+            [Output::Closed(CloseAnswer::Closed)]
+        );
         assert_eq!(state.status().change_message, "");
     }
 

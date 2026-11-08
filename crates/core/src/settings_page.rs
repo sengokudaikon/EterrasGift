@@ -8,7 +8,7 @@
 use crate::settings::{AppSettings, Locations};
 use crate::settings_service::{Change, SaveOutcome, SettingsService, Snapshot};
 use phrases::{Phrase, phrases};
-use spiderland::{Effects, Feature, Tracked, Version};
+use spiderland::{CloseAnswer, Closing, Effects, Feature, Lifecycle, Tracked, Version};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -260,10 +260,10 @@ pub enum Intent {
     /// Something went wrong outside the saves, such as a file picker.
     ReportError(String),
     Restart,
-    /// It is this page's turn to close: whatever comes first in the window's close has finished.
+    /// The window's close was asked for: the pages that go first finish, and then saves pause.
     CloseRequested,
-    /// What comes first in the window's close has a failure to show, so the window stays.
-    CloseAbandoned,
+    /// A page that goes first in the window's close answered [`Lifecycle::CloseRequested`].
+    CloseAnswered(CloseAnswer),
     /// The answer to [`Effect::TryPause`]: saves are paused for closing, or are still running.
     Paused {
         paused: bool,
@@ -299,20 +299,26 @@ pub enum Effect {
     },
     /// Open a picker for a location, whose choice comes back as `Intent::Edit`.
     Browse(Location),
-    /// Begin the window's close, as if its close button were pressed.
-    StartClose,
     /// Pause saves if none is running, and say which.
     TryPause,
     /// Accept saves again: the window stays to show one that failed.
     Resume,
-    /// Bring the Settings page into view, to show a failed save.
-    ShowPage,
     /// Close the window.
     Close,
     /// End the event loop: the settings writer has faulted.
     Quit,
     /// Ask the app to start itself again once it has closed, or stop asking.
     RequestRestart(bool),
+}
+
+/// What the page tells the rest of the window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Output {
+    /// Bring the Settings page into view, to show a failed save.
+    ShowPage,
+    /// What the pages that go first in the window's close hear. Only [`Lifecycle::CloseRequested`] is sent: they finish
+    /// their work and keep what they must, through saves that this page then waits for, before it closes the window.
+    Lifecycle(Lifecycle),
 }
 
 /// Performs a [`Save`], returning what the feature should hear. No file is touched here in production: the service
@@ -354,6 +360,10 @@ pub struct State {
     close_observed: Option<u64>,
     /// The last save asked for was the locations', so its success says "Locations saved."; a switch's says nothing.
     locations_last: bool,
+    /// How many pages go first in the window's close.
+    close_first: usize,
+    /// The window's close waits for the pages that go first to answer.
+    asking: Option<Closing>,
     /// The window waits to close for a save in flight.
     closing: bool,
     /// Restart now was chosen and waits for the save in flight.
@@ -416,10 +426,18 @@ impl State {
             live: Tracked::default(),
             close_observed: None,
             locations_last: false,
+            close_first: 0,
+            asking: None,
             closing: false,
             restarting: false,
             restart_requested: false,
         }
+    }
+
+    /// Says how many pages go first in the window's close, each answering [`Output::Lifecycle`] with
+    /// [`Intent::CloseAnswered`] before saves pause.
+    pub fn set_close_first(&mut self, pages: usize) {
+        self.close_first = pages;
     }
 
     /// The module `id`'s index, if this run has it: only a module that started can be linked.
@@ -740,14 +758,14 @@ impl Feature for SettingsPage {
     type State = State;
     type Intent = Intent;
     type Effect = Effect;
-    type Output = spiderland::Never;
+    type Output = Output;
     type Subscription = Subscription;
 
     fn subscriptions(_: &State) -> impl IntoIterator<Item = Subscription> {
         [Subscription::Saves]
     }
 
-    fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
+    fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect, Output>) {
         match intent {
             Intent::ToggleModule(index, on) => {
                 let Some(module) = state.modules.get(index) else {
@@ -858,10 +876,20 @@ impl Feature for SettingsPage {
                 state.restarting = true;
                 restart_when_saved(state, effects);
             }
-            Intent::CloseRequested => begin_close(state, effects),
-            Intent::CloseAbandoned => {
-                if std::mem::take(&mut state.restart_requested) {
-                    effects.push(Effect::RequestRestart(false));
+            Intent::CloseRequested => request_close(state, effects),
+            Intent::CloseAnswered(answer) => {
+                let Some(answer) = state.asking.as_mut().and_then(|asking| asking.hear(answer)) else {
+                    return;
+                };
+                state.asking = None;
+                match answer {
+                    CloseAnswer::Closed => begin_close(state, effects),
+                    // A page that went first has a failure to show, so the window stays and nothing restarts.
+                    CloseAnswer::StayingOpen => {
+                        if std::mem::take(&mut state.restart_requested) {
+                            effects.push(Effect::RequestRestart(false));
+                        }
+                    }
                 }
             }
             Intent::Paused { paused, snapshot } => {
@@ -877,7 +905,7 @@ impl Feature for SettingsPage {
                 state.closing = false;
                 if state.snapshot.completed > observed && matches!(state.snapshot.outcome, SaveOutcome::Failed(_)) {
                     effects.push(Effect::Resume);
-                    effects.push(Effect::ShowPage);
+                    effects.emit(Output::ShowPage);
                     // The failure is shown instead; nothing restarts.
                     if std::mem::take(&mut state.restart_requested) {
                         effects.push(Effect::RequestRestart(false));
@@ -891,17 +919,32 @@ impl Feature for SettingsPage {
 }
 
 /// Restart now closes the window as any close does, once no save is in flight; the app then starts itself again.
-fn restart_when_saved(state: &mut State, effects: &mut Effects<Effect>) {
+fn restart_when_saved(state: &mut State, effects: &mut Effects<Effect, Output>) {
     if !state.restarting || state.saving() {
         return;
     }
     state.restarting = false;
     state.restart_requested = true;
     effects.push(Effect::RequestRestart(true));
-    effects.push(Effect::StartClose);
+    request_close(state, effects);
 }
 
-fn begin_close(state: &mut State, effects: &mut Effects<Effect>) {
+/// The pages that go first in the window's close hear of it, and saves pause once they have all answered. A close already
+/// waiting for them asks no one again.
+fn request_close(state: &mut State, effects: &mut Effects<Effect, Output>) {
+    if state.asking.is_some() {
+        return;
+    }
+    // While saves are what the close waits for, the pages that went first have answered already.
+    if state.close_first == 0 || state.closing {
+        begin_close(state, effects);
+        return;
+    }
+    state.asking = Some(Closing::asking(state.close_first));
+    effects.emit(Output::Lifecycle(Lifecycle::CloseRequested));
+}
+
+fn begin_close(state: &mut State, effects: &mut Effects<Effect, Output>) {
     state.closing = true;
     let completed = state.snapshot.completed;
     state.close_observed.get_or_insert(completed);
@@ -993,14 +1036,15 @@ mod tests {
         fn send(&mut self, intent: Intent) {
             let mut queue = VecDeque::from([intent]);
             while let Some(intent) = queue.pop_front() {
-                for effect in step::<SettingsPage>(&mut self.state, intent).effects {
+                let told = step::<SettingsPage>(&mut self.state, intent);
+                // No page goes first in these tests' closes.
+                self.shown |= told.outputs.contains(&Output::ShowPage);
+                for effect in told.effects {
                     match effect {
                         Effect::Switched { key, on, .. } => self.switched.borrow_mut().push((key.into(), on)),
                         Effect::Submit(save, submission) => queue.extend(submit(&self.service, save, submission)),
-                        Effect::StartClose => queue.push_back(Intent::CloseRequested),
                         Effect::TryPause => queue.push_back(try_pause(&self.service)),
                         Effect::Resume => self.service.resume(),
-                        Effect::ShowPage => self.shown = true,
                         Effect::Close => self.closed = true,
                         Effect::RequestRestart(on) => self.restart = on,
                         Effect::ReadStatus { .. } | Effect::Act { .. } | Effect::Browse(_) | Effect::Quit => {}
@@ -1372,6 +1416,29 @@ mod tests {
                 assert!(page.closed, "the second close goes ahead once the failure was shown");
             }
         }
+    }
+
+    #[test]
+    fn a_close_waits_for_the_pages_that_go_first() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut page = page(temp.path());
+        page.state.set_close_first(1);
+        let told = step::<SettingsPage>(&mut page.state, Intent::CloseRequested);
+        assert_eq!(told.outputs, [Output::Lifecycle(Lifecycle::CloseRequested)]);
+        assert!(told.effects.is_empty(), "saves pause only once the page before has closed");
+        assert!(
+            step::<SettingsPage>(&mut page.state, Intent::CloseRequested).outputs.is_empty(),
+            "a second click asks no one again"
+        );
+        page.state.restart_requested = true;
+        let told = step::<SettingsPage>(&mut page.state, Intent::CloseAnswered(CloseAnswer::StayingOpen));
+        assert!(matches!(told.effects[..], [Effect::RequestRestart(false)]), "the window stays, and nothing restarts");
+        assert!(told.outputs.is_empty());
+        step::<SettingsPage>(&mut page.state, Intent::CloseRequested);
+        let told = step::<SettingsPage>(&mut page.state, Intent::CloseAnswered(CloseAnswer::Closed));
+        assert!(matches!(told.effects[..], [Effect::TryPause]), "{:?}", told.effects);
+        let late = step::<SettingsPage>(&mut page.state, Intent::CloseAnswered(CloseAnswer::Closed));
+        assert!(late.effects.is_empty(), "an answer nothing asked for");
     }
 
     #[test]

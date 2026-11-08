@@ -3,15 +3,13 @@
 
 mod navigation;
 
-pub use navigation::{Effect, Intent, NavKey, Navigation, Node, Outcome, Page, Shell, State};
+pub use navigation::{Entered, Intent, NavKey, Navigation, Node, Outcome, Page, Shell, State};
 
 use crate::{MainWindow, Nav, NavOutcome, NavRow, Tokens};
 use slint::platform::Key;
 use slint::{ComponentHandle, Image};
-use spiderland::{Intents, Slice, Store, Version, callbacks};
+use spiderland::{Intents, Never, Slice, Store, Version, callbacks};
 use spiderland_slint::{Rows, WindowHost, Windowed};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 fn key_of(text: &str) -> Option<NavKey> {
     let key = text.chars().next()?;
@@ -35,8 +33,6 @@ fn key_of(text: &str) -> Option<NavKey> {
     })
 }
 
-type PageEntered = Box<dyn Fn(Page)>;
-
 struct Window {
     rows: Rows<NavRow>,
     footer: Rows<NavRow>,
@@ -45,12 +41,10 @@ struct Window {
     shown: Slice<Version>,
     focused: Slice<i32>,
     entrance: Slice<i32>,
-    entered: Rc<RefCell<Vec<PageEntered>>>,
 }
 
 /// Connects a `Navigation` to the window's `Nav` global. The handle lets pages follow which one shows.
 pub fn bind(window: &MainWindow, navigation: Navigation) -> ShellHandle {
-    let entered = Rc::default();
     let host = Window {
         rows: Rows::default(),
         footer: Rows::default(),
@@ -58,7 +52,6 @@ pub fn bind(window: &MainWindow, navigation: Navigation) -> ShellHandle {
         shown: Slice::default(),
         focused: Slice::default(),
         entrance: Slice::default(),
-        entered: Rc::clone(&entered),
     };
     let nav = window.global::<Nav>();
     nav.set_rows(host.rows.model());
@@ -90,7 +83,7 @@ pub fn bind(window: &MainWindow, navigation: Navigation) -> ShellHandle {
             }
         }
     });
-    ShellHandle { store, entered }
+    ShellHandle { store }
 }
 
 fn answer(store: &Store<Shell>, intent: Intent) -> NavOutcome {
@@ -101,11 +94,10 @@ fn answer(store: &Store<Shell>, intent: Intent) -> NavOutcome {
     }
 }
 
-/// The shell as pages see it: which page shows, and word when another one does.
+/// The shell as pages see it: which page shows, word when another one does, and where to ask for one.
 #[derive(Clone)]
 pub struct ShellHandle {
     store: Store<Shell>,
-    entered: Rc<RefCell<Vec<PageEntered>>>,
 }
 
 impl ShellHandle {
@@ -113,21 +105,22 @@ impl ShellHandle {
         self.store.try_read(|state| state.navigation().current()).unwrap_or(Page::Home)
     }
 
-    pub fn navigate(&self, page: Page) {
-        self.store.send(Intent::Navigate(page));
+    /// The shell's sender, for a page's store to forward its request to show as [`Intent::Navigate`].
+    pub fn intents(&self) -> Intents<Intent> {
+        self.store.intents()
     }
 
-    /// Calls `entered` each time another page comes to show (not for the page showing now).
-    pub fn on_page_entered(&self, entered: impl Fn(Page) + 'static) {
-        self.entered.borrow_mut().push(Box::new(entered));
+    /// Turns each page that comes to show (not the page showing now) into `to`'s intent, or none.
+    pub fn forward<I: 'static, R: Into<Option<I>>>(&self, to: &Intents<I>, entered: impl Fn(Page) -> R + 'static) {
+        self.store.forward(to, move |&Entered(page)| entered(page));
     }
 
     /// Tells a page whether it shows: now, if it does, and from then on each time another page comes to show.
-    pub fn on_shown(&self, page: Page, shown: impl Fn(bool) + 'static) {
+    pub fn forward_shown<I: 'static>(&self, page: Page, to: &Intents<I>, shown: impl Fn(bool) -> I + 'static) {
         if self.current() == page {
-            shown(true);
+            to.send(shown(true));
         }
-        self.on_page_entered(move |entered| shown(entered == page));
+        self.forward(to, move |entered| shown(entered == page));
     }
 }
 
@@ -161,10 +154,8 @@ impl WindowHost<Shell> for Window {
         self.entrance.update(state.page_serial(), || nav.set_page_serial(state.page_serial()));
     }
 
-    fn perform(&mut self, _: Option<&MainWindow>, Effect::Entered(page): Effect, _: &Intents<Intent>) {
-        for entered in self.entered.borrow().iter() {
-            entered(page);
-        }
+    fn perform(&mut self, _: Option<&MainWindow>, effect: Never, _: &Intents<Intent>) {
+        match effect {}
     }
 }
 

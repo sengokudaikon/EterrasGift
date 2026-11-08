@@ -57,7 +57,7 @@ pub fn bind(
     callbacks!(state, store, {
         on_start: |mode| Intent::Start(mode_of(mode)),
     });
-    shell.on_shown(Page::Home, move |shown| store.send(if shown { Intent::Shown } else { Intent::Hidden }));
+    shell.forward_shown(Page::Home, &store.intents(), |shown| if shown { Intent::Shown } else { Intent::Hidden });
 }
 
 fn mode_of(mode: ViewMode) -> LaunchMode {

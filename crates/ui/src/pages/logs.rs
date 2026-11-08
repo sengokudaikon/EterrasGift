@@ -65,7 +65,7 @@ pub(crate) fn bind(window: &MainWindow, files: Option<LogFiles>, backend: Option
             }
         }
     });
-    shell.on_shown(Page::Logs, move |shown| store.send(if shown { Intent::Shown } else { Intent::Hidden }));
+    shell.forward_shown(Page::Logs, &store.intents(), |shown| if shown { Intent::Shown } else { Intent::Hidden });
 }
 
 fn source_of(index: i32) -> Option<Source> {

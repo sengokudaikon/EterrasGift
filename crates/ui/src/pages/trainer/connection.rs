@@ -3,7 +3,7 @@
 //! says to. Nothing here waits on the game.
 
 use crate::{
-    Connection, MainWindow, SettingsState, TrainerAccess, TrainerState,
+    Connection, MainWindow, TrainerAccess, TrainerState,
     decorations::{Ash, Decorations},
     shell::ShellHandle,
 };
@@ -56,8 +56,9 @@ fn observed(backend: &BackendHandle) -> Intent {
     }
 }
 
-/// Binds the connection to the worker. The window's callbacks keep the binding alive.
-pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, decorations: Rc<Decorations<MainWindow>>) {
+/// Binds the connection to the worker. The window's callbacks keep the binding alive. Returns the store, whose
+/// [`WorkerChanged`](eg_trainer::screens::connection::WorkerChanged) tells what else follows the worker.
+pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, decorations: Rc<Decorations<MainWindow>>) -> Store<ConnectionFeature> {
     let store = Store::<ConnectionFeature>::new(
         State::new(shell.current().is_trainer()),
         Windowed::new(
@@ -73,7 +74,11 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, de
     callbacks!(window.global::<Connection>(), store, {
         on_connect: || Intent::Connect,
     });
-    shell.on_page_entered(move |page| store.send(if page.is_trainer() { Intent::TrainerPageEntered } else { Intent::OtherPageEntered }));
+    shell.forward(
+        &store.intents(),
+        |page| if page.is_trainer() { Intent::TrainerPageEntered } else { Intent::OtherPageEntered },
+    );
+    store
 }
 
 impl WindowHost<ConnectionFeature> for Window {
@@ -88,7 +93,7 @@ impl WindowHost<ConnectionFeature> for Window {
         Box::new(on_watch(self.backend.subscribe(), intents, move || observed(&backend)))
     }
 
-    fn perform(&mut self, window: Option<&MainWindow>, effect: Effect, intents: &Intents<Intent>) {
+    fn perform(&mut self, _: Option<&MainWindow>, effect: Effect, intents: &Intents<Intent>) {
         match effect {
             Effect::Connect => {
                 // By the phase the worker is in now, not the last one shown.
@@ -100,11 +105,6 @@ impl WindowHost<ConnectionFeature> for Window {
                     // items continue to follow reads.
                     let _ = self.backend.try_submit(Command::StartMonitoring);
                     intents.send(Intent::ConnectAccepted);
-                }
-            }
-            Effect::WorkerChanged => {
-                if let Some(window) = window {
-                    window.global::<SettingsState>().invoke_backend_updated();
                 }
             }
             Effect::Drift { phase, entering } => {

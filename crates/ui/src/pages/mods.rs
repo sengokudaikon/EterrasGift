@@ -1,12 +1,13 @@
 //! Mods in the window: the `eg_companion::mods::feature` feature's impure half. It shows the feature's state in the
 //! `ModsState` global, and queues library work, runs the compiler and starts the game when the feature says to.
 
-use crate::shell::{Page, ShellHandle};
+use crate::shell::{Intent as ShellIntent, Page, ShellHandle};
 use crate::{MainWindow, MessageTone, ModLogRow, ModRow, ModSettingRow, ModsState, SettingChoiceRow, SourceRow};
 use eg_companion::launch::launcher::GameLauncher;
 use eg_companion::mods::{
     feature::{
-        Answer, Effect, Intent, LogView, ModRowView, Mods, SelectedKey, SelectedView, SettingView, SourceRowView, SourcesKey, State, Subscription, library_stopped_words, run,
+        Answer, Effect, Intent, LogView, ModRowView, Mods, Output, SelectedKey, SelectedView, SettingView, SourceRowView, SourcesKey, State, Subscription, library_stopped_words,
+        run,
     },
     page::running_state,
     sources::ModSources,
@@ -18,11 +19,9 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use spiderland::{Intents, Slice, Store, Version, callbacks};
 use spiderland_slint::{Background, Rows, WindowHost, Windowed, every};
 use std::any::Any;
-use std::cell::RefCell;
 use task_runtime::CancellationToken;
 
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::Arc;
 
 phrases! {
@@ -44,32 +43,9 @@ pub fn cancel_work(window: &MainWindow) {
     window.global::<ModsState>().invoke_stop_work();
 }
 
-/// The bound page, for the window's close: it goes first, and says when it is done.
-#[derive(Clone)]
-pub struct ModsHandle {
-    store: Store<Mods>,
-    closed: OnClosed,
-}
-
-impl ModsHandle {
-    /// Begins closing the page: finishes the build, keeps the drafts, and waits for the worker.
-    pub fn close(&self) {
-        self.store.send(Intent::CloseRequested);
-    }
-
-    /// `closed` hears when closing has finished: true when the window may go on, false when the page stays to show a failure.
-    pub fn on_closed(&self, closed: impl Fn(bool) + 'static) {
-        *self.closed.borrow_mut() = Some(Box::new(closed));
-    }
-}
-
-/// Who hears when closing has finished.
-type OnClosed = Rc<RefCell<Option<Box<dyn Fn(bool)>>>>;
-
 struct Window {
     services: ModsPage,
     background: Background,
-    closed: OnClosed,
     build_cancel: Option<CancellationToken>,
     rows: Rows<ModRow>,
     source_rows: Rows<SourceRow>,
@@ -81,12 +57,12 @@ struct Window {
     shown_selected: Slice<SelectedKey>,
 }
 
-pub(crate) fn bind(window: &MainWindow, page: ModsPage, background: Background, shell: &ShellHandle) -> ModsHandle {
-    let closed: OnClosed = Rc::default();
+/// Binds the page, and returns its store for the window's close, which it goes first in: it finishes the build, keeps the
+/// drafts and waits for the worker, and answers with [`Output::Closed`].
+pub(crate) fn bind(window: &MainWindow, page: ModsPage, background: Background, shell: &ShellHandle) -> Store<Mods> {
     let host = Window {
         services: page,
         background,
-        closed: closed.clone(),
         build_cancel: None,
         rows: Rows::default(),
         source_rows: Rows::default(),
@@ -125,16 +101,12 @@ pub(crate) fn bind(window: &MainWindow, page: ModsPage, background: Background, 
         on_setting_toggled: |index, on| Intent::SettingToggled(index, on),
         on_setting_choice: |index, value| Intent::SettingChoice(index, value.into()),
     });
-    shell.on_shown(Page::Mods, {
-        let store = store.clone();
-        move |shown| {
-            store.send(Intent::PageChanged {
-                shown,
-                now: jiff::Timestamp::now(),
-            });
-        }
+    shell.forward_shown(Page::Mods, &store.intents(), |shown| Intent::PageChanged {
+        shown,
+        now: jiff::Timestamp::now(),
     });
-    ModsHandle { store, closed }
+    store.forward(&shell.intents(), |output| (*output == Output::ShowPage).then_some(ShellIntent::Navigate(Page::Mods)));
+    store
 }
 
 fn mod_row(row: ModRowView) -> ModRow {
@@ -355,24 +327,11 @@ impl WindowHost<Mods> for Window {
                     cancel.cancel();
                 }
             }
-            Effect::ShowPage => {
-                if let Some(window) = window {
-                    window.global::<crate::Nav>().invoke_navigate("mods".into());
-                }
-            }
-            Effect::Closed => self.tell_closed(true),
-            Effect::CloseAbandoned => self.tell_closed(false),
         }
     }
 }
 
 impl Window {
-    fn tell_closed(&self, closed: bool) {
-        if let Some(tell) = &*self.closed.borrow() {
-            tell(closed);
-        }
-    }
-
     fn open(&self, path: PathBuf, reveal: bool, create: bool, intents: &Intents<Intent>) {
         self.background.run(
             intents,
