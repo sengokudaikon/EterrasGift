@@ -18,7 +18,6 @@ use spiderland::{Dropping, Intents, Slice, Store};
 use spiderland_slint::{Background, WindowHost, Windowed, after, on_watch};
 use std::any::Any;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 /// The forge as a window shows it, for a capture to set up a state through.
 #[derive(Clone)]
@@ -151,7 +150,19 @@ impl WindowHost<Forge> for ForgeHost {
                     );
                 }
             }
-            Effect::ReportUnshown { generation, snapshot, error } => self.report_unshown(generation, &snapshot, &error),
+            Effect::ReportUnshown { generation, snapshot, error } => {
+                // The reducer asks only in a run that keeps faults.
+                if let Some(faults) = self.faults.clone() {
+                    self.background.run(
+                        intents,
+                        move || report_unshown(&faults, generation, &snapshot, &error),
+                        move |written| Intent::UnshownReported {
+                            generation,
+                            written: written.unwrap_or(false),
+                        },
+                    );
+                }
+            }
         }
     }
 }
@@ -221,22 +232,22 @@ impl ForgeHost {
             }
         }
     }
+}
 
-    /// Records an item the forge cannot show, with the item as the game reported it, so the refused value can be traced.
-    fn report_unshown(&self, generation: u64, snapshot: &Arc<ForgeSnapshot>, error: &str) {
-        let Some(faults) = &self.faults else {
-            return;
-        };
-        let details = FaultDetails {
-            code: Some("ItemNotShown".into()),
-            readback: Some(serde_json::json!({ "generation": generation, "item": forge_record(snapshot) })),
-            ..Default::default()
-        };
-        faults.write(
+/// Records an item the forge cannot show, with the item as the game reported it, so the refused value can be traced. True when
+/// a folder took the report.
+fn report_unshown(faults: &FaultLog, generation: u64, snapshot: &ForgeSnapshot, error: &str) -> bool {
+    let details = FaultDetails {
+        code: Some("ItemNotShown".into()),
+        readback: Some(serde_json::json!({ "generation": generation, "item": forge_record(snapshot) })),
+        ..Default::default()
+    };
+    faults
+        .write(
             "Item Forge",
             Some(error),
             Some(&details),
             Some("The forge shows the reason in place of the item. Nothing was sent to the game."),
-        );
-    }
+        )
+        .is_some()
 }

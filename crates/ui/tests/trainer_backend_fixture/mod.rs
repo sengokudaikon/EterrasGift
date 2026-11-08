@@ -1115,6 +1115,13 @@ pub(super) fn capture(session: &Session) {
             .collect::<Vec<_>>()
     };
     assert!(refused().is_empty());
+    // The first report finds a file where the log folder goes, so no folder takes it.
+    let (logs, aside) = (folder.join("logs"), folder.join("logs-aside"));
+    let moved = logs.exists();
+    if moved {
+        std::fs::rename(&logs, &aside).unwrap();
+    }
+    std::fs::write(&logs, b"in the way").unwrap();
     let mut unreadable = item("Unreadable item", 20);
     unreadable.implicit_rolls = vec![1, 2, 3, 4];
     unreadable.fingerprint = unreadable.legacy_fingerprint();
@@ -1123,8 +1130,18 @@ pub(super) fn capture(session: &Session) {
     wait(|| ui.global::<eg_ui::TrainerState>().get_item_unavailable().contains("fault log"));
     assert!(!ui.global::<eg_ui::ForgeState>().get_has_item());
     assert_eq!(handle.snapshot().phase, Phase::Ready);
+    session.idle();
+    std::fs::remove_file(&logs).unwrap();
+    if moved {
+        std::fs::rename(&aside, &logs).unwrap();
+    }
+    assert!(refused().is_empty());
+    // The next read makes it again, off the UI thread, and the one after finds it made.
+    command(&handle, Command::ReadForge, || true);
+    wait(|| !refused().is_empty());
     command(&handle, Command::ReadForge, || true);
     settle();
+    session.idle();
     let reports = refused();
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0]["readback"]["item"]["individualId"], 20);

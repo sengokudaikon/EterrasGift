@@ -151,6 +151,11 @@ pub enum Intent {
         roll: usize,
     },
     ShowDraft(usize),
+    /// Whether the report of the item read at `generation` went into a fault log.
+    UnshownReported {
+        generation: u64,
+        written: bool,
+    },
     /// Nothing new, but what the editor has asked for since the last intent goes out, and the page shows it.
     Settle,
 }
@@ -168,7 +173,8 @@ pub enum Effect {
         replaced: Option<String>,
     },
     DeleteTemplate(String),
-    /// Record an item the forge cannot show, with the item as the game reported it.
+    /// Record an item the forge cannot show, with the item as the game reported it, off the UI thread, answered with
+    /// [`Intent::UnshownReported`].
     ReportUnshown {
         generation: u64,
         snapshot: Arc<ForgeSnapshot>,
@@ -558,6 +564,12 @@ impl Feature for Forge {
                 });
                 if let Some((target, part)) = focus {
                     state.focus.fire(Focus { target, part });
+                }
+            }
+            // A report no folder took is made again with the next read of the item, as if it had never been made.
+            Intent::UnshownReported { generation, written } => {
+                if !written && state.reported.as_ref().is_some_and(|(reported, _)| *reported == generation) {
+                    state.reported = None;
                 }
             }
             Intent::Settle => {}
