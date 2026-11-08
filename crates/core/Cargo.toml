@@ -19,6 +19,8 @@ tokio.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+# The settings page's tests set up states no intent reaches, through Store::with_state.
+spiderland = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
 
 [lints]
