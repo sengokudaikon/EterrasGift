@@ -13,6 +13,7 @@ use eg_companion::launch::host::{GameHost, LaunchError, LaunchMode, LaunchOutcom
 use eg_companion::launch::launcher::GameLauncher;
 use eg_companion::launch::loader::ModLoaderState;
 use eg_companion::logs::LogFiles;
+use eg_companion::settings::FOLDER_CHECKS;
 use eg_core::game_log::{GameLogState, GameReadiness};
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::SettingsService;
@@ -208,7 +209,7 @@ impl Session {
     /// Settings of a window's own, in a folder of their own, so nothing reaches the user's.
     fn inline_service(&self) -> SettingsService {
         let folder = self.folder();
-        SettingsService::inline(SettingsStore::open(&folder.join("app"), &folder.join("settings.json"), &[]))
+        SettingsService::inline(SettingsStore::open(&folder.join("app"), &folder.join("settings.json"), &[]).checking(FOLDER_CHECKS))
     }
 
     fn trainer_on(&self) -> Vec<ModuleChoice> {
@@ -834,7 +835,7 @@ fn settings(session: &Session) {
     // reaches the page from the writer's thread with nothing polling for it.
     let folder = session.folder();
     let file = folder.join("settings.json");
-    let service = SettingsService::new(SettingsStore::open(&folder.join("app"), &file, &[]), &session.tasks);
+    let service = SettingsService::new(SettingsStore::open(&folder.join("app"), &file, &[]).checking(FOLDER_CHECKS), &session.tasks);
     let ui = session.open_settings(session.settings(service.clone(), session.trainer_on()));
     let (release, waiting) = std::sync::mpsc::channel();
     service

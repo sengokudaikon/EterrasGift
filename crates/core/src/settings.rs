@@ -29,8 +29,6 @@ phrases! {
     ChooseExecutable: "Choose an existing game executable (.exe), or use automatic detection."
     ChooseSourcesNone: "Choose an existing folder for mod sources, or leave it empty for none."
     ChooseSourcesCheckout: "Choose an existing folder for mod sources, or leave it empty for the mods folder in the source checkout."
-    ChooseDotnet: "Choose the folder that holds dotnet.exe, or leave it empty to find the .NET SDK automatically."
-    ChooseMelonloader: "Choose a folder with MelonLoader in it (a copy of the game's MelonLoader folder), or leave it empty for the game folder."
     OneAtATime: "Move the user-data folder and the mod library one at a time: save one, restart Eterra's Gift, then change the other."
     UserDataNotEmpty: "The selected folder already holds {file} with other content. Choose an empty user-data folder."
     LibraryNotEmpty: "The selected folder already holds {file} with other content. Choose an empty folder for the mod library."
@@ -182,6 +180,19 @@ pub struct Locations {
     pub melon_loader_directory: Option<String>,
 }
 
+/// A check of what a folder holds, before it is saved. The error is the sentence the page shows after "Locations were not
+/// saved: ".
+pub type FolderCheck = fn(&Path) -> Result<(), &'static str>;
+
+/// Checks for the two locations whose contents only the companion knows: the .NET SDK and MelonLoader folders. The
+/// composition passes the companion's ([`SettingsStore::checking`]). Without them, such a folder is saved if it is a full
+/// path.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FolderChecks {
+    pub dotnet: Option<FolderCheck>,
+    pub melon_loader: Option<FolderCheck>,
+}
+
 /// The app's settings as saved, and the saves Settings and the modules make. Saves are made one at a time by whoever
 /// holds the store, each applying its change over what the save before it left.
 #[derive(Clone, Debug)]
@@ -198,6 +209,7 @@ pub struct SettingsStore {
     startup_modules: BTreeMap<String, bool>,
     startup_error: Option<String>,
     unreadable: bool,
+    checks: FolderChecks,
 }
 
 impl SettingsStore {
@@ -229,6 +241,7 @@ impl SettingsStore {
             pending: None,
             planning: false,
             pending_explicit: false,
+            checks: FolderChecks::default(),
         };
         if upgraded {
             // Read as upgraded all the same when this fails; the next save writes the new shape.
@@ -241,6 +254,12 @@ impl SettingsStore {
         }
         store.run_pending_moves();
         store
+    }
+
+    /// Checks the .NET SDK and MelonLoader folders with `checks` before saving them.
+    pub fn checking(mut self, checks: FolderChecks) -> Self {
+        self.checks = checks;
+        self
     }
 
     fn run_pending_moves(&mut self) {
@@ -372,16 +391,12 @@ impl SettingsStore {
             .into());
         }
         let dotnet = keep_or(&self.desired().dotnet_directory, &locations.dotnet_directory, DotnetFolder)?;
-        if let Some(dotnet) = &dotnet
-            && !dotnet.join("dotnet.exe").is_file()
-        {
-            return Err(ChooseDotnet.get().into());
+        if let (Some(dotnet), Some(check)) = (&dotnet, self.checks.dotnet) {
+            check(dotnet)?;
         }
         let loader = keep_or(&self.desired().melon_loader_directory, &locations.melon_loader_directory, MelonloaderFolder)?;
-        if let Some(loader) = &loader
-            && !loader.join("MelonLoader").is_dir()
-        {
-            return Err(ChooseMelonloader.get().into());
+        if let (Some(loader), Some(check)) = (&loader, self.checks.melon_loader) {
+            check(loader)?;
         }
         let directory = normalize(&locations.user_data_directory, UserDataFolder)?;
         let library = keep_or(&self.desired().mod_library_directory, &locations.mod_library_directory, ModLibraryFolder)?;
@@ -749,16 +764,19 @@ mod tests {
             ),
             "Choose an existing game executable (.exe), or use automatic detection."
         );
-        assert_eq!(
-            refused(
-                &mut store,
-                Locations {
-                    dotnet_directory: Some(fixture.root.to_string_lossy().into()),
-                    ..Locations::default()
-                }
-            ),
-            "Choose the folder that holds dotnet.exe, or leave it empty to find the .NET SDK automatically."
-        );
+        let mut checked = open(&fixture).checking(FolderChecks {
+            dotnet: Some(|_| Err("Not an SDK.")),
+            melon_loader: Some(|folder| if folder.ends_with("loader") { Ok(()) } else { Err("Not a loader.") }),
+        });
+        let tools = |dotnet: &str, loader: &str| Locations {
+            dotnet_directory: Some(fixture.root.join(dotnet).to_string_lossy().into()),
+            melon_loader_directory: Some(fixture.root.join(loader).to_string_lossy().into()),
+            ..Locations::default()
+        };
+        assert_eq!(refused(&mut checked, tools("sdk", "loader")), "Not an SDK.", "the composition's checks say why");
+        let checks = FolderChecks { dotnet: None, ..checked.checks };
+        let mut checked = checked.checking(checks);
+        assert_eq!(refused(&mut checked, tools("sdk", "elsewhere")), "Not a loader.");
         let elsewhere = fixture.root.join("elsewhere");
         assert_eq!(
             refused(

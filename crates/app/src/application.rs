@@ -21,7 +21,7 @@ use std::process::ExitCode;
 use task_runtime::{Runtime, Tasks};
 
 pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
-    let store = SettingsStore::open(&startup.root, &startup.settings_file, &[trainer_settings::LEGACY]);
+    let store = SettingsStore::open(&startup.root, &startup.settings_file, &[trainer_settings::LEGACY]).checking(eg_companion::settings::FOLDER_CHECKS);
     let faults = FaultLog::new(&startup.root, Some(&store.paths().log_directory()));
     startup::install_panic_hook(faults.clone());
     let runtime = Runtime::start().expect("the runtime for background work starts");

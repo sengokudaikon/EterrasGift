@@ -6,7 +6,7 @@
 //! accepted saves, and a save that failed in the meantime is shown instead of being lost with the window. It names no module: each one describes itself as a [`ModuleChoice`] (`eg_core::module`).
 
 use eg_core::module::{LiveStatus, ModuleChoice, ModuleSection};
-use eg_core::settings::{AppSettings, Locations};
+use eg_core::settings::{AppSettings, FolderChecks, Locations};
 use eg_core::settings_service::{Change, SaveOutcome, SettingsService, Snapshot};
 use phrases::{Phrase, phrases};
 use spiderland::{CloseAnswer, Closing, Effects, Feature, Lifecycle, Tracked, Version};
@@ -27,6 +27,23 @@ phrases! {
     SavedRestartLocations: "Saved. Restart Eterra's Gift to use the new locations."
     SavedRestartTurn: "Saved. Restart Eterra's Gift to turn {turns}."
     LocationsSaved: "Locations saved."
+    ChooseDotnet: "Choose the folder that holds dotnet.exe, or leave it empty to find the .NET SDK automatically."
+    ChooseMelonloader: "Choose a folder with MelonLoader in it (a copy of the game's MelonLoader folder), or leave it empty for the game folder."
+}
+
+/// What the .NET SDK and MelonLoader folders must hold to be saved, for the settings writer to check
+/// (`SettingsStore::checking`): dotnet.exe, and a MelonLoader folder.
+pub const FOLDER_CHECKS: FolderChecks = FolderChecks {
+    dotnet: Some(holds_dotnet),
+    melon_loader: Some(holds_melon_loader),
+};
+
+fn holds_dotnet(folder: &Path) -> Result<(), &'static str> {
+    if folder.join("dotnet.exe").is_file() { Ok(()) } else { Err(ChooseDotnet.get()) }
+}
+
+fn holds_melon_loader(folder: &Path) -> Result<(), &'static str> {
+    if folder.join("MelonLoader").is_dir() { Ok(()) } else { Err(ChooseMelonloader.get()) }
 }
 
 /// What the message is: one kind, so the action bar shows exactly one icon.
@@ -887,6 +904,20 @@ mod tests {
     use spiderland::{TestStore, step};
     use std::fs;
 
+    #[test]
+    fn the_tool_folders_must_hold_their_tools() {
+        let temp = tempfile::tempdir().unwrap();
+        assert_eq!(
+            holds_dotnet(temp.path()),
+            Err("Choose the folder that holds dotnet.exe, or leave it empty to find the .NET SDK automatically.")
+        );
+        fs::write(temp.path().join("dotnet.exe"), b"").unwrap();
+        assert_eq!(holds_dotnet(temp.path()), Ok(()));
+        assert!(holds_melon_loader(temp.path()).is_err());
+        fs::create_dir(temp.path().join("MelonLoader")).unwrap();
+        assert_eq!(holds_melon_loader(temp.path()), Ok(()));
+    }
+
     fn trainer(default_on: bool) -> ModuleChoice {
         ModuleChoice {
             id: "trainer",
@@ -1034,7 +1065,8 @@ mod tests {
     fn inline(temp: &Path) -> SettingsService {
         let root = temp.join("app");
         fs::create_dir_all(&root).unwrap();
-        SettingsService::inline(SettingsStore::open(&root, &temp.join("settings.json"), &[]))
+        // As the app opens it, with the companion's checks of the tool folders.
+        SettingsService::inline(SettingsStore::open(&root, &temp.join("settings.json"), &[]).checking(FOLDER_CHECKS))
     }
 
     fn page(temp: &Path) -> Page {

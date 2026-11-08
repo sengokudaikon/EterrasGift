@@ -612,6 +612,14 @@ msgid "Changes last for this run only. Save locations replaces the unreadable fi
 msgstr ""
 
 #: crates/companion/src/settings.rs
+msgid "Choose a folder with MelonLoader in it (a copy of the game's MelonLoader folder), or leave it empty for the game folder."
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Choose the folder that holds dotnet.exe, or leave it empty to find the .NET SDK automatically."
+msgstr ""
+
+#: crates/companion/src/settings.rs
 msgid "Every mod version you install, and which mods are on. A new folder takes effect after a restart."
 msgstr ""
 
@@ -769,10 +777,6 @@ msgid "Access to the path '{path}' is denied."
 msgstr ""
 
 #: crates/core/src/settings.rs
-msgid "Choose a folder with MelonLoader in it (a copy of the game's MelonLoader folder), or leave it empty for the game folder."
-msgstr ""
-
-#: crates/core/src/settings.rs
 msgid "Choose an existing folder for mod sources, or leave it empty for none."
 msgstr ""
 
@@ -782,10 +786,6 @@ msgstr ""
 
 #: crates/core/src/settings.rs
 msgid "Choose an existing game executable (.exe), or use automatic detection."
-msgstr ""
-
-#: crates/core/src/settings.rs
-msgid "Choose the folder that holds dotnet.exe, or leave it empty to find the .NET SDK automatically."
 msgstr ""
 
 #: crates/core/src/settings.rs
