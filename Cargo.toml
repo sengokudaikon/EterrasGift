@@ -1,5 +1,5 @@
 # The app. It builds on two workspaces of their own, which name neither the app nor the game: the libraries (`libs/`) and
-# the UI framework, spiderland, a repository of its own taken by revision (all four of its crates at the same one).
+# the UI framework, spiderland, a repository of its own taken by revision (both of its crates at the same one).
 [workspace]
 resolver = "3"
 members = ["crates/*"]
@@ -24,6 +24,8 @@ uuid = { version = "1.28.0", features = ["v4"] }
 # File and folder pickers, parented to the Slint window through raw-window-handle 0.6.
 rfd = { version = "0.17.2", default-features = false }
 raw-window-handle = "0.6.2"
+# The user's locale, read as Slint reads it to pick a bundled translation (eg_ui::select_language).
+sys-locale = "0.3.2"
 tempfile = "3.27.0"
 tokio = { version = "=1.53.3", features = ["rt", "net", "io-util", "time", "sync"] }
 
@@ -34,8 +36,7 @@ spiderland-slint = { git = "https://github.com/sengokudaikon/spiderland", rev = 
 il2cpp-runtime = { path = "libs/il2cpp-runtime" }
 native-hooks = { path = "libs/native-hooks" }
 eg-core = { path = "crates/core" }
-spiderland-phrases = { git = "https://github.com/sengokudaikon/spiderland", rev = "51ff537b75346ebc09849b0ea4e07c29c036aeb7" }
-spiderland-phrases-build = { git = "https://github.com/sengokudaikon/spiderland", rev = "51ff537b75346ebc09849b0ea4e07c29c036aeb7" }
+phrases = { path = "libs/phrases" }
 file-ops = { path = "libs/file-ops" }
 melon-loader = { path = "libs/melon-loader" }
 unity-files = { path = "libs/unity-files" }

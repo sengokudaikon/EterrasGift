@@ -1,6 +1,6 @@
 //! Settings in the window: the `eg_core::settings_page` feature's impure half. It shows the feature's state in the
 //! `SettingsState` global, and saves, picks files, tells linked modules and closes the window when the feature says to.
-use spiderland_phrases::phrases;
+use phrases::phrases;
 
 pub mod trainer;
 

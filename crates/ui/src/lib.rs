@@ -52,10 +52,16 @@ pub struct App {
     pub start: Page,
 }
 
-/// Shows the app in the user's language when a translation has it, else in English. Call it as soon as the first window
-/// exists, before any page or message is built.
+/// Shows the app in the user's language when a translation has it, else in English: the views through Slint's bundled
+/// translation, the phrases through the bundled catalogs, and numbers in that language's symbols, chosen once for all. Call it
+/// as soon as the first window exists, before any page or message is built.
 pub fn select_language() {
-    spiderland_slint::select_language(translations::CATALOGS).expect("a bundled catalog's plural rule can't be read");
+    let translations = phrases::Translations::new(translations::CATALOGS).expect("a bundled catalog's plural rule can't be read");
+    let language = sys_locale::get_locale().and_then(|locale| translations.choose(&locale));
+    translations.select(language);
+    phrases::locale::select(language);
+    // Fails only when no translation is bundled, and English needs none.
+    let _ = slint::select_bundled_translation(language.unwrap_or(""));
 }
 
 /// What a window was bound to: captures set up the forge's states through it.
@@ -134,6 +140,6 @@ where
 mod tests {
     #[test]
     fn every_bundled_translation_reads() {
-        spiderland_phrases::Translations::new(super::translations::CATALOGS).unwrap();
+        phrases::Translations::new(super::translations::CATALOGS).unwrap();
     }
 }

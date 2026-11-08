@@ -26,6 +26,14 @@ uuid = { version = "1.28.0", features = ["v4"] }
 # CIL metadata and span-preserving TOML (melon-loader).
 dotscope = "=0.9.1"
 toml_edit = "=0.25.17"
+# A library's errors, as types a caller can match and print (phrases).
+thiserror = "2.0.21"
+# The parser slint-build bundles translations with, so the Rust phrases' table takes what the views take (phrases' `build`).
+rspolib = "=0.1.2"
+# The template reads Rust sources as tokens, and their strings as Rust reads them (phrases' `build`). The versions
+# thiserror's macro already builds.
+proc-macro2 = { version = "1.0.107", default-features = false }
+syn = { version = "3.0.9", default-features = false }
 
 binary-reader = { path = "binary-reader" }
 file-ops = { path = "file-ops" }

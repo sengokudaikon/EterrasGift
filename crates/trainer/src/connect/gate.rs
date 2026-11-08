@@ -4,7 +4,7 @@
 //! helper into a game that is online. The gate is the helper's own check of the character in play, before every change.
 use eg_core::game_log::{GameLogReader, GameLogState, GameLogStatus, GameReadiness};
 use jiff::Timestamp;
-use spiderland_phrases::phrases;
+use phrases::phrases;
 
 phrases! {
     LogMissing: "Last Epoch's Player.log was not found, so an offline character cannot be confirmed."

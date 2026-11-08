@@ -1,0 +1,29 @@
+[package]
+name = "phrases"
+description = "The words and numbers a UI shows, in the user's language: phrases, plurals, the bundled catalogs and number symbols. Its `build` feature bundles the catalogs in a build script and collects the shown words into a gettext template. Names no app or game."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[features]
+# `build`: `phrases::build`, for a build script and the task that writes the template. It brings a .po parser and a Rust
+# tokenizer, which the shown words don't need.
+build = ["dep:proc-macro2", "dep:rspolib", "dep:syn"]
+
+[dependencies]
+thiserror.workspace = true
+proc-macro2 = { workspace = true, optional = true }
+rspolib = { workspace = true, optional = true }
+syn = { workspace = true, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Globalization"] }
+
+[dev-dependencies]
+# This crate's own tests cover its `build` feature too.
+phrases = { path = ".", features = ["build"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

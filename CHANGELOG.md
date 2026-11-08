@@ -3,6 +3,10 @@
 What the rewrite can do, newest first, one line per feature. Add a line when a feature lands; details live in the
 code and its tests, and what is still to build in [the helper's backlog](crates/trainer-helper/BACKLOG.md).
 
+## 2026-11-08
+
+- Build: the words and numbers the UI shows come from `libs/phrases`, no longer from spiderland.
+
 ## 2026-11-06
 
 - Trainer: a hook group that can't restore no longer keeps the others in the game; the rest are restored and the helper retries it before giving up.

@@ -34,7 +34,7 @@ To build against a local spiderland checkout instead, point Cargo at it for one 
 cargo build --config "patch.'https://github.com/sengokudaikon/spiderland'.spiderland.path='../spiderland/spiderland'"
 ```
 
-Add the same `patch` entries for `spiderland-slint`, `spiderland-phrases` and `spiderland-phrases-build`. A patched build
+Add the same `patch` entry for `spiderland-slint`. A patched build
 rewrites `Cargo.lock` to name the local crates; keep that change out of commits.
 
 ## Licence

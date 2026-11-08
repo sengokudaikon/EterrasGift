@@ -6,7 +6,7 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
-spiderland-phrases-build.workspace = true
+phrases = { workspace = true, features = ["build"] }
 
 [lints]
 workspace = true

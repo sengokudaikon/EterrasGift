@@ -1,8 +1,8 @@
 //! Navigation: which pages exist, which one shows, and how the pane's rows answer clicks and keys. No toolkit in it; `super`
 //! shows it in the `Nav` global.
 
+use phrases::phrases;
 use spiderland::{Effects, Feature, Tracked};
-use spiderland_phrases::phrases;
 
 phrases! {
     Home: "Home"

@@ -11,8 +11,8 @@ use crate::launch::launcher::{LaunchReport, StartingWithMods};
 use crate::launch::loader::ModLoaderState;
 use eg_core::bloom::BloomPhase;
 use eg_core::game_log::GameReadiness;
+use phrases::{Phrase, phrases};
 use spiderland::{Effects, Feature, Panicked, Tracked};
-use spiderland_phrases::{Phrase, phrases};
 use std::borrow::Cow;
 
 phrases! {

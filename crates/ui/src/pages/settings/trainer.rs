@@ -5,7 +5,7 @@
 use crate::pages::settings::{LiveStatus, ModuleChoice, ModuleLink, ModuleSection};
 use eg_core::settings::LegacyModuleSettings;
 use eg_trainer::backend::{Activity, BackendHandle, BackendSnapshot, CatalogState, Command, GameFiles};
-use spiderland_phrases::phrases;
+use phrases::phrases;
 use std::rc::Rc;
 
 phrases! {

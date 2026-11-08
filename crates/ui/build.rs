@@ -11,7 +11,7 @@ fn main() {
     // the Rust phrases. Slint refuses a folder with none, and the template (lang/eterras-gift.pot) is not a translation.
     let lang = Path::new("../../lang");
     let out = Path::new(&std::env::var("OUT_DIR").unwrap()).join("translations.rs");
-    if !spiderland_phrases_build::bundle_catalogs(lang, "eg-ui", &out).is_empty() {
+    if !phrases::build::bundle_catalogs(lang, "eg-ui", &out).is_empty() {
         config = config.with_bundled_translations(lang);
     }
     slint_build::compile_with_config("ui/app.slint", config).expect("Slint UI failed to compile");

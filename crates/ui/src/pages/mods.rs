@@ -11,9 +11,9 @@ use eg_companion::mods::{
     worker::ModWorker,
 };
 use eg_core::settings_service::SettingsService;
+use phrases::phrases;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
 use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version, callbacks};
-use spiderland_phrases::phrases;
 use spiderland_slint::{Background, Rows, every};
 use std::cell::RefCell;
 use task_runtime::CancellationToken;

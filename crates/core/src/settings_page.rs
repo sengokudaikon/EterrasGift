@@ -7,8 +7,8 @@
 
 use crate::settings::{AppSettings, Locations};
 use crate::settings_service::{Change, SaveOutcome, SettingsService, Snapshot};
+use phrases::{Phrase, phrases};
 use spiderland::{Effects, Feature, Tracked, Version};
-use spiderland_phrases::{Phrase, phrases};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

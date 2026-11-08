@@ -11,8 +11,8 @@ use super::rows::{AffixRow, FieldDraft, FieldKind, FieldOption, RollRow, ValueEd
 use crate::backend::BackendSnapshot;
 use crate::item::template::{ItemTemplate, TemplateAffix, TemplateItem, TemplateStatus};
 use eg_core::lists::{Conjunction, list};
+use phrases::{Phrase, phrases};
 use spiderland::Tracked;
-use spiderland_phrases::{Phrase, phrases};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;

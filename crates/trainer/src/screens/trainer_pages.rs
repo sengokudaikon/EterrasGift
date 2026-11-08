@@ -9,9 +9,9 @@ use super::pages::{self, Content, EditorRow, FieldModel, HookRow, PageModel, Row
 use super::profiles::{self, Profile};
 use super::registry::{self, Area, Feature, FeatureKind, FeatureValue};
 use super::session::{FieldRequest, FieldResult, FieldWrite, HookState, TrainerSession};
+use phrases::locale::numbers;
+use phrases::phrases;
 use spiderland::{Effects, Feature as SpiderlandFeature, Tracked, Version};
-use spiderland_phrases::locale::numbers;
-use spiderland_phrases::phrases;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;

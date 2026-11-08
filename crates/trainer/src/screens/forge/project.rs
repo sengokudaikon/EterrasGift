@@ -5,7 +5,7 @@ use super::game::Catalog;
 use super::item::{self, AffixDefinition, AffixKind, Category, ForgeItem, ValueTable};
 use crate::backend::{BackendSnapshot, CatalogState, ForgeState, Phase};
 use crate::definitions::catalog::{Availability, GameCatalog};
-use spiderland_phrases::phrases;
+use phrases::phrases;
 use std::sync::Arc;
 
 phrases! {

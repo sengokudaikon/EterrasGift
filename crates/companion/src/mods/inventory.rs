@@ -13,7 +13,7 @@ use melon_loader::assembly::{GameIdentity, LoaderVersion};
 use melon_loader::loader_state::{self, LoaderInstall, LoaderPreparation};
 use melon_loader::log::{LogProblem, MelonLog, ModLogRun};
 use melon_loader::preferences::{MelonPreferences, PreferenceKind, PreferenceValue};
-use spiderland_phrases::phrases;
+use phrases::phrases;
 use std::path::{Path, PathBuf};
 
 phrases! {

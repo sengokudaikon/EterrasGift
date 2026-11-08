@@ -2,7 +2,7 @@
 //! [`melon_loader::assembly`].
 
 use melon_loader::assembly::{GameIdentity, LoaderVersion, MelonAssembly, MelonDomain, MelonKind};
-use spiderland_phrases::phrases;
+use phrases::phrases;
 
 phrases! {
     UnknownKind: "Its MelonInfo names a class that is neither a MelonMod nor a MelonPlugin, so MelonLoader will not load it."

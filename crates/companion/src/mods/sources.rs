@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime};
 use task_runtime::CancellationToken;
 use task_runtime::{Closed, Tasks, process};
 
-use spiderland_phrases::phrases;
+use phrases::phrases;
 
 phrases! {
     Cancelled: "The operation was cancelled."

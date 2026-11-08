@@ -1,6 +1,6 @@
 //! Items joined into one phrase, as the user's language joins them: "a", "a and b", "a, b and c".
 
-use spiderland_phrases::phrases;
+use phrases::phrases;
 use std::fmt;
 
 /// The word before a [`list`]'s last item.

@@ -5,8 +5,8 @@
 use super::backend_session::sentence;
 use crate::backend::{Activity, BackendSnapshot, Command, ErrorKind, HelperResidency, HelperRestartRequired, Phase, ProfileLock};
 use eg_core::{bloom::BloomPhase, game_log::GameReadiness};
+use phrases::phrases;
 use spiderland::{Effects, Feature, Tracked};
-use spiderland_phrases::phrases;
 use std::sync::Arc;
 
 phrases! {

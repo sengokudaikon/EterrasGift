@@ -5,8 +5,8 @@
 use crate::paths::{self, AppPaths};
 use file_ops::folder_move::{migrate, migration_conflict, probe, relative};
 use file_ops::{atomic, json};
+use phrases::{Phrase, phrases};
 use serde_json::{Map, Value};
-use spiderland_phrases::{Phrase, phrases};
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};

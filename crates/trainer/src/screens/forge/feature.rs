@@ -11,8 +11,8 @@ use super::rows::FieldKind;
 use crate::backend::{BackendError, BackendSnapshot, ForgeSnapshot, ForgeState, Phase};
 use crate::definitions::catalog::GameCatalog;
 use crate::item::template::ItemTemplate;
+use phrases::phrases;
 use spiderland::{Effects, Feature, Panicked, Tracked};
-use spiderland_phrases::phrases;
 use std::sync::Arc;
 
 phrases! {

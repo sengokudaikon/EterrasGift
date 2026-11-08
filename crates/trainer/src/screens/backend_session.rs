@@ -6,7 +6,7 @@ use super::session::{FieldError, FieldRequest, FieldWrite, GameField, HookState,
 use crate::backend::{BackendHandle, BackendSnapshot, Command, Pending, Phase};
 use crate::features::profiles::ProfileKey;
 use crate::features::{FeatureIntents, HookId};
-use spiderland_phrases::phrases;
+use phrases::phrases;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;

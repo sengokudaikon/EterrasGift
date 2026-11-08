@@ -2,7 +2,7 @@
 //! identity (`eg_trainer_wire::hooks::GameplayHook`); a descriptor grants no permission to install a hook.
 
 use eg_trainer_wire::hooks::{GameplayHook, ValueKind};
-use spiderland_phrases::{Phrase, phrases};
+use phrases::{Phrase, phrases};
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
@@ -139,7 +139,7 @@ impl FeatureValue {
     pub fn start_text(&self) -> String {
         match self.choices.get(self.start as usize) {
             Some(choice) => choice.get().to_owned(),
-            None => spiderland_phrases::locale::numbers().plain(self.start),
+            None => phrases::locale::numbers().plain(self.start),
         }
     }
 

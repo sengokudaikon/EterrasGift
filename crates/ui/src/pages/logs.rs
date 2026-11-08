@@ -5,9 +5,9 @@ use crate::shell::{Page, ShellHandle};
 use crate::{LogsState, MainWindow};
 use eg_core::logs::{Effect, Intent, LogFiles, Logs, Source, State, WATCH_INTERVAL, read};
 use eg_trainer::backend::BackendHandle;
+use phrases::phrases;
 use slint::{ComponentHandle, Weak};
 use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version, callbacks};
-use spiderland_phrases::phrases;
 use spiderland_slint::{Background, every};
 
 phrases! {

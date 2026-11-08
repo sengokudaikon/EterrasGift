@@ -4,8 +4,8 @@
 //! makes an older one's result meaningless, so each read carries a generation. Contents that come back unchanged leave
 //! the view alone, which keeps a text selection in place.
 
+use phrases::phrases;
 use spiderland::{Effects, Feature, Panicked, Tracked};
-use spiderland_phrases::phrases;
 use std::{
     fs::{self, File},
     io::{self, Read, Seek, SeekFrom},

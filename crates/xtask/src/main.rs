@@ -6,7 +6,7 @@
 
 mod sweep;
 
-use spiderland_phrases_build::Template;
+use phrases::build::Template;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 

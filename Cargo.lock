@@ -1330,10 +1330,10 @@ dependencies = [
  "file-ops",
  "jiff",
  "melon-loader",
+ "phrases",
  "regex",
  "serde_json",
  "spiderland",
- "spiderland-phrases",
  "task-runtime",
  "tempfile",
  "tokio",
@@ -1347,10 +1347,10 @@ version = "0.1.0"
 dependencies = [
  "file-ops",
  "jiff",
+ "phrases",
  "regex",
  "serde_json",
  "spiderland",
- "spiderland-phrases",
  "task-runtime",
  "tempfile",
  "tokio",
@@ -1390,9 +1390,9 @@ dependencies = [
  "eg-trainer-wire",
  "file-ops",
  "jiff",
+ "phrases",
  "serde_json",
  "spiderland",
- "spiderland-phrases",
  "task-runtime",
  "tempfile",
  "tokio",
@@ -1433,15 +1433,15 @@ dependencies = [
  "image",
  "jiff",
  "melon-loader",
+ "phrases",
  "raw-window-handle",
  "rfd",
  "serde_json",
  "slint",
  "slint-build",
  "spiderland",
- "spiderland-phrases",
- "spiderland-phrases-build",
  "spiderland-slint",
+ "sys-locale",
  "task-runtime",
  "tempfile",
  "tokio",
@@ -4000,6 +4000,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "phrases"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "rspolib",
+ "syn 3.0.9",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "pico-args"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4977,17 +4988,6 @@ source = "git+https://github.com/sengokudaikon/spiderland?rev=51ff537b75346ebc09
 dependencies = [
  "thiserror 2.0.21",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "spiderland-phrases-build"
-version = "0.1.0"
-source = "git+https://github.com/sengokudaikon/spiderland?rev=51ff537b75346ebc09849b0ea4e07c29c036aeb7#51ff537b75346ebc09849b0ea4e07c29c036aeb7"
-dependencies = [
- "proc-macro2",
- "rspolib",
- "syn 3.0.9",
- "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -6529,7 +6529,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
- "spiderland-phrases-build",
+ "phrases",
 ]
 
 [[package]]

@@ -16,7 +16,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use spiderland_phrases::phrases;
+use phrases::phrases;
 
 phrases! {
     NotADll: "{file} is not a DLL. A mod is a .dll file; take it out of a downloaded zip first."

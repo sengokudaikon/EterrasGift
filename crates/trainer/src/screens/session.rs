@@ -4,7 +4,7 @@
 //! profile is known.
 
 use super::profiles::Profile;
-use spiderland_phrases::phrases;
+use phrases::phrases;
 use std::pin::Pin;
 
 /// Where a hook of the live profile stands in the game: the worker's own report.

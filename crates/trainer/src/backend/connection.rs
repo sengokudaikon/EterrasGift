@@ -1,7 +1,7 @@
 //! What the worker runs on: the game's processes (`ProcessLocator`), the preparation of a connection (`Connector`),
 //! the connection itself (`BackendConnection`, which a helper `Session` is) and the clock.
 use super::*;
-use spiderland_phrases::phrases;
+use phrases::phrases;
 
 pub trait ProcessLocator: Send + 'static {
     /// Query identities only. A matching filename alone is not an attachment.

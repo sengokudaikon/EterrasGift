@@ -8,7 +8,7 @@ use crate::backend::{BackendError, BackendSnapshot, Command, ForgeState as Backe
 use crate::item::edit::{ExpectedObservation, RollEdit, RollTarget};
 use crate::item::values::{MappingAddress, MappingRequest, MappingTarget};
 use crate::write::ForgePlan;
-use spiderland_phrases::phrases;
+use phrases::phrases;
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::Duration;
