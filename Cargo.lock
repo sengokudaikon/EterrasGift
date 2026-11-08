@@ -4980,7 +4980,7 @@ dependencies = [
 [[package]]
 name = "spiderland"
 version = "0.1.0"
-source = "git+https://github.com/sengokudaikon/spiderland?rev=517655cfca4543c08372cef972f0bf6608464224#517655cfca4543c08372cef972f0bf6608464224"
+source = "git+https://github.com/sengokudaikon/spiderland?rev=6cef3d6c3b8a1aa165bdeb5a6b42c6615938dca7#6cef3d6c3b8a1aa165bdeb5a6b42c6615938dca7"
 dependencies = [
  "tokio",
 ]
@@ -4988,7 +4988,7 @@ dependencies = [
 [[package]]
 name = "spiderland-slint"
 version = "0.1.0"
-source = "git+https://github.com/sengokudaikon/spiderland?rev=517655cfca4543c08372cef972f0bf6608464224#517655cfca4543c08372cef972f0bf6608464224"
+source = "git+https://github.com/sengokudaikon/spiderland?rev=6cef3d6c3b8a1aa165bdeb5a6b42c6615938dca7#6cef3d6c3b8a1aa165bdeb5a6b42c6615938dca7"
 dependencies = [
  "slint",
  "spiderland",
