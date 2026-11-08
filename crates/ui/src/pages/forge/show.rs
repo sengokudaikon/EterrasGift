@@ -12,10 +12,10 @@ use eg_trainer::screens::forge::feature::State;
 use eg_trainer::screens::forge::game::{self, Lookup};
 use eg_trainer::screens::forge::item::{ForgeItem, Seal};
 use eg_trainer::screens::forge::picker::{self, KindFilter, SourceChoice};
-use eg_trainer::screens::forge::rows::{FieldKind, ValueEditor};
-use slint::{ModelRc, SharedString, VecModel};
+use eg_trainer::screens::forge::rows::{AffixRow, FieldKind, ValueEditor};
+use slint::{ModelRc, SharedString};
 use spiderland::{CheckedSlice, Slice, Version};
-use spiderland_slint::Rows;
+use spiderland_slint::{InnerRows, Rows};
 use std::rc::Rc;
 
 pub(super) fn cell_of(cell: &CellRef) -> Cell {
@@ -52,7 +52,11 @@ struct Gates {
 }
 
 type RowVersions = [Version; 7];
-type Lines = Vec<(ModifierRowView, Vec<ValueCell>)>;
+/// Rows each made with the list inside them apart, so the rows can be compared, and their lists kept in models of their own.
+type WithLists<R, T> = Vec<(R, Vec<T>)>;
+type Lines = WithLists<ModifierRowView, ValueCell>;
+/// A menu's options, each with its facts.
+type Options = WithLists<MenuOptionView, SharedString>;
 /// What the picker's rows are built from: the catalog, what is listed, the slot and the base their values are scaled for.
 type PickerKey = (u64, Vec<usize>, Option<u16>, Option<(u16, u16)>);
 
@@ -63,39 +67,26 @@ struct Regions {
     fields: CheckedSlice<(Version, Gates), Vec<FieldView>>,
     implicits: CheckedSlice<(Version, Version, Gates), Lines>,
     uniques: CheckedSlice<(Version, Version, Gates), Lines>,
-    affixes: CheckedSlice<(RowVersions, Gates), Vec<AffixRowView>>,
+    affixes: CheckedSlice<(RowVersions, Gates), WithLists<AffixRowView, TierOption>>,
     drafts: CheckedSlice<(RowVersions, u64), Vec<DraftEntryView>>,
     history: CheckedSlice<Version, Vec<AppliedEntryView>>,
-    /// These rows hold new models for their facts each time they are made, so they can't be compared to check their key.
-    identity_options: Slice<(u64, i64, String)>,
-    base_options: Slice<(u64, i64)>,
-    /// Their rows hold new models for their facts too. What they say of each template comes from the catalog.
-    template_rows: Slice<(Version, u64)>,
+    identity_options: CheckedSlice<(u64, i64, String), Options>,
+    base_options: CheckedSlice<(u64, i64), Options>,
+    /// What they say of each template comes from the catalog.
+    template_rows: CheckedSlice<(Version, u64), WithLists<TemplateRowView, SharedString>>,
     input: Slice<Version>,
     picker: Slice<PickerKey>,
-}
-
-/// What a row's tier list depends on: the affix drafted, its highest tier and the game's own, and the catalog.
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct TierKey {
-    affix: u16,
-    max_tier: u8,
-    added: bool,
-    game_affix: u16,
-    game_tier: u8,
-    generation: u64,
 }
 
 /// The models the view holds for its whole life, updated in place so its repeated rows aren't rebuilt under the pointer.
 #[derive(Default)]
 struct Models {
     affixes: Rows<AffixRowView>,
-    tiers: Vec<Rows<TierOption>>,
-    tier_keys: Vec<Option<TierKey>>,
+    tiers: InnerRows<TierOption>,
     uniques: Rows<ModifierRowView>,
-    unique_rolls: Vec<Rows<ValueCell>>,
+    unique_rolls: InnerRows<ValueCell>,
     implicits: Rows<ModifierRowView>,
-    implicit_rolls: Vec<Rows<ValueCell>>,
+    implicit_rolls: InnerRows<ValueCell>,
     implicit_preview: Rows<SharedString>,
     summary: Rows<SharedString>,
     fields: Rows<FieldView>,
@@ -103,7 +94,11 @@ struct Models {
     history: Rows<AppliedEntryView>,
     rarity_options: Rows<MenuOptionView>,
     base_options: Rows<MenuOptionView>,
+    base_facts: InnerRows<SharedString>,
     identity_options: Rows<MenuOptionView>,
+    identity_facts: InnerRows<SharedString>,
+    template_rows: Rows<TemplateRowView>,
+    template_facts: InnerRows<SharedString>,
     picker_rows: Rc<PickerRows>,
     picker_slots: Rows<SharedString>,
     picker_levels: Rows<SharedString>,
@@ -134,6 +129,7 @@ impl View {
         forge.set_rarity_options(models.rarity_options.model());
         forge.set_base_options(models.base_options.model());
         forge.set_identity_options(models.identity_options.model());
+        forge.set_template_rows(models.template_rows.model());
         forge.set_picker_rows(ModelRc::from(models.picker_rows.clone()));
         forge.set_picker_slots(models.picker_slots.model());
         forge.set_picker_levels(models.picker_levels.model());
@@ -160,7 +156,7 @@ impl View {
         };
         let drafted = drafted.as_ref();
 
-        show_templates(forge, state, regions);
+        show_templates(forge, state, regions, models);
         show_input(forge, state, regions);
         show_header(forge, editor, drafted, regions, models);
 
@@ -177,17 +173,14 @@ impl View {
             "implicits",
             (editor.implicits.version(), editor.base.version(), gates),
             || lines(editor, CellKind::Implicit),
-            |rows| models.implicits.sync(with_rolls(rows, &mut models.implicit_rolls)),
+            |rows| models.implicits.sync(models.implicit_rolls.fill(rows, |row, rolls| row.rolls = rolls)),
         );
 
         regions.affixes.update(
             "affixes",
             (rows, gates),
             || affix_rows(editor),
-            |rows| {
-                let rows = with_tiers(rows, editor, &mut models.tiers, &mut models.tier_keys);
-                models.affixes.sync(rows);
-            },
+            |rows| models.affixes.sync(models.tiers.fill(rows, |row, tiers| row.tiers = tiers)),
         );
         forge.set_selected_affix(editor.selected_affix().map_or(-1, |index| index as i32));
         forge.set_can_change_affix_list(editor.can_change_affix_list());
@@ -205,7 +198,7 @@ impl View {
             "uniques",
             (editor.uniques.version(), editor.item_version(), gates),
             || lines(editor, CellKind::Unique),
-            |rows| models.uniques.sync(with_rolls(rows, &mut models.unique_rolls)),
+            |rows| models.uniques.sync(models.unique_rolls.fill(rows, |row, rolls| row.rolls = rolls)),
         );
         forge.set_selected_unique(editor.selected_unique().map_or(-1, |index| index as i32));
         forge.set_preview_status(editor.preview_status.clone().into());
@@ -249,25 +242,30 @@ impl View {
 }
 
 /// The kept templates, read again from their folder when something says to, and the name typed for a new one.
-fn show_templates(forge: &ForgeState, state: &State, regions: &mut Regions) {
+fn show_templates(forge: &ForgeState, state: &State, regions: &mut Regions, models: &mut Models) {
     let editor = state.editor();
     forge.set_has_templates(editor.keeps_templates);
     forge.set_template_message(editor.template_message.clone().into());
-    regions.template_rows.update((editor.templates.version(), editor.menu_generation()), || {
-        let rows: Vec<TemplateRowView> = editor
-            .templates
-            .iter()
-            .map(|template| {
-                let detail = editor.template_detail(template);
-                TemplateRowView {
-                    name: template.name.clone().into(),
-                    label: format!("{}\n{}", template.name, detail.join(", ")).into(),
-                    facts: facts(detail),
-                }
-            })
-            .collect();
-        forge.set_template_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
-    });
+    regions.template_rows.update(
+        "templates",
+        (editor.templates.version(), editor.menu_generation()),
+        || {
+            editor
+                .templates
+                .iter()
+                .map(|template| {
+                    let detail = editor.template_detail(template);
+                    let row = TemplateRowView {
+                        name: template.name.clone().into(),
+                        label: format!("{}\n{}", template.name, detail.join(", ")).into(),
+                        facts: ModelRc::default(),
+                    };
+                    (row, facts(&detail))
+                })
+                .collect()
+        },
+        |rows| models.template_rows.sync(models.template_facts.fill(rows, |row, facts| row.facts = facts)),
+    );
     forge.set_template_name(editor.template_name.clone().into());
     forge.set_template_replaces(editor.template_replaces().unwrap_or_default().into());
 }
@@ -306,18 +304,30 @@ fn show_header(forge: &ForgeState, editor: &ForgeEditor, drafted: Option<&ForgeI
     forge.set_identity_tip(editor.identity_tip().into());
     forge.set_identity_search(editor.identity_search.clone().into());
     let held = editor.identity.as_ref().map_or(-1, |identity| identity.value());
-    regions.identity_options.update((generation, held, editor.identity_search.clone()), || {
-        models.identity_options.sync(editor.identity_choices().into_iter().map(|option| MenuOptionView {
-            name: option.name.clone().into(),
-            facts: facts(option.facts.clone()),
-            note: option.note.clone().into(),
-            implicits: SharedString::new(),
-            in_game: option.in_game,
-            available: option.available,
-            current: option.value == held,
-            rarity: rarity_of(option.rarity),
-        }));
-    });
+    regions.identity_options.update(
+        "identity options",
+        (generation, held, editor.identity_search.clone()),
+        || {
+            editor
+                .identity_choices()
+                .into_iter()
+                .map(|option| {
+                    let row = MenuOptionView {
+                        name: option.name.clone().into(),
+                        facts: ModelRc::default(),
+                        note: option.note.clone().into(),
+                        implicits: SharedString::new(),
+                        in_game: option.in_game,
+                        available: option.available,
+                        current: option.value == held,
+                        rarity: rarity_of(option.rarity),
+                    };
+                    (row, facts(&option.facts))
+                })
+                .collect()
+        },
+        |rows| models.identity_options.sync(models.identity_facts.fill(rows, |row, facts| row.facts = facts)),
+    );
     // Unique, set and legendary come from the item before exalted does, so a legendary with a T6+ affix keeps its own colour.
     let rarity = editor.rarity_code();
     forge.set_name_rarity(if !matches!(rarity, 7..=9) && editor.name_is_exalted() {
@@ -350,24 +360,32 @@ fn show_header(forge: &ForgeState, editor: &ForgeEditor, drafted: Option<&ForgeI
     forge.set_can_change_base(editor.can_change_base());
     forge.set_base_tip(editor.base_tip().into());
     let base_held = editor.base.as_ref().map_or(-1, |base| base.value());
-    regions.base_options.update((generation, base_held), || {
-        let options = editor.base.as_ref().map(|base| {
+    regions.base_options.update(
+        "base options",
+        (generation, base_held),
+        || {
+            let Some(base) = editor.base.as_ref() else {
+                return Vec::new();
+            };
             base.options
                 .iter()
-                .map(|option| MenuOptionView {
-                    name: option.name.clone().into(),
-                    facts: facts(option.facts.clone()),
-                    note: option.note.clone().into(),
-                    implicits: option.implicits.clone().into(),
-                    in_game: option.in_game,
-                    available: option.available,
-                    current: option.value == base.value(),
-                    rarity: ItemRarity::Normal,
+                .map(|option| {
+                    let row = MenuOptionView {
+                        name: option.name.clone().into(),
+                        facts: ModelRc::default(),
+                        note: option.note.clone().into(),
+                        implicits: option.implicits.clone().into(),
+                        in_game: option.in_game,
+                        available: option.available,
+                        current: option.value == base.value(),
+                        rarity: ItemRarity::Normal,
+                    };
+                    (row, facts(&option.facts))
                 })
-                .collect::<Vec<_>>()
-        });
-        models.base_options.sync(options.unwrap_or_default());
-    });
+                .collect()
+        },
+        |rows| models.base_options.sync(models.base_facts.fill(rows, |row, facts| row.facts = facts)),
+    );
     forge.set_base_allow_incompatible(editor.base.as_ref().is_some_and(|base| base.allow_incompatible));
     forge.set_base_can_edit(editor.can_edit_base_field());
     models.summary.sync(editor.summary().into_iter().map(SharedString::from));
@@ -417,78 +435,68 @@ fn field_rows(editor: &ForgeEditor) -> Vec<FieldView> {
         .collect()
 }
 
-/// The affix rows, without their tier lists: `with_tiers` keeps those, which change far less often.
-fn affix_rows(editor: &ForgeEditor) -> Vec<AffixRowView> {
+/// The affix rows, each with the tiers its menu lists, scaled for the base the item would have.
+fn affix_rows(editor: &ForgeEditor) -> WithLists<AffixRowView, TierOption> {
     editor
         .affixes
         .iter()
         .enumerate()
-        .map(|(index, row)| AffixRowView {
-            value: value_cell(
-                reference_of(Cell::Affix(index)),
-                uid_of(row.uid, 0),
-                &row.value,
-                row.roll(),
-                row.game_roll(),
-                row.is_value_drafted(),
-                row.was(),
-                editor.can_edit_value(Cell::Affix(index)),
-                row.value.tip(row.roll(), row.game_roll()),
-            ),
-            name: row.name().into(),
-            replaced: row.is_replaced(),
-            added: row.added,
-            removed: row.is_removed(),
-            detail: row.detail().into(),
-            reforged: row.is_reforged(),
-            name_tip: row.name_tip().into(),
-            range: editor.range_text(index).into(),
-            tier: format!("T{}", row.tier()).into(),
-            tier_drafted: row.is_tier_drafted(),
-            exalted: row.is_exalted(),
-            tier_index: i32::from(row.tier()) - 1,
-            seal: row.seal().name().into(),
-            sealed: row.seal() != Seal::Normal,
-            seal_drafted: row.is_seal_drafted(),
-            seal_index: row.seal().index() as i32,
-            can_edit: editor.can_change_affix() && row.is_editable(),
-            dirty: row.is_dirty(),
-            pending: row.is_pending(),
-            stale: row.is_stale(),
-            draft_tip: row.change_summary().into(),
-            confirmed: row.confirmed,
-            tiers: ModelRc::default(),
+        .map(|(index, row)| (affix_row(editor, index, row), tier_options(editor, index)))
+        .collect()
+}
+
+fn tier_options(editor: &ForgeEditor, row: usize) -> Vec<TierOption> {
+    editor
+        .tier_options(row)
+        .into_iter()
+        .map(|(tier, range, in_game)| TierOption {
+            label: tr::Tier.with(&[("tier", &tier)]).into(),
+            range: range.into(),
+            in_game,
         })
         .collect()
 }
 
-fn with_tiers(mut rows: Vec<AffixRowView>, editor: &ForgeEditor, tiers: &mut Vec<Rows<TierOption>>, keys: &mut Vec<Option<TierKey>>) -> Vec<AffixRowView> {
-    let generation = editor.menu_generation();
-    tiers.resize_with(rows.len(), Rows::default);
-    keys.resize(rows.len(), None);
-    for (index, (shown, row)) in rows.iter_mut().zip(editor.affixes.iter()).enumerate() {
-        let key = TierKey {
-            affix: row.draft_id(),
-            max_tier: row.max_tier(),
-            added: row.added,
-            game_affix: row.state.id,
-            game_tier: row.state.tier,
-            generation,
-        };
-        if keys[index] != Some(key) {
-            tiers[index].sync(editor.tier_options(index).into_iter().map(|(tier, range, in_game)| TierOption {
-                label: tr::Tier.with(&[("tier", &tier)]).into(),
-                range: range.into(),
-                in_game,
-            }));
-            keys[index] = Some(key);
-        }
-        shown.tiers = tiers[index].model();
+fn affix_row(editor: &ForgeEditor, index: usize, row: &AffixRow) -> AffixRowView {
+    AffixRowView {
+        value: value_cell(
+            reference_of(Cell::Affix(index)),
+            uid_of(row.uid, 0),
+            &row.value,
+            row.roll(),
+            row.game_roll(),
+            row.is_value_drafted(),
+            row.was(),
+            editor.can_edit_value(Cell::Affix(index)),
+            row.value.tip(row.roll(), row.game_roll()),
+        ),
+        name: row.name().into(),
+        replaced: row.is_replaced(),
+        added: row.added,
+        removed: row.is_removed(),
+        detail: row.detail().into(),
+        reforged: row.is_reforged(),
+        name_tip: row.name_tip().into(),
+        range: editor.range_text(index).into(),
+        tier: format!("T{}", row.tier()).into(),
+        tier_drafted: row.is_tier_drafted(),
+        exalted: row.is_exalted(),
+        tier_index: i32::from(row.tier()) - 1,
+        seal: row.seal().name().into(),
+        sealed: row.seal() != Seal::Normal,
+        seal_drafted: row.is_seal_drafted(),
+        seal_index: row.seal().index() as i32,
+        can_edit: editor.can_change_affix() && row.is_editable(),
+        dirty: row.is_dirty(),
+        pending: row.is_pending(),
+        stale: row.is_stale(),
+        draft_tip: row.change_summary().into(),
+        confirmed: row.confirmed,
+        tiers: ModelRc::default(),
     }
-    rows
 }
 
-/// The implicit or unique lines, each with its roll cells apart: `with_rolls` gives those the models the view keeps.
+/// The implicit or unique lines, each with its roll cells apart.
 fn lines(editor: &ForgeEditor, kind: CellKind) -> Lines {
     let rows = if kind == CellKind::Unique { &editor.uniques } else { &editor.implicits };
     rows.iter()
@@ -536,18 +544,6 @@ fn lines(editor: &ForgeEditor, kind: CellKind) -> Lines {
                 },
             };
             (row, cells)
-        })
-        .collect()
-}
-
-fn with_rolls(rows: Lines, models: &mut Vec<Rows<ValueCell>>) -> Vec<ModifierRowView> {
-    models.resize_with(rows.len(), Rows::default);
-    rows.into_iter()
-        .zip(models.iter())
-        .map(|((mut row, cells), model)| {
-            model.sync(cells);
-            row.rolls = model.model();
-            row
         })
         .collect()
 }
@@ -683,8 +679,8 @@ fn show_picker_choices(forge: &ForgeState, editor: &ForgeEditor, picker: &Picker
 }
 
 /// Facts shown side by side, each its own text.
-fn facts(parts: Vec<String>) -> ModelRc<SharedString> {
-    ModelRc::new(VecModel::from(parts.into_iter().map(SharedString::from).collect::<Vec<_>>()))
+fn facts(parts: &[String]) -> Vec<SharedString> {
+    parts.iter().map(|part| part.as_str().into()).collect()
 }
 
 /// The game's rarity code determines its colour independently of localized names.

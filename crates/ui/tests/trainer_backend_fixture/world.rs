@@ -390,6 +390,17 @@ impl World {
         }
     }
 
+    /// The Gold Ring with one affix, where a Sapphire Ring would give its affixes half as much again.
+    fn ring_scaling_affixes() -> World {
+        let mut world = World::ring(false);
+        let ring = world.catalog.bases.get_mut(&(RING as u8)).unwrap();
+        ring.sub_types
+            .iter_mut()
+            .filter(|base| base.sub_type == 5)
+            .for_each(|base| base.affix_effect_modifier = 0.5);
+        world
+    }
+
     /// A unique ring: its name opens the identity picker.
     fn unique_ring() -> World {
         let mut world = World::ring(false);
@@ -766,7 +777,7 @@ impl Forge {
         let lines = self.data.world.unique_lines.len();
         let until = std::time::Instant::now() + Duration::from_secs(8);
         while !(self.ui.global::<ForgeState>().get_has_item()
-            && self.handle.edit(|editor| settled(editor) && editor.uniques.len() >= lines)
+            && self.handle.read(|editor| settled(editor) && editor.uniques.len() >= lines) == Some(true)
             && !self.ui.global::<ForgeState>().get_formatting_loading())
         {
             assert!(
@@ -807,7 +818,8 @@ impl Forge {
         );
         wait(|| {
             self.handle
-                .edit(|editor| editor.item().is_some_and(|shown| shown.context.as_ref().is_some_and(|c| c.expected.snapshot() == &item)))
+                .read(|editor| editor.item().is_some_and(|shown| shown.context.as_ref().is_some_and(|c| c.expected.snapshot() == &item)))
+                == Some(true)
         });
         self.settle();
     }
@@ -1056,6 +1068,22 @@ pub(in super::super) fn item_captures(session: &Session) {
     forge.handle.edit(|editor| editor.pick_base(1));
     forge.settle();
     session.capture(&forge.ui, "item-implicits-base-draft");
+    drop(forge);
+
+    // An affix's tier menu reads its ranges on the base the item would have, so drafting a base that scales affixes rescales
+    // them, and drafting the item's own base back undoes it.
+    let forge = Forge::open(session, World::ring_scaling_affixes(), 1100, 700);
+    let state = forge.ui.global::<ForgeState>();
+    let first_tier = || state.get_affixes().row_data(0).unwrap().tiers.row_data(0).unwrap().range;
+    let base = |name: &str| state.get_base_options().iter().position(|option| option.name == name).unwrap();
+    let own = first_tier();
+    forge.handle.edit(|editor| editor.pick_base(base("Sapphire Ring")));
+    forge.settle();
+    assert_ne!(first_tier(), own, "the Sapphire Ring's tiers are scaled");
+    forge.handle.edit(|editor| editor.pick_base(base("Gold Ring")));
+    forge.settle();
+    assert_eq!(first_tier(), own);
+    drop(state);
     drop(forge);
 
     // ----- Real input on the cells: menus, the value popover, the keyboard and the replacement catalogue -----

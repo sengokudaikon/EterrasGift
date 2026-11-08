@@ -5,6 +5,7 @@ code and its tests, and what is still to build in [the helper's backlog](crates/
 
 ## 2026-11-08
 
+- Forge: a drafted unique roll always shows what it was, and an affix's tier menu is rescaled by a drafted base.
 - Forge: a write's, read's or preview's answer is shown in one redraw with the worker's state it was judged on.
 - Build: the words and numbers the UI shows come from `libs/phrases`, no longer from spiderland.
 
