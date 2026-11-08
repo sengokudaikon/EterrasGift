@@ -1,6 +1,5 @@
 //! Detached affix, unique and implicit roll sampling through the game's own tooltip producers and formatters.
-use crate::game::metadata_text;
-use crate::game::{Class, GameError, Images, Method, Root, RuntimeAccess, accessors::item::ForgeGraph, array_data, target, unsupported};
+use crate::game::{Class, GameError, Images, Method, MethodError, MethodQuery, Root, RuntimeAccess, accessors::item::ForgeGraph, array_data, metadata_text, target, unsupported};
 use eg_trainer_wire::{
     forge::ForgeSnapshot,
     mapping::{AffixMappingQuery, MAX_CONTEXT_BYTES, MappingAddress, MappingStart, MappingTarget, ModifierMappingQuery, RawMappingPage, RawValueSample},
@@ -25,6 +24,8 @@ fn context_text(out: &mut Vec<u8>, text: &str) {
 
 impl RuntimeAccess {
     // These helpers inherit read_affix_mapping's single attached-runtime and private-copy span.
+    /// `object`'s instance method `name`, from the nearest class that declares one with these parameters, checked as
+    /// [`Self::description_method`] checks, and the body `object` runs for it.
     pub(super) unsafe fn mapping_method(
         &self,
         api: raw::InvocationApi,
@@ -33,37 +34,18 @@ impl RuntimeAccess {
         parameters: &[Class],
         returns: Option<Class>,
     ) -> Result<Method, GameError> {
-        // SAFETY: The retained owner metadata is scanned with exact parameter/return classes before binding a method.
+        // SAFETY: the retained owner metadata is checked with exact parameter/return classes before its body is chosen.
         unsafe {
-            let mut owner = (self.object_class)(target(object)?.as_ptr());
-            for _ in 0..256 {
-                if owner.is_null() {
-                    break;
-                }
-                let mut found = false;
-                for method in self.methods(owner) {
-                    let method = method?;
-                    let actual = (self.method_name)(method);
-                    if actual.is_null() {
-                        return Err(unsupported("mapping method name"));
-                    }
-                    if metadata_text(actual) == name && (self.method_params)(method) as usize == parameters.len() {
-                        found = true;
-                        break;
-                    }
-                }
-                if found {
-                    let method = self.description_method(api, owner, name, parameters, returns, true)?;
-                    if (api.method_get_flags)(method, std::ptr::null_mut()) & raw::METHOD_ATTRIBUTE_VIRTUAL != 0 {
-                        return NonNull::new((api.object_get_virtual_method)(target(object)?.as_ptr(), method).cast_mut())
-                            .map(|m| m.as_ptr().cast_const())
-                            .ok_or_else(|| unsupported("mapping virtual method"));
-                    }
-                    return Ok(method);
-                }
-                owner = (self.class_parent)(owner);
-            }
-            Err(unsupported("mapping method missing"))
+            let receiver = target(object)?;
+            let owner = self
+                .nearest_declaring((self.object_class)(receiver.as_ptr()), name, parameters.len())
+                .map_err(|error| match error {
+                    MethodError::Metadata(error) => error.into(),
+                    MethodError::Unnamed => unsupported("mapping method name"),
+                    _ => unsupported("mapping method missing"),
+                })?;
+            let method = self.description_method(owner, name, parameters, returns, true)?;
+            api.dispatched(receiver, method).ok_or_else(|| unsupported("mapping virtual method"))
         }
     }
     unsafe fn mapping_float(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, object: &Root<'_, '_>, name: &CStr) -> Result<f32, GameError> {
@@ -134,7 +116,6 @@ impl RuntimeAccess {
             let serial = self.mapping_clone_bytes(attached, &serial, 4096)?;
             let unpacked = self.class(&graph.images, c"", c"ItemDataUnpacked")?;
             let constructor = self.description_method(
-                api,
                 unpacked,
                 c".ctor",
                 &[(self.object_class)(target(&serial)?.as_ptr())],
@@ -187,20 +168,13 @@ impl RuntimeAccess {
             let values = self.list(attached, &affixes, affix_class, 32)?;
             let affix = values.get(usize::from(slot)).ok_or_else(|| unsupported("mapping slot absent"))?;
             let builder = self.class(images, c"LE.UI.Tooltips", c"ItemTooltipContentBuilder")?;
-            let mut slot_type = None;
-            for method in self.methods(builder) {
-                let method = method?;
-                let name = (self.method_name)(method);
-                if !name.is_null() && metadata_text(name) == c"GetItemAffixInfo" && (self.method_params)(method) == 3 {
-                    if slot_type.is_some() {
-                        return Err(unsupported("ambiguous affix tooltip builder"));
-                    }
-                    slot_type = NonNull::new((self.type_class)((self.method_param)(method, 2)));
-                }
-            }
-            let slot_type = slot_type.ok_or_else(|| unsupported("affix tooltip slot enum"))?;
+            let probe = self.find_method(builder, &MethodQuery::named(c"GetItemAffixInfo", 3)).map_err(|error| match error {
+                MethodError::Metadata(error) => error.into(),
+                MethodError::Twice => unsupported("ambiguous affix tooltip builder"),
+                _ => unsupported("affix tooltip slot enum"),
+            })?;
+            let slot_type = NonNull::new((self.type_class)((self.method_param)(probe, 2))).ok_or_else(|| unsupported("affix tooltip slot enum"))?;
             let method = self.description_method(
-                api,
                 builder,
                 c"GetItemAffixInfo",
                 &[self.class(images, c"", c"ItemDataUnpacked")?, affix_class, slot_type.as_ptr()],
@@ -401,15 +375,12 @@ impl RuntimeAccess {
         unsafe {
             let unpacked = self.class(images, c"", c"ItemDataUnpacked")?;
             let void = self.system_class(c"Void")?;
-            let mut method = self
-                .description_method(api, unpacked, c"UpdateItemImplicitData", &[], Some(void), true)
-                .or_else(|_| self.description_method(api, unpacked, c"AfterIDChange", &[], Some(void), true))?;
-            if (api.method_get_flags)(method, std::ptr::null_mut()) & raw::METHOD_ATTRIBUTE_VIRTUAL != 0 {
-                method = (api.object_get_virtual_method)(target(copy)?.as_ptr(), method);
-                if method.is_null() || (self.class_image)((api.method_get_class)(method)) != images.game {
-                    return Err(unsupported("implicit refresh override"));
-                }
-            }
+            let method = self
+                .description_method(unpacked, c"UpdateItemImplicitData", &[], Some(void), true)
+                .or_else(|_| self.description_method(unpacked, c"AfterIDChange", &[], Some(void), true))?;
+            let method = self
+                .game_body(api, images.game, target(copy)?, method)
+                .ok_or_else(|| unsupported("implicit refresh override"))?;
             self.mapping_void(attached, api, copy, method, &mut [])
         }
     }
@@ -499,8 +470,8 @@ impl RuntimeAccess {
                 );
             }
             let list_class = (self.object_class)(target(&list)?.as_ptr());
-            let clear = self.affix_list_method(list_class, class, c"Clear", false, api).map_err(contract)?;
-            let add = self.affix_list_method(list_class, class, c"Add", true, api).map_err(contract)?;
+            let clear = self.affix_list_method(list_class, class, c"Clear", false).map_err(contract)?;
+            let add = self.affix_list_method(list_class, class, c"Add", true).map_err(contract)?;
             let list_class = NonNull::new(list_class).ok_or_else(|| unsupported("detached list class"))?;
             let clear = context
                 .bind_with_closed_references(NonNull::new(clear.cast_mut()).ok_or_else(|| unsupported("detached Clear"))?, &[list_class])

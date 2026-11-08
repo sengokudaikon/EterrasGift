@@ -12,6 +12,7 @@
 // for bounds, ownership and ABI details rather than repeating those contracts.
 
 use il2cpp_runtime::metadata::{Class, MetadataError, Method, Ptr, array_data, copy_values, instance_offset, metadata_text, read_value, target, write_bytes};
+pub(crate) use il2cpp_runtime::metadata::{MethodError, MethodQuery, Others, Params, Returns};
 #[cfg(test)]
 use il2cpp_runtime::metadata::{TestExportStub, Type};
 #[cfg(test)]
@@ -29,6 +30,7 @@ mod apply;
 mod discovery;
 mod dispatcher_thread;
 mod features;
+mod invoke;
 mod read;
 
 pub use accessors::presence;

@@ -4,10 +4,10 @@
 mod affix;
 
 use crate::game::{
-    Class, Ptr, Root, RuntimeAccess,
+    Class, MethodError, MethodQuery, Params, Ptr, Returns, Root, RuntimeAccess,
     accessors::item::ForgeGraph,
     apply::{WriteError, stored, uncertain},
-    array_data, metadata_text, target,
+    array_data, target,
 };
 use eg_trainer_wire::{
     forge::ForgeSnapshot,
@@ -47,35 +47,22 @@ impl RuntimeAccess {
         unsafe {
             let owner = self.class(&graph.images, c"", c"UniqueList")?;
             let entry = self.nested(owner, c"Entry")?;
-            let mut found = None;
-            for method in self.methods(owner) {
-                let method = method?;
-                let name = (self.method_name)(method);
-                if name.is_null() {
-                    return Err(WriteError::Refused("Missing unique lookup method name".into()));
+            let query = MethodQuery {
+                params: Params::Classes(&[self.system_class(c"UInt16")?]),
+                instance: Some(false),
+                returns: Returns::Class(entry),
+                declared: true,
+                ..MethodQuery::named(c"getUnique", 1)
+            };
+            let method = self.find_method(owner, &query).map_err(|error| match error {
+                MethodError::Metadata(error) => error.into(),
+                MethodError::Unnamed => WriteError::Refused("Missing unique lookup method name".into()),
+                MethodError::Missing => WriteError::Refused("Missing getUnique(UInt16)".into()),
+                MethodError::Untyped | MethodError::Twice | MethodError::Signature | MethodError::Parameters => {
+                    WriteError::Refused("Unique lookup signature differs from getUnique(UInt16) -> Entry".into())
                 }
-                if metadata_text(name) != c"getUnique" || (self.method_params)(method) != 1 {
-                    continue;
-                }
-                let parameter = (self.method_param)(method, 0);
-                let returns = (self.method_return)(method);
-                if found.is_some()
-                    || (self.method_instance)(method)
-                    || (api.method_get_class)(method) != owner
-                    || parameter.is_null()
-                    || returns.is_null()
-                    || (self.type_byref)(parameter)
-                    || (self.type_byref)(returns)
-                    || (self.type_code)(parameter) != raw::type_code::U2
-                    || (self.type_class)(parameter) != self.system_class(c"UInt16")?
-                    || (self.type_code)(returns) != raw::type_code::CLASS
-                    || (self.type_class)(returns) != entry
-                {
-                    return Err(WriteError::Refused("Unique lookup signature differs from getUnique(UInt16) -> Entry".into()));
-                }
-                found = NonNull::new(method.cast_mut());
-            }
-            let method = found.ok_or_else(|| WriteError::Refused("Missing getUnique(UInt16)".into()))?;
+            })?;
+            let method = NonNull::new(method.cast_mut()).ok_or_else(|| WriteError::Refused("Missing getUnique(UInt16)".into()))?;
             let context = InvocationContext::new(attached, api);
             let method = context.bind(method).map_err(|e| WriteError::Refused(e.to_string()))?;
             let definition = match method
@@ -180,31 +167,19 @@ impl RuntimeAccess {
     unsafe fn item_refresh(&self, api: raw::InvocationApi, graph: &ForgeGraph<'_, '_>, owner: Class, name: &CStr) -> Result<crate::game::Method, WriteError> {
         // SAFETY: The signature is checked against retained metadata; the item stays rooted while its override is resolved.
         unsafe {
-            let mut method = self.description_method(api, owner, name, &[], Some(self.system_class(c"Void")?), true)?;
-            if (api.method_get_flags)(method, std::ptr::null_mut()) & raw::METHOD_ATTRIBUTE_VIRTUAL != 0 {
-                method = (api.object_get_virtual_method)(target(&graph.item)?.as_ptr(), method);
-                if method.is_null() || (self.class_image)((api.method_get_class)(method)) != graph.images.game {
-                    return Err(WriteError::Refused(format!("The game's {} override is unavailable", name.to_string_lossy())));
-                }
-            }
-            Ok(method)
+            let method = self.description_method(owner, name, &[], Some(self.system_class(c"Void")?), true)?;
+            self.game_body(api, graph.images.game, target(&graph.item)?, method)
+                .ok_or_else(|| WriteError::Refused(format!("The game's {} override is unavailable", name.to_string_lossy())))
         }
     }
 
     unsafe fn has_refresh(&self, owner: Class, name: &CStr) -> Result<bool, WriteError> {
         // SAFETY: The owner is retained class metadata; bounded method inspection checks signatures without executing refresh.
-        unsafe {
-            for method in self.methods(owner) {
-                let method = method?;
-                let actual = (self.method_name)(method);
-                if actual.is_null() {
-                    return Err(WriteError::Refused("Missing refresh method name".into()));
-                }
-                if metadata_text(actual) == name && (self.method_params)(method) == 0 {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
+        match unsafe { self.find_method(owner, &MethodQuery::named(name, 0)) } {
+            Ok(_) | Err(MethodError::Twice) => Ok(true),
+            Err(MethodError::Missing) => Ok(false),
+            Err(MethodError::Metadata(error)) => Err(error.into()),
+            Err(_) => Err(WriteError::Refused("Missing refresh method name".into())),
         }
     }
 

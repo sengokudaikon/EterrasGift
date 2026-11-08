@@ -1,8 +1,7 @@
 //! Game-specific affix list edits: construct, validate, then rewrite through List<T>'s barriers.
 
-use super::metadata_text;
 use super::*;
-use crate::game::GameError;
+use crate::game::{GameError, MethodError, MethodQuery, Returns};
 use eg_trainer_wire::{
     forge::AffixSnapshot,
     rules::{affix_order_key, layout_problems},
@@ -63,8 +62,8 @@ impl RuntimeAccess {
                 return Err(WriteError::Stale("Affix count changed".into()));
             }
             let list_class = (self.object_class)(target(&list)?.as_ptr());
-            let clear = self.affix_list_method(list_class, class, c"Clear", false, api)?;
-            let add = self.affix_list_method(list_class, class, c"Add", true, api)?;
+            let clear = self.affix_list_method(list_class, class, c"Clear", false)?;
+            let add = self.affix_list_method(list_class, class, c"Add", true)?;
             let list_class = NonNull::new(list_class).ok_or_else(|| WriteError::Refused("Missing affix-list class".into()))?;
             let context = InvocationContext::new(attached, api);
             // Finish checked binding before the live mutation boundary. Metadata
@@ -176,48 +175,30 @@ impl RuntimeAccess {
     // Game-specific discovery for these two closed List<ItemAffix> methods.
     // CheckedMethod validates the receiver/arguments at each invocation too.
     // Interface implementations may be final virtual; the receiver is the exact closed List.
-    pub(in super::super) unsafe fn affix_list_method(
-        &self,
-        class: Class,
-        element: Class,
-        name: &CStr,
-        takes_element: bool,
-        api: raw::InvocationApi,
-    ) -> Result<crate::game::Method, WriteError> {
+    pub(in super::super) unsafe fn affix_list_method(&self, class: Class, element: Class, name: &CStr, takes_element: bool) -> Result<crate::game::Method, WriteError> {
+        let query = MethodQuery {
+            instance: Some(true),
+            returns: Returns::Code(raw::type_code::VOID),
+            refused: raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT,
+            refuse_generic: true,
+            declared: true,
+            ..MethodQuery::named(name, usize::from(takes_element))
+        };
         // SAFETY: The owner is retained closed List metadata; exact element and parameter classes are checked before binding.
         unsafe {
-            let mut found = None;
-            for method in self.methods(class) {
-                let method = method?;
-                let actual = (self.method_name)(method);
-                if actual.is_null() {
-                    return Err(WriteError::Refused("Missing list method name".into()));
+            let method = self.find_method(class, &query).map_err(|error| match error {
+                MethodError::Metadata(error) => error.into(),
+                MethodError::Unnamed => WriteError::Refused("Missing list method name".into()),
+                MethodError::Missing => WriteError::Refused("Missing closed affix-list method".into()),
+                MethodError::Untyped | MethodError::Twice | MethodError::Signature | MethodError::Parameters => WriteError::Refused("Affix-list method signature differs".into()),
+            })?;
+            if takes_element {
+                let parameter = (self.method_param)(method, 0);
+                if parameter.is_null() || (self.type_byref)(parameter) || (self.type_code)(parameter) != raw::type_code::CLASS || (self.type_class)(parameter) != element {
+                    return Err(WriteError::Refused("Affix-list Add parameter differs".into()));
                 }
-                if metadata_text(actual) != name || (self.method_params)(method) != u32::from(takes_element) {
-                    continue;
-                }
-                let returns = (self.method_return)(method);
-                let mut implementation_flags = 0;
-                if found.is_some()
-                    || !(self.method_instance)(method)
-                    || (self.method_generic)(method)
-                    || (api.method_get_class)(method) != class
-                    || returns.is_null()
-                    || (self.type_byref)(returns)
-                    || (self.type_code)(returns) != raw::type_code::VOID
-                    || (api.method_get_flags)(method, &mut implementation_flags) & (raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT) != 0
-                {
-                    return Err(WriteError::Refused("Affix-list method signature differs".into()));
-                }
-                if takes_element {
-                    let parameter = (self.method_param)(method, 0);
-                    if parameter.is_null() || (self.type_byref)(parameter) || (self.type_code)(parameter) != raw::type_code::CLASS || (self.type_class)(parameter) != element {
-                        return Err(WriteError::Refused("Affix-list Add parameter differs".into()));
-                    }
-                }
-                found = Some(method);
             }
-            found.ok_or_else(|| WriteError::Refused("Missing closed affix-list method".into()))
+            Ok(method)
         }
     }
 }

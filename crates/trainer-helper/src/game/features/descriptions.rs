@@ -1,65 +1,34 @@
 //! Optional implicit text from the methods the game's own item tooltip uses.
-use crate::game::metadata_text;
-use crate::game::{Class, GameError, Images, Method, Root, RuntimeAccess, target, unsupported};
+use crate::game::{Class, GameError, Images, Method, MethodError, MethodQuery, Others, Params, Returns, Root, RuntimeAccess, target, unsupported};
 use eg_trainer_wire::mapping::{ForgeDescriptionRequest, MAX_TEXT_BYTES, ModifierSnapshot};
 use il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use std::{ffi::CStr, ptr::NonNull};
 
 impl RuntimeAccess {
-    // Exact supported-game call signatures. Closed List<T> returns require an
-    // explicit class allowlist when bound below.
-    pub(super) unsafe fn description_method(
-        &self,
-        api: raw::InvocationApi,
-        owner: Class,
-        name: &CStr,
-        parameters: &[Class],
-        returns: Option<Class>,
-        instance: bool,
-    ) -> Result<Method, GameError> {
-        // SAFETY: Owner and method descriptors belong to retained metadata; parameter and return classes are checked before binding.
-        unsafe {
-            let mut found = None;
-            for method in self.methods(owner) {
-                let method = method?;
-                let actual = (self.method_name)(method);
-                if actual.is_null() {
-                    return Err(unsupported("tooltip method name"));
-                }
-                if metadata_text(actual) != name || (self.method_params)(method) as usize != parameters.len() {
-                    continue;
-                }
-                let parameters_match = parameters.iter().enumerate().all(|(index, expected)| {
-                    let ty = (self.method_param)(method, index as u32);
-                    !ty.is_null() && !(self.type_byref)(ty) && (self.type_class)(ty) == *expected
-                });
-                if !parameters_match {
-                    continue;
-                }
-                let result = (self.method_return)(method);
-                if found.is_some()
-                    || (api.method_get_class)(method) != owner
-                    || (self.method_instance)(method) != instance
-                    || (self.method_generic)(method)
-                    || (self.method_inflated)(method)
-                    || (api.method_get_flags)(method, std::ptr::null_mut()) & (raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT) != 0
-                    || result.is_null()
-                    || (self.type_byref)(result)
-                    || returns.is_none() && !matches!((self.type_code)(result), raw::type_code::STRING | raw::type_code::CLASS | raw::type_code::GENERICINST)
-                    || returns.is_some_and(|expected| (self.type_class)(result) != expected)
-                {
-                    return Err(unsupported("tooltip method signature"));
-                }
-                for (index, expected) in parameters.iter().enumerate() {
-                    let ty = (self.method_param)(method, index as u32);
-                    if ty.is_null() || (self.type_byref)(ty) || (self.type_class)(ty) != *expected {
-                        return Err(unsupported("tooltip parameter signature"));
-                    }
-                }
-                found = Some(method);
-            }
-            found.ok_or_else(|| unsupported(format!("missing tooltip method {}", name.to_string_lossy())))
-        }
+    /// The one method `name` declared by `owner` with exactly these parameter classes, each by value, as `instance` says,
+    /// nongeneric, not P/Invoke or abstract, returning `returns` (or, with none, a string, class or generic instance) by
+    /// value. Overloads with other parameters are passed over. Closed List<T> returns need an explicit class allowlist
+    /// when bound.
+    pub(super) unsafe fn description_method(&self, owner: Class, name: &CStr, parameters: &[Class], returns: Option<Class>, instance: bool) -> Result<Method, GameError> {
+        let query = MethodQuery {
+            params: Params::Classes(parameters),
+            others: Others::Overloads,
+            instance: Some(instance),
+            returns: returns.map_or(Returns::Reference, Returns::Class),
+            refused: raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT,
+            refuse_generic: true,
+            refuse_inflated: true,
+            declared: true,
+            ..MethodQuery::named(name, parameters.len())
+        };
+        // SAFETY: owner and method descriptors belong to retained metadata; parameter and return classes are checked.
+        unsafe { self.find_method(owner, &query) }.map_err(|error| match error {
+            MethodError::Metadata(error) => error.into(),
+            MethodError::Unnamed => unsupported("tooltip method name"),
+            MethodError::Missing => unsupported(format!("missing tooltip method {}", name.to_string_lossy())),
+            MethodError::Untyped | MethodError::Parameters => unsupported("tooltip parameter signature"),
+            MethodError::Twice | MethodError::Signature => unsupported("tooltip method signature"),
+        })
     }
     pub(super) unsafe fn description_call<'a, 'r>(
         &self,
@@ -85,38 +54,16 @@ impl RuntimeAccess {
         // SAFETY: The rooted receiver and checked getter stay live until its rooted string result is copied.
         unsafe {
             let string = self.system_class(c"String")?;
-            let mut owner = (self.object_class)(target(info)?.as_ptr());
+            let receiver = target(info)?;
             // The concrete tooltip class may inherit a virtual formatter. Resolve
             // its runtime override rather than calling a base implementation.
-            let mut method = None;
-            for _ in 0..256 {
-                if owner.is_null() {
-                    break;
-                }
-                for candidate in self.methods(owner) {
-                    let candidate = candidate?;
-                    let actual = (self.method_name)(candidate);
-                    if actual.is_null() {
-                        return Err(unsupported("tooltip formatter name"));
-                    }
-                    if metadata_text(actual) == name && (self.method_params)(candidate) == 1 {
-                        method = Some(owner);
-                        break;
-                    }
-                }
-                if method.is_some() {
-                    break;
-                }
-                owner = (self.class_parent)(owner);
-            }
-            let owner = method.ok_or_else(|| unsupported("tooltip formatter unavailable"))?;
-            let mut method = self.description_method(api, owner, name, &[self.system_class(c"Boolean")?], Some(string), true)?;
-            if (api.method_get_flags)(method, std::ptr::null_mut()) & raw::METHOD_ATTRIBUTE_VIRTUAL != 0 {
-                method = (api.object_get_virtual_method)(target(info)?.as_ptr(), method);
-                if method.is_null() {
-                    return Err(unsupported("tooltip virtual formatter unavailable"));
-                }
-            }
+            let owner = self.nearest_declaring((self.object_class)(receiver.as_ptr()), name, 1).map_err(|error| match error {
+                MethodError::Metadata(error) => error.into(),
+                MethodError::Unnamed => unsupported("tooltip formatter name"),
+                _ => unsupported("tooltip formatter unavailable"),
+            })?;
+            let method = self.description_method(owner, name, &[self.system_class(c"Boolean")?], Some(string), true)?;
+            let method = api.dispatched(receiver, method).ok_or_else(|| unsupported("tooltip virtual formatter unavailable"))?;
             let text = self.description_call(attached, api, method, Some(info), &mut [Argument::Scalar(Scalar::Boolean(false))])?;
             self.description_string(text.as_ref())
         }
@@ -210,7 +157,7 @@ impl RuntimeAccess {
                 if !implicits.is_empty() {
                     let base = self.implicit_definitions(attached, api, images)?;
                     let builder = self.class(images, c"LE.UI.Tooltips", c"ItemTooltipContentBuilder")?;
-                    let build = self.description_method(api, builder, c"GetItemImplicitInfo", &[unpacked, element, base.data_class], None, false)?;
+                    let build = self.description_method(builder, c"GetItemImplicitInfo", &[unpacked, element, base.data_class], None, false)?;
                     for (slot, implicit) in implicits.iter().enumerate() {
                         let (data, minimum, maximum) = self.implicit_range(attached, api, &base, snapshot, slot)?;
                         let info = self.description_call(
@@ -243,7 +190,7 @@ impl RuntimeAccess {
         unsafe {
             let item_list = self.class(images, c"", c"ItemList")?;
             let data_class = self.nested(item_list, c"EquipmentImplicit")?;
-            let singleton = self.description_method(api, item_list, c"get", &[], Some(item_list), false)?;
+            let singleton = self.description_method(item_list, c"get", &[], Some(item_list), false)?;
             let registry = self
                 .description_call(attached, api, singleton, None, &mut [])?
                 .ok_or(GameError::NotReady("implicit definitions absent"))?;
@@ -251,7 +198,7 @@ impl RuntimeAccess {
                 return Err(GameError::NotReady("implicit definitions destroyed"));
             }
             let i32_class = self.system_class(c"Int32")?;
-            let lookup = self.description_method(api, item_list, c"GetItemImplicit", &[i32_class; 3], Some(data_class), true)?;
+            let lookup = self.description_method(item_list, c"GetItemImplicit", &[i32_class; 3], Some(data_class), true)?;
             Ok(ImplicitDefinitions { registry, lookup, data_class })
         }
     }

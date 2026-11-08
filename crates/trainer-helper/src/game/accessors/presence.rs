@@ -1,6 +1,6 @@
 //! Cached metadata for the menu/play distinction; object and state values are
 //! always read afresh on the verified Unity dispatcher thread.
-use crate::game::{GameError, RuntimeAccess, unsupported};
+use crate::game::{GameError, MethodError, MethodQuery, Others, RuntimeAccess, unsupported};
 use il2cpp_runtime::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, ValueTypeContract, raw};
 use std::ptr::NonNull;
 
@@ -42,31 +42,20 @@ impl RuntimeAccess {
             let environment = self.class(&images, c"EHG.Multiplayer", c"GameplayEnvironment")?;
             let online = self.static_field(environment, c"_isOnlinePlay", "System.Boolean")?;
             let owner = self.class(&images, c"ClientAppState", c"ClientStateManager")?;
-            let mut getter = None;
-            for candidate in self.methods(owner) {
-                let candidate = candidate?;
-                let name = (self.method_name)(candidate);
-                if name.is_null() {
-                    return Err(unsupported("null app state getter name"));
-                }
-                if crate::game::metadata_text(name) != c"get_CurrentClientAppStateType" {
-                    continue;
-                }
-                let mut implementation_flags = 0;
-                if getter.is_some()
-                    || (self.method_params)(candidate) != 0
-                    || (self.method_instance)(candidate)
-                    || (self.method_generic)(candidate)
-                    || (self.method_inflated)(candidate)
-                    || (self.method_flags)(candidate, &raw mut implementation_flags)
-                        & (raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT | raw::METHOD_ATTRIBUTE_VIRTUAL)
-                        != 0
-                {
-                    return Err(unsupported("client app state getter signature/flags"));
-                }
-                getter = Some(candidate);
-            }
-            let getter = getter.ok_or_else(|| unsupported("client app state getter missing"))?;
+            let query = MethodQuery {
+                others: Others::Fail,
+                instance: Some(false),
+                refused: raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT | raw::METHOD_ATTRIBUTE_VIRTUAL,
+                refuse_generic: true,
+                refuse_inflated: true,
+                ..MethodQuery::named(c"get_CurrentClientAppStateType", 0)
+            };
+            let getter = self.find_method(owner, &query).map_err(|error| match error {
+                MethodError::Metadata(error) => error.into(),
+                MethodError::Unnamed => unsupported("null app state getter name"),
+                MethodError::Missing => unsupported("client app state getter missing"),
+                MethodError::Untyped | MethodError::Twice | MethodError::Signature | MethodError::Parameters => unsupported("client app state getter signature/flags"),
+            })?;
             let state_class = self.class(&images, c"ClientAppState", c"ClientAppStateType")?;
             self.enum_storage(state_class, c"Int32", raw::type_code::I4)?;
             if (self.type_class)((self.method_return)(getter)) != state_class {

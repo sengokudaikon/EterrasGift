@@ -1,6 +1,5 @@
 //! Unique tooltip lines and private-copy draft previews, using the game's producers.
-use crate::game::metadata_text;
-use crate::game::{GameError, Images, Root, RuntimeAccess, array_data, target, unsupported};
+use crate::game::{GameError, Images, MethodError, MethodQuery, Root, RuntimeAccess, array_data, metadata_text, target, unsupported};
 use eg_trainer_wire::mapping::{ForgeDescriptionRequest, MAX_MODIFIERS, ModifierSnapshot, UniquePreviewRequest};
 use il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, ValueTypeContract, raw};
 use std::{collections::BTreeSet, ffi::CStr, ptr::NonNull};
@@ -87,20 +86,13 @@ impl RuntimeAccess {
             let entries = self.list(attached, &entries, tooltip_class, MAX_MODIFIERS as u32)?;
             let mods = self.list(attached, &mods, mod_class, MAX_MODIFIERS as u32)?;
             let builder = self.class(images, c"LE.UI.Tooltips", c"ItemTooltipContentBuilder")?;
-            let mut slot_type = None;
-            for method in self.methods(builder) {
-                let method = method?;
-                let name = (self.method_name)(method);
-                if !name.is_null() && metadata_text(name) == c"GetUniqueModifierInfo" && (self.method_params)(method) == 4 {
-                    if slot_type.is_some() {
-                        return Err(unsupported("ambiguous unique tooltip builder"));
-                    }
-                    slot_type = NonNull::new((self.type_class)((self.method_param)(method, 3)));
-                }
-            }
-            let slot_type = slot_type.ok_or_else(|| unsupported("unique tooltip slot enum"))?;
+            let probe = self.find_method(builder, &MethodQuery::named(c"GetUniqueModifierInfo", 4)).map_err(|error| match error {
+                MethodError::Metadata(error) => error.into(),
+                MethodError::Twice => unsupported("ambiguous unique tooltip builder"),
+                _ => unsupported("unique tooltip slot enum"),
+            })?;
+            let slot_type = NonNull::new((self.type_class)((self.method_param)(probe, 3))).ok_or_else(|| unsupported("unique tooltip slot enum"))?;
             let builder = self.description_method(
-                api,
                 builder,
                 c"GetUniqueModifierInfo",
                 &[self.class(images, c"", c"ItemDataUnpacked")?, entry_class, tooltip_class, slot_type.as_ptr()],

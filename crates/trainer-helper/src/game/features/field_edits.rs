@@ -12,7 +12,7 @@ use crate::game::{
     *,
 };
 use eg_trainer_wire::field_edits::{Edit, Field, FieldSet, Snapshot};
-use il2cpp_runtime::metadata::MethodSpec;
+use il2cpp_runtime::metadata::{MethodError, MethodQuery, MethodSpec};
 use il2cpp_runtime::{AttachedThread, CheckedMethod, InvocationContext, InvocationOutcome, ReturnValue, Scalar, ValueTypeContract};
 
 pub(crate) struct FieldGraph<'a, 'r> {
@@ -97,31 +97,20 @@ impl RuntimeAccess {
                 .ok_or_else(|| WriteError::NotReady(format!("{} is still loading", name.to_string_lossy())))
         }
     }
-    unsafe fn field_method(&self, mut owner: Class, name: &CStr, arity: usize) -> Result<NonNull<raw::MethodInfo>, WriteError> {
-        // SAFETY: immutable runtime metadata. Select the nearest implementation; inherited virtual methods are not
-        // implicitly dispatched. The current dynamic receiver's matching override wins, as in the original trainer.
+    /// The method `name` with `arity` parameters on `owner` or the nearest parent that declares one. Inherited virtual
+    /// methods are not dispatched: the current dynamic receiver's matching override wins, as in the original trainer.
+    unsafe fn field_method(&self, owner: Class, name: &CStr, arity: usize) -> Result<NonNull<raw::MethodInfo>, WriteError> {
+        let worded = |error| match error {
+            MethodError::Metadata(error) => WriteError::from(error),
+            MethodError::Twice => WriteError::Refused(format!("Ambiguous {}", name.to_string_lossy())),
+            MethodError::Unnamed => unsupported("null method name").into(),
+            MethodError::Missing | MethodError::Untyped | MethodError::Signature | MethodError::Parameters => WriteError::Refused(format!("Missing {}", name.to_string_lossy())),
+        };
+        // SAFETY: immutable runtime metadata.
         unsafe {
-            for _ in 0..128 {
-                if owner.is_null() {
-                    break;
-                }
-                let mut found = None;
-                for method in self.methods(owner) {
-                    let method = method?;
-                    let actual = (self.method_name)(method);
-                    if !actual.is_null() && metadata_text(actual) == name && (self.method_params)(method) as usize == arity {
-                        if found.is_some() {
-                            return Err(WriteError::Refused(format!("Ambiguous {}", name.to_string_lossy())));
-                        }
-                        found = NonNull::new(method.cast_mut());
-                    }
-                }
-                if let Some(found) = found {
-                    return Ok(found);
-                }
-                owner = (self.class_parent)(owner);
-            }
-            Err(WriteError::Refused(format!("Missing {}", name.to_string_lossy())))
+            let owner = self.nearest_declaring(owner, name, arity).map_err(worded)?;
+            let method = self.find_method(owner, &MethodQuery::named(name, arity)).map_err(worded)?;
+            NonNull::new(method.cast_mut()).ok_or_else(|| worded(MethodError::Missing))
         }
     }
     unsafe fn field_call<'c, 'a, 'r>(

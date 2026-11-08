@@ -3,7 +3,7 @@
 //! The marker in an entry's name says it is ours, whichever load of the helper added it. Added affixes roll nowhere: no
 //! base lists them and they weigh nothing.
 use crate::game::apply::uncertain;
-use crate::game::{Class, GameError, Images, Method, Root, RuntimeAccess, WriteError, instance_offset, metadata_text, target};
+use crate::game::{Class, GameError, Images, Method, MethodError, MethodQuery, Root, RuntimeAccess, WriteError, instance_offset, target};
 use eg_trainer_wire::new_affixes::{MARKER, NewAffix, StatLine, TIERS};
 use il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use std::{
@@ -259,7 +259,7 @@ impl RuntimeAccess {
                 self.set_reference(&writes, attached, &object, name, &list)?;
             }
             let tiers = self.new_list(attached, api, self.field_class(self.field(owner, c"tiers")?, "affix")?)?;
-            let add = self.list_add(api, &tiers, classes.tier)?;
+            let add = self.list_add(&tiers, classes.tier)?;
             for _ in 0..TIERS {
                 let tier = self.new_tier(attached, writes, api, classes, first, rest)?;
                 self.add_to_list(attached, api, &tiers, add, &tier)?;
@@ -274,7 +274,7 @@ impl RuntimeAccess {
                 );
             } else {
                 let properties = self.new_list(attached, api, self.field_class(self.field(classes.multi, c"affixProperties")?, "affix")?)?;
-                let add = self.list_add(api, &properties, classes.property)?;
+                let add = self.list_add(&properties, classes.property)?;
                 for line in &affix.properties {
                     let property = self.constructed(attached, api, classes.property)?;
                     self.store_line(writes, &property, classes.property, line)?;
@@ -303,7 +303,7 @@ impl RuntimeAccess {
             writes.set_f32(target(&tier)?, self.mutable_field(classes.tier, c"maxRoll", SINGLE.0, SINGLE.1)?, first.maximum);
             if !rest.is_empty() {
                 let rolls = self.new_list(attached, api, self.field_class(self.field(classes.tier, c"extraRolls")?, "affix")?)?;
-                let add = self.list_add(api, &rolls, classes.pair)?;
+                let add = self.list_add(&rolls, classes.pair)?;
                 for line in rest {
                     let pair = self.constructed_pair(attached, api, classes.pair, line.minimum, line.maximum)?;
                     self.add_to_list(attached, api, &rolls, add, &pair)?;
@@ -409,15 +409,10 @@ impl RuntimeAccess {
         // SAFETY: the exact corlib closed List's parameterless constructor runs on a new rooted object.
         unsafe {
             self.list_class(class)?;
-            let mut constructor = None;
-            for method in self.methods(class) {
-                let method = method?;
-                let name = (self.method_name)(method);
-                if !name.is_null() && metadata_text(name) == c".ctor" && (self.method_params)(method) == 0 {
-                    constructor = Some(method);
-                }
-            }
-            let constructor = constructor.ok_or_else(|| refused("A list has no parameterless constructor"))?;
+            let constructor = self.find_method(class, &MethodQuery::named(c".ctor", 0)).map_err(|error| match error {
+                MethodError::Metadata(error) => WriteError::from(error),
+                _ => refused("A list has no parameterless constructor"),
+            })?;
             let closed = NonNull::new(class).ok_or_else(|| refused("Missing list class"))?;
             let object = self.allocated(attached, class)?;
             let context = InvocationContext::new(attached, api);
@@ -431,9 +426,9 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn list_add(&self, api: raw::InvocationApi, list: &Root<'_, '_>, element: Class) -> Result<Method, WriteError> {
+    unsafe fn list_add(&self, list: &Root<'_, '_>, element: Class) -> Result<Method, WriteError> {
         // SAFETY: the closed List's exact Add(element), checked as the Forge's own.
-        unsafe { self.affix_list_method((self.object_class)(target(list)?.as_ptr()), element, c"Add", true, api) }
+        unsafe { self.affix_list_method((self.object_class)(target(list)?.as_ptr()), element, c"Add", true) }
     }
 
     unsafe fn add_to_list(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, list: &Root<'_, '_>, add: Method, value: &Root<'_, '_>) -> Result<(), WriteError> {
