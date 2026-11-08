@@ -2,7 +2,7 @@
 //! ([`NumberSymbols::capture`]), and the language shown ([`select`], [`numbers`]). Never the current user's locale or its
 //! overrides.
 use std::io;
-use std::sync::{LazyLock, RwLock};
+use std::sync::{Arc, LazyLock, RwLock};
 
 /// What a language writes numbers with.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,12 +17,12 @@ pub struct NumberSymbols {
     pub negative: String,
 }
 
-static ENGLISH: LazyLock<NumberSymbols> = LazyLock::new(NumberSymbols::english);
-static SHOWN: RwLock<Option<&'static NumberSymbols>> = RwLock::new(None);
+static ENGLISH: LazyLock<Arc<NumberSymbols>> = LazyLock::new(|| Arc::new(NumberSymbols::english()));
+static SHOWN: RwLock<Option<Arc<NumberSymbols>>> = RwLock::new(None);
 
 /// The symbols shown numbers use: the shown language's, else English's.
-pub fn numbers() -> &'static NumberSymbols {
-    SHOWN.read().unwrap_or_else(|p| p.into_inner()).unwrap_or(&ENGLISH)
+pub fn numbers() -> Arc<NumberSymbols> {
+    SHOWN.read().unwrap_or_else(|p| p.into_inner()).clone().unwrap_or_else(|| ENGLISH.clone())
 }
 
 /// Shown numbers follow `language` from now on, as the views' do; English when it is None or Windows has no
@@ -31,8 +31,7 @@ pub fn select(language: Option<&str>) {
     let symbols = language
         .and_then(|language| NumberSymbols::capture(language).ok())
         .filter(|symbols| !symbols.decimal.is_empty() && symbols.decimal != symbols.group);
-    // Once per selection, for the process's life, so every number can borrow them.
-    *SHOWN.write().unwrap_or_else(|p| p.into_inner()) = symbols.map(|symbols| &*Box::leak(Box::new(symbols)));
+    *SHOWN.write().unwrap_or_else(|p| p.into_inner()) = symbols.map(Arc::new);
 }
 
 impl NumberSymbols {

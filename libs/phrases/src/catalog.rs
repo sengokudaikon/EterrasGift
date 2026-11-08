@@ -3,7 +3,7 @@
 use crate::plural_rule::Rule;
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 /// One language's translations as an app's build script bundles them, with what made it in: entries the
 /// translator finished (not fuzzy, every form filled), as Slint takes them for the views.
@@ -18,7 +18,7 @@ pub struct Catalog {
 }
 
 /// The bundled catalogs, each plural rule parsed.
-pub struct Translations(Vec<&'static Language>);
+pub struct Translations(Vec<Arc<Language>>);
 
 impl fmt::Debug for Translations {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -50,10 +50,11 @@ pub(crate) struct Language {
     entries: HashMap<(Option<&'static str>, &'static str), &'static [&'static str]>,
 }
 
-static CURRENT: RwLock<Option<&'static Language>> = RwLock::new(None);
+static CURRENT: RwLock<Option<Arc<Language>>> = RwLock::new(None);
 
-pub(crate) fn current() -> Option<&'static Language> {
-    *CURRENT.read().unwrap_or_else(|p| p.into_inner())
+/// What `read` finds in the language shown; None in English.
+pub(crate) fn current<R>(read: impl FnOnce(&Language) -> Option<R>) -> Option<R> {
+    CURRENT.read().unwrap_or_else(|p| p.into_inner()).as_deref().and_then(read)
 }
 
 impl Translations {
@@ -69,12 +70,12 @@ impl Translations {
                     reason,
                 })?;
                 let entries = catalog.entries.iter().map(|(context, msgid, forms)| ((*context, *msgid), *forms)).collect();
-                // Once per catalog for the process's life, so its phrases can be `&'static`.
-                Ok(&*Box::leak(Box::new(Language {
+                // Its phrases are the bundled table's, so they stay `&'static` without the language being kept forever.
+                Ok(Arc::new(Language {
                     name: catalog.language,
                     rule,
                     entries,
-                })))
+                }))
             })
             .collect::<Result<_, _>>()
             .map(Self)
@@ -93,7 +94,7 @@ impl Translations {
 
     /// Phrases show in `language` from now on; `None` is English.
     pub fn select(&self, language: Option<&str>) {
-        let chosen = language.and_then(|name| self.0.iter().find(|language| language.name == name)).copied();
+        let chosen = language.and_then(|name| self.0.iter().find(|language| language.name == name)).cloned();
         *CURRENT.write().unwrap_or_else(|p| p.into_inner()) = chosen;
     }
 }
@@ -103,9 +104,9 @@ impl Language {
         self.entries.get(&(context, msgid)).and_then(|forms| forms.first()).copied()
     }
 
-    pub(crate) fn plural(&self, one: &str, n: u64) -> Option<&'static str> {
+    pub(crate) fn plural(&self, one: &str, n: usize) -> Option<&'static str> {
         let forms = self.entries.get(&(None, one))?;
-        forms.get(self.rule.form(n)).or(forms.last()).copied()
+        forms.get(self.rule.form(u64::try_from(n).unwrap_or(u64::MAX))).or(forms.last()).copied()
     }
 }
 
@@ -136,7 +137,7 @@ mod tests {
         assert_eq!(translations.choose("pt-BR"), Some("pt-BR"));
         assert_eq!(translations.choose("pt_PT"), Some("pt-BR"));
         assert_eq!(translations.choose("fr-FR"), None);
-        let german = translations.0[0];
+        let german = &translations.0[0];
         assert_eq!(german.text(None, "Delete"), Some("Löschen"));
         assert_eq!(german.text(Some("key"), "Delete"), Some("Entf"));
         assert_eq!(german.text(None, "Undo"), None);

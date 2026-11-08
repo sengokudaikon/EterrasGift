@@ -98,15 +98,18 @@ impl Template<'_> {
         }
     }
 
-    /// Writes the template and says what it did.
-    pub fn write(&self) -> Result<String, Error> {
-        let (out, count) = self.generate()?;
-        let unchanged = self.current().as_deref() == Some(out.as_str());
-        let path = self.root.join(self.path);
-        let folder = path.parent().unwrap_or(self.root);
-        fs::create_dir_all(folder).map_err(|error| io_error(folder, error))?;
-        fs::write(&path, &out).map_err(|error| io_error(&path, error))?;
-        Ok(format!("wrote {} ({count} phrases{})", self.path, if unchanged { ", unchanged" } else { "" }))
+    /// Writes the template, unless it already says what the sources do: then the file is left as it is, so nothing that
+    /// watches it rebuilds.
+    pub fn write(&self) -> Result<Written, Error> {
+        let (out, phrases) = self.generate()?;
+        let changed = self.current().as_deref() != Some(out.as_str());
+        if changed {
+            let path = self.root.join(self.path);
+            let folder = path.parent().unwrap_or(self.root);
+            fs::create_dir_all(folder).map_err(|error| io_error(folder, error))?;
+            fs::write(&path, &out).map_err(|error| io_error(&path, error))?;
+        }
+        Ok(Written { phrases, changed })
     }
 
     fn current(&self) -> Option<String> {
@@ -117,6 +120,15 @@ impl Template<'_> {
     fn generate(&self) -> Result<(String, usize), Error> {
         generate(self)
     }
+}
+
+/// What [`Template::write`] did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Written {
+    /// How many phrases the template holds.
+    pub phrases: usize,
+    /// Whether the file changed; an unchanged template isn't written again.
+    pub changed: bool,
 }
 
 fn io_error(path: &Path, error: io::Error) -> Error {

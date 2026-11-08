@@ -24,7 +24,7 @@ impl Phrase {
 
     /// In the user's language.
     pub fn get(self) -> &'static str {
-        current().and_then(|language| language.text(self.context, self.english)).unwrap_or(self.english)
+        current(|language| language.text(self.context, self.english)).unwrap_or(self.english)
     }
 
     /// With each `{name}` replaced by its value; a name without a value stays as it is.
@@ -60,10 +60,8 @@ impl Plural {
     }
 
     /// The form for `n`, in the user's language.
-    pub fn get(self, n: u64) -> &'static str {
-        current()
-            .and_then(|language| language.plural(self.one, n))
-            .unwrap_or(if n == 1 { self.one } else { self.other })
+    pub fn get(self, n: usize) -> &'static str {
+        current(|language| language.plural(self.one, n)).unwrap_or(if n == 1 { self.one } else { self.other })
     }
 
     /// The form for `n`, with `{n}` filled in.
@@ -75,7 +73,7 @@ impl Plural {
     pub fn with(self, n: usize, values: &[(&str, &dyn fmt::Display)]) -> String {
         let mut all: Vec<(&str, &dyn fmt::Display)> = vec![("n", &n)];
         all.extend_from_slice(values);
-        fill(self.get(n as u64), &all)
+        fill(self.get(n), &all)
     }
 }
 

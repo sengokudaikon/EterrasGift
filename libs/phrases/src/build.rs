@@ -8,4 +8,4 @@ mod catalogs;
 mod template;
 
 pub use catalogs::bundle_catalogs;
-pub use template::{Error, Template};
+pub use template::{Error, Template, Written};

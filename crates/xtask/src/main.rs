@@ -22,7 +22,13 @@ fn main() -> ExitCode {
         views: "crates/ui/ui",
     };
     let result = match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
-        ["phrases"] => template.write().map(|said| println!("{said}")).map_err(|error| error.to_string()),
+        ["phrases"] => template
+            .write()
+            .map(|written| match written.changed {
+                true => println!("wrote {} ({} phrases)", template.path, written.phrases),
+                false => println!("{} is current ({} phrases)", template.path, written.phrases),
+            })
+            .map_err(|error| error.to_string()),
         ["phrases", "--check"] => template.check().map_err(|error| error.to_string()),
         ["sweep", rest @ ..] => sweep::run(&root, rest),
         _ => Err(format!(

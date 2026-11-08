@@ -8,7 +8,8 @@ use std::path::Path;
 /// views agree on what is translated.
 ///
 /// With no `lang` folder it bundles nothing and says so in a cargo warning, which an empty folder quiets. It panics on anything
-/// else it can't read or write, as a build script should.
+/// else it can't read or write, as a build script should, and on a plural rule that [`Translations`](crate::Translations)
+/// couldn't read.
 pub fn bundle_catalogs(lang: &Path, domain: &str, out: &Path) -> Vec<String> {
     println!("cargo:rerun-if-changed={}", lang.display());
     let file = format!("LC_MESSAGES/{domain}.po");
@@ -41,6 +42,10 @@ pub fn bundle_catalogs(lang: &Path, domain: &str, out: &Path) -> Vec<String> {
                     .find_map(|part| part.split_once('=').filter(|(key, _)| key.trim() == "plural").map(|(_, rule)| rule.trim()))
             })
             .unwrap_or("n != 1");
+        // The app parses the same rule as it selects the language; one it couldn't read fails here, not there.
+        if let Err(reason) = crate::plural_rule::Rule::parse(plural) {
+            panic!("{}: the plural rule {plural:?} can't be read: {reason}", path.display());
+        }
         writeln!(table, "    ::phrases::Catalog {{ language: {language:?}, plural: {plural:?}, entries: &[").unwrap();
         for entry in catalog.translated_entries() {
             let forms = match &entry.msgstr {
@@ -118,6 +123,23 @@ msgstr "Rückgängig"
         let out = dir.path().join("table.rs");
         assert!(bundle_catalogs(&dir.path().join("lang"), "ui", &out).is_empty());
         assert_eq!(std::fs::read_to_string(&out).unwrap(), "pub static CATALOGS: &[::phrases::Catalog] = &[\n];\n");
+    }
+
+    #[test]
+    #[should_panic(expected = "the plural rule \"n !=\" can't be read")]
+    fn a_plural_rule_the_app_could_not_read_stops_the_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let german = dir.path().join("lang/de/LC_MESSAGES");
+        std::fs::create_dir_all(&german).unwrap();
+        std::fs::write(
+            german.join("ui.po"),
+            r#"msgid ""
+msgstr ""
+"Plural-Forms: nplurals=2; plural=n !=;\n"
+"#,
+        )
+        .unwrap();
+        bundle_catalogs(&dir.path().join("lang"), "ui", &dir.path().join("table.rs"));
     }
 
     #[test]
