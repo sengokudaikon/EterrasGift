@@ -31,8 +31,8 @@ tokio = { version = "=1.53.3", features = ["rt", "net", "io-util", "time", "sync
 
 task-runtime = { path = "libs/task-runtime" }
 binary-reader = { path = "libs/binary-reader" }
-spiderland = { git = "https://github.com/sengokudaikon/spiderland", rev = "51ff537b75346ebc09849b0ea4e07c29c036aeb7", features = ["nightly"] }
-spiderland-slint = { git = "https://github.com/sengokudaikon/spiderland", rev = "51ff537b75346ebc09849b0ea4e07c29c036aeb7" }
+spiderland = { git = "https://github.com/sengokudaikon/spiderland", rev = "517655cfca4543c08372cef972f0bf6608464224", features = ["nightly"] }
+spiderland-slint = { git = "https://github.com/sengokudaikon/spiderland", rev = "517655cfca4543c08372cef972f0bf6608464224" }
 il2cpp-runtime = { path = "libs/il2cpp-runtime" }
 native-hooks = { path = "libs/native-hooks" }
 eg-core = { path = "crates/core" }
