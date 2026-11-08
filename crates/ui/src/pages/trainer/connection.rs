@@ -1,4 +1,4 @@
-//! The trainer's connection in the window: the `eg_trainer::screens::connection` feature's impure half. It shows the
+//! The trainer's connection in the window: the `eg_trainer_screens::connection` feature's impure half. It shows the
 //! feature's state in the `Connection` and `TrainerState` globals, queues commands and moves Eterra's ash when the feature
 //! says to. Nothing here waits on the game.
 
@@ -8,7 +8,7 @@ use crate::{
     shell::ShellHandle,
 };
 use eg_trainer::backend::{BackendHandle, Command, Phase};
-use eg_trainer::screens::connection::{Access, ConnectionFeature, ConnectionView, Effect, Intent, State, Subscription, connect_command, unbound as unbound_view};
+use eg_trainer_screens::connection::{Access, ConnectionFeature, ConnectionView, Effect, Intent, State, Subscription, connect_command, unbound as unbound_view};
 use slint::ComponentHandle;
 use spiderland::{Intents, Slice, Store, Version, callbacks};
 use spiderland_slint::{WindowHost, Windowed, on_watch};
@@ -56,7 +56,7 @@ fn observed(backend: &BackendHandle) -> Intent {
 }
 
 /// Binds the connection to the worker. The window's callbacks keep the binding alive. Returns the store, whose
-/// [`WorkerChanged`](eg_trainer::screens::connection::WorkerChanged) tells what else follows the worker.
+/// [`WorkerChanged`](eg_trainer_screens::connection::WorkerChanged) tells what else follows the worker.
 pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, decorations: Rc<Decorations<MainWindow>>) -> Store<ConnectionFeature> {
     let store = Store::<ConnectionFeature>::new(
         State::new(shell.current().is_trainer()),

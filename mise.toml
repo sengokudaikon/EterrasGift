@@ -85,7 +85,7 @@ run = ["cargo test -p eg-game-files --release -- --ignored --nocapture", "cargo 
 
 [tasks."trainer:test"]
 description = "The trainer packages' tests alone (part of test); no live game"
-run = ["cargo test --manifest-path libs/Cargo.toml -p il2cpp-runtime -p native-hooks --offline", "cargo test -p eg-trainer-wire -p eg-game-access -p eg-trainer -p eg-trainer-helper --offline"]
+run = ["cargo test --manifest-path libs/Cargo.toml -p il2cpp-runtime -p native-hooks --offline", "cargo test -p eg-trainer-wire -p eg-game-access -p eg-trainer -p eg-trainer-screens -p eg-trainer-helper --offline"]
 
 [tasks."trainer:unload"]
 description = "Plain native fixture: 100 unload/reloads with active callers, then a stuck callback; no Unity or game"

@@ -4,10 +4,10 @@
 
 use super::item::{self, ItemEdit, ModifierSnapshot, RollRequest, ValueTable};
 use super::project::{project_item, value_table};
-use crate::backend::{BackendError, BackendSnapshot, Command, ForgeState as BackendForgeState, Phase};
-use crate::item::edit::{ExpectedObservation, RollEdit, RollTarget};
-use crate::item::values::{MappingAddress, MappingRequest, MappingTarget};
-use crate::write::ForgePlan;
+use eg_trainer::backend::{BackendError, BackendSnapshot, Command, ForgeState as BackendForgeState, Phase};
+use eg_trainer::item::edit::{ExpectedObservation, RollEdit, RollTarget};
+use eg_trainer::item::values::{MappingAddress, MappingRequest, MappingTarget};
+use eg_trainer::write::ForgePlan;
 use phrases::phrases;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -36,7 +36,7 @@ impl<T> From<Result<T, String>> for Lookup<T> {
 }
 
 use super::item::{AffixDefinition, ForgeItem, TierProperty, format_tier_range};
-pub use crate::write::WriteOutcome;
+pub use eg_trainer::write::WriteOutcome;
 
 /// An independently observed item can be undisplayable by this editor. That
 /// presentation limitation never downgrades the completed write certainty.
@@ -473,7 +473,9 @@ impl ForgeGame {
         }
         let undo = if undoing { state.undo_forge.clone() } else { None };
         let planned = if undoing {
-            undo.as_ref().ok_or(crate::item::edit::EditError::StaleItem).and_then(|undo| state.forge_undo_plan(undo))
+            undo.as_ref()
+                .ok_or(eg_trainer::item::edit::EditError::StaleItem)
+                .and_then(|undo| state.forge_undo_plan(undo))
         } else {
             state.forge_plan(edit.clone())
         };
@@ -540,7 +542,7 @@ impl ForgeGame {
             }));
         }
         Some(match result {
-            Err(error) if error.delivery != Some(crate::backend::Delivery::MayHaveRun) => refused(error.message),
+            Err(error) if error.delivery != Some(eg_trainer::backend::Delivery::MayHaveRun) => refused(error.message),
             _ => WriteOutcome::uncertain(NoWriteRecord),
         })
     }

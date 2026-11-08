@@ -83,7 +83,7 @@ impl ForgeEditor {
             Ok::<(), String>(())
         };
         for row in removed {
-            let edit = ItemEdit::RemoveAffix(crate::item::edit::RemoveAffixEdit {
+            let edit = ItemEdit::RemoveAffix(eg_trainer::item::edit::RemoveAffixEdit {
                 slot: *at.get(&row.slot()).unwrap_or(&row.slot()) as i32,
                 id: i32::from(row.state.id),
                 restore_potential: None,
@@ -108,12 +108,12 @@ impl ForgeEditor {
                 return Err(refused(Moved.into()));
             };
             let edit = match edit {
-                ItemEdit::Affix(crate::item::edit::AffixEdit { slot, id, tier, roll, seal, .. })
+                ItemEdit::Affix(eg_trainer::item::edit::AffixEdit { slot, id, tier, roll, seal, .. })
                     if (i32::from(previous.id), i32::from(previous.tier), previous.seal) == (id, tier, seal) =>
                 {
-                    ItemEdit::Roll(crate::item::edit::RollEdit {
+                    ItemEdit::Roll(eg_trainer::item::edit::RollEdit {
                         target: RollTarget::Affix,
-                        changes: vec![crate::item::edit::RollChange { index: slot, value: roll }],
+                        changes: vec![eg_trainer::item::edit::RollChange { index: slot, value: roll }],
                         allow_incompatible: false,
                     })
                 }
@@ -168,7 +168,7 @@ impl ForgeEditor {
             }
         }
         if !implicits.is_empty() {
-            let edit = ItemEdit::Roll(crate::item::edit::RollEdit {
+            let edit = ItemEdit::Roll(eg_trainer::item::edit::RollEdit {
                 target: RollTarget::Implicit,
                 changes: item::roll_changes(implicits.iter().flat_map(|row| row.changes())),
                 allow_incompatible: self.unrestricted(),
@@ -195,12 +195,12 @@ impl ForgeEditor {
                 _ => match field.read_edit() {
                     // "Allow incompatible affixes" on a base that breaks none needs no override.
                     ItemEdit::BaseType(
-                        rebase @ crate::item::edit::BaseTypeEdit {
+                        rebase @ eg_trainer::item::edit::BaseTypeEdit {
                             allow_incompatible: true,
                             item_type: None,
                             ..
                         },
-                    ) if self.broken_by_base(&projected, projected.item_type, rebase.sub_type as u16) == 0 => ItemEdit::BaseType(crate::item::edit::BaseTypeEdit {
+                    ) if self.broken_by_base(&projected, projected.item_type, rebase.sub_type as u16) == 0 => ItemEdit::BaseType(eg_trainer::item::edit::BaseTypeEdit {
                         allow_incompatible: false,
                         ..rebase
                     }),
@@ -215,16 +215,16 @@ impl ForgeEditor {
             }
             let problem = match &edit {
                 edit if edit.needs_override() && !self.unrestricted() => Some(tr::OverrideRequired.into()),
-                ItemEdit::UniqueIdentity(crate::item::edit::UniqueIdentityEdit { rarity: 8, .. }) if !projected.affixes.is_empty() => Some(SetHoldsNone.into()),
-                ItemEdit::UniqueIdentity(crate::item::edit::UniqueIdentityEdit { .. }) if !edit.is_valid(&projected) => Some(UniqueMisfits.into()),
-                ItemEdit::Status(crate::item::edit::StatusEdit { .. }) if !edit.is_valid(&projected) => Some(StatusMisfits.with(&[("name", &field.name)])),
+                ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit { rarity: 8, .. }) if !projected.affixes.is_empty() => Some(SetHoldsNone.into()),
+                ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit { .. }) if !edit.is_valid(&projected) => Some(UniqueMisfits.into()),
+                ItemEdit::Status(eg_trainer::item::edit::StatusEdit { .. }) if !edit.is_valid(&projected) => Some(StatusMisfits.with(&[("name", &field.name)])),
                 // Before the base's own check, which also refuses an equipment-type break without naming it.
-                ItemEdit::BaseType(crate::item::edit::BaseTypeEdit {
+                ItemEdit::BaseType(eg_trainer::item::edit::BaseTypeEdit {
                     allow_incompatible: false,
                     item_type: None,
                     sub_type,
                 }) if self.broken_by_base(&projected, projected.item_type, *sub_type as u16) > 0 => Some(tr::BrokenByBase.into()),
-                ItemEdit::BaseType(crate::item::edit::BaseTypeEdit { .. }) if !edit.is_valid(&projected) => Some(FixedBase.into()),
+                ItemEdit::BaseType(eg_trainer::item::edit::BaseTypeEdit { .. }) if !edit.is_valid(&projected) => Some(FixedBase.into()),
                 _ => None,
             };
             if let Some(problem) = problem {

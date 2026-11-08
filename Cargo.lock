@@ -1387,13 +1387,12 @@ dependencies = [
  "eg-core",
  "eg-game-access",
  "eg-game-files",
+ "eg-trainer-screens",
  "eg-trainer-wire",
  "file-ops",
  "jiff",
  "phrases",
  "serde_json",
- "spiderland",
- "strum",
  "task-runtime",
  "tempfile",
  "tokio",
@@ -1417,6 +1416,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "eg-trainer-screens"
+version = "0.1.0"
+dependencies = [
+ "eg-core",
+ "eg-trainer",
+ "eg-trainer-wire",
+ "jiff",
+ "phrases",
+ "spiderland",
+ "strum",
+ "tempfile",
+]
+
+[[package]]
 name = "eg-trainer-wire"
 version = "0.1.0"
 dependencies = [
@@ -1430,6 +1443,7 @@ dependencies = [
  "eg-companion",
  "eg-core",
  "eg-trainer",
+ "eg-trainer-screens",
  "file-ops",
  "image",
  "jiff",
@@ -1513,6 +1527,7 @@ dependencies = [
  "eg-core",
  "eg-trainer",
  "eg-trainer-helper",
+ "eg-trainer-screens",
  "eg-ui",
  "file-ops",
  "slint",

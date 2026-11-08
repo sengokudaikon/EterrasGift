@@ -1,4 +1,4 @@
-//! The Item Forge in the window: `eg_trainer::screens::forge` behind the `ForgeState` global. This host is the feature's
+//! The Item Forge in the window: `eg_trainer_screens::forge` behind the `ForgeState` global. This host is the feature's
 //! impure half: `show` puts the state on the view, region by region, and `perform` here takes its requests to the worker.
 
 mod connect;
@@ -10,9 +10,9 @@ use crate::{CellFocus, CellKind, CellRef, ForgeState, MainWindow};
 use eg_core::fault::{FaultDetails, FaultLog};
 use eg_trainer::backend::{BackendHandle, Command, ForgeSnapshot, forge_record};
 use eg_trainer::item::template::TemplateStore;
-use eg_trainer::screens::forge::editor::ForgeEditor;
-use eg_trainer::screens::forge::feature::{Effect, Focus, FocusTarget, Forge, Intent, State, Subscription};
-use eg_trainer::screens::forge::game::{PREVIEW_DELAY, Request};
+use eg_trainer_screens::forge::editor::ForgeEditor;
+use eg_trainer_screens::forge::feature::{Effect, Focus, FocusTarget, Forge, Intent, State, Subscription};
+use eg_trainer_screens::forge::game::{PREVIEW_DELAY, Request};
 use slint::{ComponentHandle, Timer};
 use spiderland::{Dropping, Intents, Slice, Store};
 use spiderland_slint::{Background, WindowHost, Windowed, after, on_watch};

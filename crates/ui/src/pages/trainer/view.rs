@@ -1,4 +1,4 @@
-//! The trainer's pages in the window: the `eg_trainer::screens::trainer_pages` feature's impure half. It shows the open
+//! The trainer's pages in the window: the `eg_trainer_screens::trainer_pages` feature's impure half. It shows the open
 //! page's sections and rows in the `TrainerState` global, and performs on the session what the feature asks. Rows keep
 //! their models between changes, and their place when the split moves, so a box being typed in keeps its focus while its
 //! row follows.
@@ -8,10 +8,10 @@ use crate::{
     FeatureFieldView, FeatureRowKind, FeatureRowModels, FeatureRowPlace, FeatureRowView, FeatureTone, FeatureValueView, MainWindow, RowAction, RowActionKind, Tokens, TrainerState,
 };
 use eg_trainer::backend::BackendHandle;
-use eg_trainer::screens::pages::Tone;
-use eg_trainer::screens::registry::{Area, Feature};
-use eg_trainer::screens::session::{FieldRequest, TrainerSession};
-use eg_trainer::screens::trainer_pages::{Effect, FieldRowView, Intent, PlaceView, REVEAL, RowKind, RowView, State, Subscription, TrainerPages, ValueView, read_facts};
+use eg_trainer_screens::pages::Tone;
+use eg_trainer_screens::registry::{Area, Feature};
+use eg_trainer_screens::session::{FieldRequest, TrainerSession};
+use eg_trainer_screens::trainer_pages::{Effect, FieldRowView, Intent, PlaceView, REVEAL, RowKind, RowView, State, Subscription, TrainerPages, ValueView, read_facts};
 use slint::{ComponentHandle, ModelRc, SharedString, Timer, VecModel};
 use spiderland::{CheckedSlice, Intents, Slice, Store, Version, callbacks};
 use spiderland_slint::{Background, InnerRows, Rows, WindowHost, Windowed, after, on_watch};

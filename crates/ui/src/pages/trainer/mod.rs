@@ -1,5 +1,5 @@
 //! The trainer's pages in the window: their binding to `pages/trainer.slint`. What they show and how they answer is
-//! `eg_trainer::screens`. With the trainer's worker they run on its snapshots; without one, on `Unconnected`, which tells
+//! `eg_trainer_screens`. With the trainer's worker they run on its snapshots; without one, on `Unconnected`, which tells
 //! the truth: no offline character is connected. Captures drive other states through fake sessions of their own.
 
 pub mod connection;
@@ -9,9 +9,9 @@ pub use view::bind;
 
 use crate::MainWindow;
 use eg_trainer::backend::BackendHandle;
-use eg_trainer::screens::backend_session::BackendSession;
-use eg_trainer::screens::registry;
-use eg_trainer::screens::session::Unconnected;
+use eg_trainer_screens::backend_session::BackendSession;
+use eg_trainer_screens::registry;
+use eg_trainer_screens::session::Unconnected;
 use spiderland_slint::Background;
 use std::rc::Rc;
 

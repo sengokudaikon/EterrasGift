@@ -16,7 +16,7 @@ impl ForgeEditor {
         let item = self.item.as_ref()?;
         let identity = self.identity.as_ref().filter(|identity| identity.is_dirty())?;
         match self.identity_edit(item, identity.value() as u16) {
-            ItemEdit::UniqueIdentity(crate::item::edit::UniqueIdentityEdit { unique_id, sub_type, rarity, .. }) => {
+            ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit { unique_id, sub_type, rarity, .. }) => {
                 Some((u16::try_from(unique_id).ok()?, u16::try_from(sub_type).ok()?, u8::try_from(rarity).ok()?))
             }
             _ => None,
@@ -35,7 +35,7 @@ impl ForgeEditor {
         self.identity.as_ref().is_some_and(FieldDraft::is_editable)
             && self.can_change_draft()
             && !self.has_other_drafts()
-            && self.game.supports(&ItemEdit::UniqueIdentity(crate::item::edit::UniqueIdentityEdit {
+            && self.game.supports(&ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit {
                 unique_id: 0,
                 sub_type: 0,
                 rarity: 7,
@@ -84,7 +84,7 @@ impl ForgeEditor {
         };
         let rarity = item::identity_rarity(item, unique.is_some_and(|unique| unique.is_set));
         let unrestricted = unique.is_some_and(|unique| (rarity == item::LEGENDARY && !unique.can_drop_as_legendary) || !Self::legendary_fits(item, unique));
-        ItemEdit::UniqueIdentity(crate::item::edit::UniqueIdentityEdit {
+        ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit {
             unique_id: (unique_id) as i32,
             sub_type: (sub_type) as i32,
             rarity: (rarity) as i32,
@@ -93,15 +93,15 @@ impl ForgeEditor {
     }
 
     /// Whether the unique or set item holds the legendary values the item has (the trainer's own rule).
-    pub(super) fn legendary_fits(item: &ForgeItem, unique: &crate::screens::forge::game::UniqueDefinition) -> bool {
-        item.context
-            .as_ref()
-            .is_none_or(|context| crate::item::edit::legendary_fits(context.expected.snapshot(), unique.is_set, i32::from(unique.legendary_type == LegendaryType::WeaversWill)))
+    pub(super) fn legendary_fits(item: &ForgeItem, unique: &crate::forge::game::UniqueDefinition) -> bool {
+        item.context.as_ref().is_none_or(|context| {
+            eg_trainer::item::edit::legendary_fits(context.expected.snapshot(), unique.is_set, i32::from(unique.legendary_type == LegendaryType::WeaversWill))
+        })
     }
 
     /// What the item keeps that this unique or set item never holds, or None when it holds what the item has: the forge's
     /// risk wording, cut to fit a menu caption.
-    pub(super) fn foreign_legendary(item: &ForgeItem, unique: &crate::screens::forge::game::UniqueDefinition) -> Option<String> {
+    pub(super) fn foreign_legendary(item: &ForgeItem, unique: &crate::forge::game::UniqueDefinition) -> Option<String> {
         if Self::legendary_fits(item, unique) {
             return None;
         }
@@ -125,7 +125,7 @@ impl ForgeEditor {
     /// legendary the game never makes, or legendary potential or Weaver's Will kept where the new identity never holds it,
     /// needs the override.
     pub(super) fn identity_options(&self, item: &ForgeItem) -> Vec<FieldOption> {
-        let mut uniques: Vec<&crate::screens::forge::game::UniqueDefinition> = self.catalog().uniques.iter().filter(|unique| unique.item_type == item.item_type).collect();
+        let mut uniques: Vec<&crate::forge::game::UniqueDefinition> = self.catalog().uniques.iter().filter(|unique| unique.item_type == item.item_type).collect();
         uniques.sort_by(|a, b| (a.is_set, &a.name).cmp(&(b.is_set, &b.name)));
         uniques
             .into_iter()
@@ -133,7 +133,7 @@ impl ForgeEditor {
                 let game = Some(unique.id) == item.identity_id();
                 let edit = self.identity_edit(item, unique.id);
                 let (sub_type, rarity) = match edit {
-                    ItemEdit::UniqueIdentity(crate::item::edit::UniqueIdentityEdit { sub_type, rarity, .. }) => (sub_type as u16, rarity as u8),
+                    ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit { sub_type, rarity, .. }) => (sub_type as u16, rarity as u8),
                     _ => (item.sub_type, item.rarity),
                 };
                 let rarity = if game { item.rarity } else { rarity };

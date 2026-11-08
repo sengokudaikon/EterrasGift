@@ -115,7 +115,7 @@ impl ForgeEditor {
         self.base.as_ref().is_some_and(FieldDraft::is_editable)
             && self.can_mutate()
             && !self.has_implicit_drafts()
-            && self.game.supports(&ItemEdit::BaseType(crate::item::edit::BaseTypeEdit {
+            && self.game.supports(&ItemEdit::BaseType(eg_trainer::item::edit::BaseTypeEdit {
                 sub_type: 0,
                 allow_incompatible: false,
                 item_type: None,
@@ -152,16 +152,11 @@ impl ForgeEditor {
         }
         phrases! { AndModifiers: "{affixes}, {modifiers}" }
         let affixes = tr::Affixes.count(self.affixes.iter().filter(|row| !row.is_removed()).count());
-        parts.push(
-            if item
-                .backing()
-                .is_some_and(|unique| matches!(unique.formatting, crate::screens::forge::game::Lookup::Ready(())))
-            {
-                AndModifiers.with(&[("affixes", &affixes), ("modifiers", &tr::UniqueModifiers.count(self.uniques.len()))])
-            } else {
-                affixes
-            },
-        );
+        parts.push(if item.backing().is_some_and(|unique| matches!(unique.formatting, crate::forge::game::Lookup::Ready(()))) {
+            AndModifiers.with(&[("affixes", &affixes), ("modifiers", &tr::UniqueModifiers.count(self.uniques.len()))])
+        } else {
+            affixes
+        });
         parts
     }
 

@@ -1,5 +1,5 @@
 use super::*;
-use eg_trainer::screens::{
+use eg_trainer_screens::{
     backend_session::BackendSession,
     session::{FieldRequest, FieldResult, FieldWrite, TrainerSession},
 };

@@ -1,0 +1,22 @@
+[package]
+name = "eg-trainer-screens"
+description = "The trainer's pages without a window, as spiderland features: its pages of hooks and field editors, the connection, the Item Forge and its part of Settings."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+eg-trainer.workspace = true
+eg-trainer-wire = { path = "../trainer-wire" }
+eg-core.workspace = true
+spiderland.workspace = true
+strum.workspace = true
+phrases.workspace = true
+jiff.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

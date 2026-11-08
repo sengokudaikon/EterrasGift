@@ -3,7 +3,7 @@
 
 use super::game::Lookup;
 use super::item::{AffixDefinition, AffixState, ItemEdit, ModifierSnapshot, RollTarget, Seal, StatusField, ValueSample, ValueTable};
-use crate::definitions::catalog::ValueRange;
+use eg_trainer::definitions::catalog::ValueRange;
 use phrases::phrases;
 use std::rc::Rc;
 
@@ -772,7 +772,7 @@ impl AffixRow {
 
     /// The draft as the write Apply makes for it, in the slot it names now.
     pub fn read_edit(&self, slot: usize, allow_incompatible: bool) -> ItemEdit {
-        ItemEdit::Affix(crate::item::edit::AffixEdit {
+        ItemEdit::Affix(eg_trainer::item::edit::AffixEdit {
             slot: (slot) as i32,
             id: (self.draft_id()) as i32,
             tier: (self.draft.tier) as i32,
@@ -1363,14 +1363,14 @@ impl FieldDraft {
 
     pub fn read_edit(&self) -> ItemEdit {
         match self.field {
-            Some(field) => ItemEdit::Status(crate::item::edit::StatusEdit {
+            Some(field) => ItemEdit::Status(eg_trainer::item::edit::StatusEdit {
                 field,
                 value: (self.value.clamp(0, 255) as u8) as i32,
                 unrestricted: self.unrestricted,
             }),
             None => {
                 let (item_type, sub_type) = base_of(self.value);
-                ItemEdit::BaseType(crate::item::edit::BaseTypeEdit {
+                ItemEdit::BaseType(eg_trainer::item::edit::BaseTypeEdit {
                     sub_type: i32::from(sub_type),
                     allow_incompatible: self.allow_incompatible,
                     // Another idol type, which only the override lists.
@@ -1410,7 +1410,7 @@ fn integer_table(minimum: u8, maximum: u8) -> ValueTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::screens::forge::item::{AffixKind, Category};
+    use crate::forge::item::{AffixKind, Category};
 
     fn table(minimum: f64, maximum: f64) -> ValueTable {
         ValueTable {
@@ -1549,7 +1549,7 @@ mod tests {
             assert!(draft.set_roll(next));
             assert_eq!(
                 draft.read_edit(),
-                ItemEdit::Status(crate::item::edit::StatusEdit {
+                ItemEdit::Status(eg_trainer::item::edit::StatusEdit {
                     field,
                     value: i32::from(next),
                     unrestricted: true,

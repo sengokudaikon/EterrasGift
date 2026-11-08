@@ -4,7 +4,7 @@
 //!
 //! **Stat tags** come from a definition's stat lines. A line's `tags` are the game's `AT` flags (`LE.dll`, read from the
 //! build's metadata; see `crates/game-files/README.md`) where its property reads them as flags
-//! ([`crate::definitions::files::ordinary`]); the rest name the stat itself, by the game's property list.
+//! ([`eg_trainer::definitions::files::ordinary`]); the rest name the stat itself, by the game's property list.
 //!
 //! **What stays hidden.** Unique modifiers repeat shipped stats ("Fractured Crown: Health" beside "Health"), so the default
 //! [`SourceChoice::Game`] leaves them out until Source or Kind asks. A search of [`REVEAL_LENGTH`] or more characters that
@@ -123,7 +123,7 @@ pub const STAT_TAGS: [StatTag; 39] = [
 pub fn stat_tags(lines: impl Iterator<Item = (u8, i32)>) -> u64 {
     let mut mask = 0;
     for (property, flags) in lines {
-        let reads_flags = crate::definitions::files::ordinary(property);
+        let reads_flags = eg_trainer::definitions::files::ordinary(property);
         for (index, tag) in STAT_TAGS.iter().enumerate() {
             if (reads_flags && flags & tag.flags != 0) || tag.properties.contains(&property) {
                 mask |= 1u64 << index;
@@ -710,8 +710,8 @@ pub fn entry(definition: &AffixDefinition, catalog: &Catalog, slot: Option<u16>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::screens::forge::game::ItemTypeDefinition;
-    use crate::screens::forge::item::{AffixEffect, AffixSource, TierProperty};
+    use crate::forge::game::ItemTypeDefinition;
+    use crate::forge::item::{AffixEffect, AffixSource, TierProperty};
 
     const BOOTS: u16 = 3;
     const HELMET: u16 = 0;
@@ -1099,7 +1099,7 @@ mod tests {
         catalog.item_types = vec![ItemTypeDefinition {
             item_type: 12,
             name: "2H Axes".into(),
-            bases: vec![crate::screens::forge::game::BaseDefinition {
+            bases: vec![crate::forge::game::BaseDefinition {
                 sub_type: 0,
                 name: "Axe".into(),
                 level: 0,

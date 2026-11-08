@@ -888,6 +888,1797 @@ msgstr ""
 msgid "{name} must be text."
 msgstr ""
 
+#: crates/trainer-screens/src/backend_session.rs
+msgid "A value must be a whole number from 0 to 2147483647"
+msgstr ""
+
+#: crates/trainer-screens/src/backend_session.rs
+msgid "Read these fields before applying changes"
+msgstr ""
+
+#: crates/trainer-screens/src/backend_session.rs
+msgid "The field observation changed; read again"
+msgstr ""
+
+#: crates/trainer-screens/src/backend_session.rs
+msgid "The field observation is no longer available; read again"
+msgstr ""
+
+#: crates/trainer-screens/src/backend_session.rs
+msgid "The trainer worker stopped."
+msgstr ""
+
+#: crates/trainer-screens/src/backend_session.rs
+msgid "Wait for the current trainer operation to finish."
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Applying changes…"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Changing area"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Changing area…"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Close all but one copy of Last Epoch, then connect."
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Close all but one copy of Last Epoch."
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Connect"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Connect to an offline character to use the trainer."
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Connected"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Connecting"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Connecting to the game…"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Connecting…"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Connection stopped"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Disconnecting…"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Edit not confirmed"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Load an offline character to use the trainer."
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Load an offline character."
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Not connected"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Online mode"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs crates/trainer-screens/src/settings.rs
+msgid "Reading the game files…"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Restart Eterra's Gift to connect again."
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Restart Eterra's Gift to connect again. Home and Mods remain available."
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Retry"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Start Last Epoch and load an offline character."
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "The edit may have reached the game but couldn't be confirmed. Check the item in the game, then Retry. The edit won't be sent again. Drafts and Undo were cleared."
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "The helper is leaving Last Epoch."
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "The trainer couldn't connect. Retry when the game is ready."
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Trainer is off"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Trainer stopped"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Turn the trainer on in Settings and restart Eterra's Gift."
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Turning off trainer effects."
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Waiting for Last Epoch"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Waiting for a character"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Waiting for an offline character"
+msgstr ""
+
+#: crates/trainer-screens/src/connection.rs
+msgid "Waiting for the character to finish changing area."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor.rs
+msgid "Item read again. The previous write was not retried."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor.rs
+msgid "the game gave no usable values"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "Added by \"I know what I'm doing\". The game would not add it here."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "Allowed by \"I know what I'm doing\". The game doesn't roll it here."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "Compatible with this slot"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "Currently {name}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "Fits this item."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "Incompatible: the item already has this affix."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "Incompatible: this affix belongs in the other slot (prefix or suffix)."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "Incompatible: this affix requires another class."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "Incompatible: this affix rolls on another kind of item."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "Incompatible: this kind of affix (experimental, personal, set) stays in its own slots."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "No free prefix slot. Adding more needs \"I know what I'm doing\" in Settings."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "No free suffix slot. Adding more needs \"I know what I'm doing\" in Settings."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "Replace affix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "Select an affix slot."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "The game data is incomplete for this affix, so where it rolls can't be checked."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "This affix has no verified definition in the current build."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "This affix is incompatible with the selected item or slot."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "Use this affix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "{fits} It takes the corrupted slot: {name} becomes a normal affix."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/choosing.rs
+msgid "{name} cannot become a normal affix to free the corrupted slot: {problem}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/header.rs
+msgid "Apply or discard the implicit roll drafts first. A new base replaces the implicits."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/header.rs
+msgid "Change the base. Implicits and requirements follow it."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/header.rs
+msgid "Draft the affix up to its highest tier, at most T7. Primordial affixes stay."
+msgid_plural "Draft {n} affixes up to their highest tier, at most T7. Primordial affixes stay."
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/editor/header.rs
+msgid "Draft the roll up to 255, the game's perfect roll."
+msgid_plural "Draft {n} rolls up to 255, the game's perfect roll."
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/editor/header.rs
+msgid "Every affix is at its highest tier below T8."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/header.rs
+msgid "Every roll that can change is at its best."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/header.rs
+msgid "Lowers {name} to T{tier}."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/header.rs
+msgid "Lowers {n} affixes below T6."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/header.rs
+msgid "No affix on this item has a T6."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/header.rs
+msgid "Normal, magic and rare follow the unsealed affix count. Exalted needs an affix at T6 or higher."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/header.rs
+msgid "Raises {name} to T6."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/header.rs
+msgid "Restores {name} to T{tier}."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/header.rs
+msgid "Restores {n} affixes to their tiers in game."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/header.rs
+msgid "Switching to or from exalted changes affix tiers. Normal, magic and rare follow the unsealed affix count."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/header.rs
+msgid "Uniques, set items and legendaries keep their base. Change the unique to change it."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/header.rs
+msgid "{affixes}, {modifiers}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/identity.rs
+msgid "Apply or discard the other drafts first. A new unique brings its own modifiers."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/identity.rs
+msgid "Change which unique or set item this is"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/identity.rs
+msgid "Holds no affixes. Remove them first."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/identity.rs
+msgid "Keeps Weaver's Will it never holds, which may crash the game and reset the item."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/identity.rs
+msgid "Keeps legendary potential and Weaver's Will it never holds, which may crash the game and reset the item."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/identity.rs
+msgid "Keeps legendary potential it never holds, which may crash the game and reset the item."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/identity.rs
+msgid "Never legendary in the game."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/identity.rs
+msgid "Undo apply can't reverse it."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/identity.rs
+msgctxt "rarity"
+msgid "Legendary"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/ledger.rs
+msgid "Apply to game"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/ledger.rs
+msgid "Apply {n} draft"
+msgid_plural "Apply {n} drafts"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/editor/ledger.rs
+msgid "Changes"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/ledger.rs
+msgid "Changes ({n})"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/ledger.rs crates/ui/ui/strings/forge.slint
+msgid "Discard draft"
+msgid_plural "Discard {n} drafts"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/editor/ledger.rs
+msgid "Draft discarded."
+msgid_plural "{n} drafts discarded."
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/editor/ledger.rs
+msgid "Draft for {name} discarded."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/ledger.rs
+msgid "Last draft change undone."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/ledger.rs
+msgid "No drafts"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/ledger.rs
+msgid "Nothing left to undo. Undo apply writes back the values from before the last Apply."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/ledger.rs
+msgid "Undo apply"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/ledger.rs
+msgid "Undo the last draft change (Ctrl+Z)"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/ledger.rs
+msgid "Write back the values from before the last Apply"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/lists.rs
+msgid "Add an affix as a draft"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/lists.rs
+msgid "Free: {prefixes}, {suffixes}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/lists.rs
+msgid "Free: {prefixes}, {suffixes}. An affix makes it legendary."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/lists.rs
+msgid "From game data. The game didn't describe them, so they can't reroll."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/lists.rs
+msgid "From the drafted base. Roll positions carry over when it applies."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/lists.rs
+msgid "No affix slots on a set item."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/lists.rs
+msgid "No affix slots on a set item. Adding needs \"I know what I'm doing\"."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/lists.rs
+msgid "No affix slots on a unique idol."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/lists.rs
+msgid "No affix slots on a unique idol. Adding needs \"I know what I'm doing\"."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/lists.rs
+msgid "Select an affix to see its tiers."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/lists.rs
+msgid "Set by the base. Their values can reroll, and a new base replaces them."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/lists.rs
+msgid "This item has no affixes."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/sync.rs
+msgid "Corrupted base"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/sync.rs
+msgid "The forge item changed, so its draft was discarded."
+msgid_plural "The forge item changed, so its {n} drafts were discarded."
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/editor/sync.rs
+msgid "The item changed in the game and no longer has {missing}, so that draft was discarded."
+msgid_plural "The item changed in the game and no longer has {missing}, so those drafts were discarded."
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/editor/sync.rs
+msgid "This unique isn't in the game data. Read the game files again in Settings."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tables.rs
+msgid "Draft preview"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tables.rs
+msgid "Linked with {names}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tables.rs
+msgid "Preview unavailable: {details}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "\"{name}\" matches the item already."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs crates/ui/ui/strings/forge.slint
+msgid "Affixes"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "Apply or discard the drafts first: a template drafts the whole item."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs crates/trainer-screens/src/forge/rows.rs
+msgid "Base"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "Deleted \"{name}\"."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "Drafted \"{name}\": {n} draft. Review it, then Apply."
+msgid_plural "Drafted \"{name}\": {n} drafts. Review them, then Apply."
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "Drafted only the unique from \"{name}\": a new unique brings its own modifiers. Apply it, then draft the template again for the rest."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "Left out: {items}."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "Name the template first."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "Replaced \"{name}\"."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "Saved \"{name}\" in place of \"{kept}\"."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "Saved \"{name}\"."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "Templates are not kept in this run."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "That template holds a unique, set or legendary item, and this item is none of them."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "That template is for another kind of item."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "That template's unique does not fit this item."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "The item can't take drafts until the game is ready."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "The template could not be deleted: {error}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "The template could not be saved: {error}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "Wait for the write in progress to finish, then draft the template."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs crates/ui/ui/strings/forge.slint
+msgid "Whole item"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "{name} (read only)"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/templates.rs
+msgid "{name} ({problem})"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "A legendary's legendary potential is fixed."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs crates/ui/ui/strings/forge.slint
+msgid "Add affix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Change the level requirement. The game works it out again when the item reloads or changes."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Compatibility could not be confirmed. Turn on \"I know what I'm doing\" in Settings to use it."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Compatibility couldn't be confirmed."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs crates/ui/ui/strings/forge.slint
+msgid "Confirmed"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Corrupted"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Don't do it"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Enchanting gives an idol Weaver's Touch. 0 takes it off. Only uncorrupted Grand, Large, Ornate, Huge and Adorned idols use it."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Exalted"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Forging potential"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs crates/ui/ui/strings/forge.slint
+msgid "Implicits"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Incompatible with this item or slot."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Incompatible with this item or slot. Turn on \"I know what I'm doing\" in Settings to use it."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Legendary potential"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs crates/ui/ui/strings/forge.slint
+msgid "Level requirement"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Level {level}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Needs \"I know what I'm doing\"."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Not corrupted"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Not ruined"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Nothing was applied."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Place an item in the forge first."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Ruin"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Ruined"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "The game grows and upgrades affixes with it, up to its maximum. 0 takes it off. After a reload, a unique that hasn't grown an affix yet shows it as legendary potential."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "The game has odd rules for these two: once Weaver's Will starts adding affixes, it may crash the game and reset the item."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "The game would not add it here. Turn on \"I know what I'm doing\" in Settings to add it anyway."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "The new base would make affixes incompatible. Allow incompatible affixes in the base picker to apply it anyway."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "This affix can't be written: it's missing from the game data, or its type is unknown."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "This edit needs \"I know what I'm doing\" in Settings. Nothing was applied."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Turn on \"I know what I'm doing\" in Settings to change this."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "T{tier}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs crates/ui/ui/strings/mods.slint
+msgid "Undo"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs crates/trainer-screens/src/forge/picker.rs crates/ui/ui/strings/forge.slint
+msgid "Unique modifiers"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Weaver's Touch"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Weaver's Will"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "Weaver's Will on a legendary. 0 takes it off."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "{name}: {problem}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs crates/trainer-screens/src/forge/picker.rs crates/trainer-screens/src/settings.rs
+msgid "{n} affix"
+msgid_plural "{n} affixes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "{n} draft"
+msgid_plural "{n} drafts"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "{n} incompatible affix"
+msgid_plural "{n} incompatible affixes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "{n} prefix"
+msgid_plural "{n} prefixes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "{n} suffix"
+msgid_plural "{n} suffixes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "{n} unique modifier"
+msgid_plural "{n} unique modifiers"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/editor/tr.rs
+msgid "{problem} Nothing was applied."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "A set item holds no affixes. Remove them first."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "Applying to game… Waiting for independent readback."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "Edit readback confirmed: {names}."
+msgid_plural "{n} drafts applied. Edit readback confirmed for each: {names}."
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "Enter integer roll positions from 0 to 255 for implicits whose values roll."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "Enter integer roll positions from 0 to 255 for mapped unique modifiers."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "Implicit rolls changed in the game after you drafted them. Discard those drafts and edit them again. Nothing was applied."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "Last applied edit restored"
+msgid_plural "{n} applied edits restored"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "Previous values restored; readback confirmed."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "Restored"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "That affix is no longer in that slot."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "That unique does not fit this item."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "The forge item is no longer available."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "The game confirmed the edit, but the item could not be shown afterwards. It shows again the next time the game reports it. Remaining drafts and Undo were cleared."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "The game did not keep this edit, and the item could not be shown afterwards. It shows again the next time the game reports it. Drafts and Undo were cleared; details are in the fault log."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "The game did not keep this edit; the item shows what it holds now. Drafts and Undo were cleared."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "The session is not ready to write."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "This affix supports at most tier {tier}."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "This change is one-way: the game would not give the old rarity back, so Undo apply cannot reverse it."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "This draft includes an edit that is not available in this build. Nothing was applied."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "This edit is not available in this build. Nothing was applied."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "This item's base cannot change."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "Undo is no longer valid for the observed item or current settings."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "Unique modifier rolls changed in the game after you drafted them. Discard those drafts and edit them again. Nothing was applied."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "{completed} of {total} drafts applied and confirmed. {message}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "{completed} of {total} drafts applied and confirmed; {step} was not applied. {message}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "{completed} of {total} edits restored. {message}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "{name} changed in the game after you drafted it. Discard that draft and edit it again. Nothing was applied."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/editor/writes.rs
+msgid "{name} does not apply to this item."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/feature.rs
+msgid "something went wrong unexpectedly. Details are in the fault log."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/feature.rs
+msgid "{error} Details are in the fault log."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "An item edit is already pending."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "Implicit (the game's text is unavailable)"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "Only unique rolls have a tooltip preview."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "Reading unique descriptions…"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "The confirmed Undo is no longer available. Check the item and override setting."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "The item changed before its preview could be read."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "The item changed before its values could be read."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "The item changed. Discard the stale draft and edit it again."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "The trainer cannot accept another command."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "The trainer cannot accept another preview request."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "The trainer cannot accept another value request."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "The trainer cannot accept the edit. Nothing was submitted."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "The worker ended without a terminal write outcome."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "The worker stopped without a completed write record."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "This connection offers no supported item edits."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "This edit is unavailable in this build."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "This preview draft is unsupported."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "This roll is unsupported."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "Updating preview…"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/game.rs
+msgid "{value} {stat}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Corrupted prefix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Corrupted suffix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Descriptions unavailable."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs crates/trainer-screens/src/forge/picker.rs
+msgid "Experimental"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Experimental prefix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Experimental suffix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs crates/trainer-screens/src/forge/picker.rs
+msgid "Idol enchantment"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Idol enchantment prefix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Idol enchantment suffix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs crates/trainer-screens/src/forge/picker.rs
+msgid "Personal"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Personal prefix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Personal suffix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Prefix (special affix {value})"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs crates/trainer-screens/src/forge/picker.rs
+msgid "Reforged set"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Reforged set prefix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Reforged set suffix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Roll position"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Roll {roll}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Special affix {value}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Suffix (special affix {value})"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "T1 only"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "T1–T{max}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs crates/trainer-screens/src/forge/picker.rs
+msgid "Unique modifier"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Unique modifier prefix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Unique modifier suffix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Unknown #{id}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Unknown seal {value}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Unknown tier {value}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Unknown type {value}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs crates/trainer-screens/src/forge/picker.rs
+msgid "Weaver idol"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Weaver idol prefix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs
+msgid "Weaver idol suffix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/item.rs crates/trainer-screens/src/forge/picker.rs
+msgctxt "affix category"
+msgid "Corrupted"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Acolyte"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Ailment"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "All sources"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Any class"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Any kind"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Any level"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Any slot"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Any tag"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Armor"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Attributes"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Block"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Bow"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Buff"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Channelling"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Class: {classes}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Cold"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Critical strike"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Curse"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Damage"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Damage over time"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Dodge"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Elemental"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Endurance"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Fire"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Fits this item"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Fits this item (level {level})"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "From {name}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "From {unique} ({slot})"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Full health"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Game affixes"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Health"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "High health"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Item type {id}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Lightning"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Low health"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Mage"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Mana"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Melee"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Minion"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Necrotic"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "No affix fits this item."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "No affix matches these filters."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "No affix matches this search with these filters."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "No affix matches this search."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "No class requirement"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "On hit"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Physical"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Poison"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Potion"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs crates/ui/ui/strings/forge.slint
+msgid "Prefix or suffix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Prefixes"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Primalist"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Requires level {level}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Resistance"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Rogue"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Rolls on {slots}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Rolls on {slots} and {more} more"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Sentinel"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Show {n} unique modifier"
+msgid_plural "Show {n} unique modifiers"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Skill"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Slot: {name}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Speed"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Spell"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Standard"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Stun"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Suffixes"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Tags: {tags}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "These affixes roll on another slot."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Throwing"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Totem"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Transform"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "T{tier} {range}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Unique modifiers need \"I know what I'm doing\" in Settings."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Up to level {level}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Void"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "Ward"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/picker.rs
+msgid "{slot} +{more}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/project.rs
+msgid "Catalog unavailable."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/project.rs
+msgid "Unique #{id}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/project.rs
+msgid "Unnamed item"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/project.rs crates/trainer-screens/src/forge/rows.rs crates/ui/ui/strings/forge.slint
+msgid "Value"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Actual values are unavailable for this value."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Actual values unavailable ({reason}). Editing the roll position."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Actual values unavailable: {reason}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Added at tier {tier}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Added at tier {tier}, {seal}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Added when you apply"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Change {name}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Enter a value from {minimum} to {maximum}."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Fixed value"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Fixed: the roll does not change this value."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Identity"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "In game {value}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Its value can be set once Apply has added it."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Loading actual values…"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "No other base of this item type is known. Refresh game data in Settings."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "No other unique or set item of this item type is known. Refresh game data in Settings."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Range {minimum} – {maximum}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Refresh game data in Settings to edit this value."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Removed"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Removed when you apply"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Replace with another affix"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Roll unavailable"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Sets only the {flag} flag. The game's own {name} effects are not applied."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs crates/ui/ui/strings/forge.slint
+msgid "The game changed this affix after you drafted it."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "The game changed this value after you drafted it."
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Tier {from} → {to}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Value {from} → {to}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Value {n}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "Value → {to}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "was {value}"
+msgstr ""
+
+#: crates/trainer-screens/src/forge/rows.rs
+msgid "{value} is outside the game's range of {minimum}–{maximum}."
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "Apply"
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "Apply {n} change"
+msgid_plural "Apply {n} changes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "Confirmed."
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "Connect an offline character first."
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "Couldn't read from the game: it answered with other fields."
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "Couldn't read from the game: {details}"
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "Couldn't turn off: {reason}"
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "Couldn't turn on: {reason}"
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "In game: {value}"
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "Not changed: {details}"
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs crates/ui/ui/strings/trainer.slint
+msgid "Not read yet"
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "On in the game."
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "One-hit kills are on."
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "The game answered with other fields."
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "The game kept {kept}."
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "Turning off…"
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "Turning on…"
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "Turns on when {name} enters play."
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "Type a number from {minimum} to {maximum}, or ∞."
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "Type a number from {minimum} to {maximum}."
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "Up and Down change it by {step}"
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "Waiting to turn on…"
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "{choice} selected in the game."
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgid "{details} Read again to see what the game holds."
+msgstr ""
+
+#: crates/trainer-screens/src/pages.rs
+msgctxt "a field and the value the game kept"
+msgid "{field} {value}"
+msgstr ""
+
+#: crates/trainer-screens/src/profiles.rs
+msgid "Changes apply at once and are kept in {name}'s profile."
+msgstr ""
+
+#: crates/trainer-screens/src/profiles.rs
+msgid "Changes apply at once and last this session. Keep them as {name}'s profile to have them every time."
+msgstr ""
+
+#: crates/trainer-screens/src/profiles.rs
+msgid "No profiles yet. Connect with an offline character in play to keep one."
+msgstr ""
+
+#: crates/trainer-screens/src/profiles.rs
+msgid "What you turn on here turns on when {name} enters play."
+msgstr ""
+
+#: crates/trainer-screens/src/profiles.rs
+msgid "{name} ({class}, {cycle})"
+msgstr ""
+
+#: crates/trainer-screens/src/session.rs
+msgid "No offline character is connected."
+msgstr ""
+
+#: crates/trainer-screens/src/session.rs
+msgid "Not available in this version yet."
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "Affixes and uniques read from the game's files, read again when the game updates."
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "Allows edits the game wouldn't make: incompatible affixes and bases, Weaver, enchantment and corrupted affixes in any fitting slot, other idol sizes, Weaver's Will on any unique and Weaver's Touch on any idol."
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "Automatic"
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "Checked: {time}"
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "Connect automatically"
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "Connect when an offline character is loaded."
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "Edit offline characters and their items in the running game. A helper loads into Last Epoch and leaves when you disconnect or the character leaves play."
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "Game definitions"
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "I know what I'm doing"
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "Last Epoch wasn't found"
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "Last Epoch wasn't found."
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "Manual"
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs crates/ui/ui/strings/shell.slint
+msgid "Off"
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs crates/ui/ui/strings/shell.slint
+msgid "On"
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs crates/ui/ui/strings/trainer.slint
+msgid "Read again"
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "Read the game's files again"
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "The game files could not be read: {reason}"
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs crates/ui/src/shell/navigation.rs
+msgid "Trainer"
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "Trainer connection"
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "Updated: {time}"
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "Use expendable items. The game may drop or rearrange what it doesn't support."
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "not recorded"
+msgstr ""
+
+#: crates/trainer-screens/src/settings.rs
+msgid "the trainer"
+msgstr ""
+
+#: crates/trainer-screens/src/trainer_pages.rs
+msgid "{name}: one-hit kills"
+msgstr ""
+
 #: crates/trainer/src/backend/connection.rs
 msgid "The helper couldn't leave the game. Restart Last Epoch before playing online."
 msgstr ""
@@ -1132,7 +2923,7 @@ msgstr ""
 msgid "Combat targets count for your prophecies at any distance."
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/trainer/src/screens/forge/editor/tr.rs
+#: crates/trainer/src/features/registry.rs crates/trainer-screens/src/forge/editor/tr.rs
 msgid "Corruption"
 msgstr ""
 
@@ -1912,27 +3703,27 @@ msgctxt "monster rarity"
 msgid "Rare"
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/trainer/src/screens/forge/item.rs
+#: crates/trainer/src/features/registry.rs crates/trainer-screens/src/forge/item.rs
 msgctxt "rarity"
 msgid "Magic"
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/trainer/src/screens/forge/item.rs
+#: crates/trainer/src/features/registry.rs crates/trainer-screens/src/forge/item.rs
 msgctxt "rarity"
 msgid "Normal"
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/trainer/src/screens/forge/item.rs
+#: crates/trainer/src/features/registry.rs crates/trainer-screens/src/forge/item.rs
 msgctxt "rarity"
 msgid "Rare"
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/trainer/src/screens/forge/editor/identity.rs
+#: crates/trainer/src/features/registry.rs crates/trainer-screens/src/forge/editor/identity.rs
 msgctxt "rarity"
 msgid "Set"
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/trainer/src/screens/forge/editor/identity.rs
+#: crates/trainer/src/features/registry.rs crates/trainer-screens/src/forge/editor/identity.rs
 msgctxt "rarity"
 msgid "Unique"
 msgstr ""
@@ -1963,1797 +3754,6 @@ msgstr ""
 #: crates/trainer/src/item/edit.rs crates/ui/ui/strings/forge.slint
 msgctxt "seal"
 msgid "Sealed"
-msgstr ""
-
-#: crates/trainer/src/screens/backend_session.rs
-msgid "A value must be a whole number from 0 to 2147483647"
-msgstr ""
-
-#: crates/trainer/src/screens/backend_session.rs
-msgid "Read these fields before applying changes"
-msgstr ""
-
-#: crates/trainer/src/screens/backend_session.rs
-msgid "The field observation changed; read again"
-msgstr ""
-
-#: crates/trainer/src/screens/backend_session.rs
-msgid "The field observation is no longer available; read again"
-msgstr ""
-
-#: crates/trainer/src/screens/backend_session.rs
-msgid "The trainer worker stopped."
-msgstr ""
-
-#: crates/trainer/src/screens/backend_session.rs
-msgid "Wait for the current trainer operation to finish."
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Applying changes…"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Changing area"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Changing area…"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Close all but one copy of Last Epoch, then connect."
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Close all but one copy of Last Epoch."
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Connect"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Connect to an offline character to use the trainer."
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Connected"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Connecting"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Connecting to the game…"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Connecting…"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Connection stopped"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Disconnecting…"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Edit not confirmed"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Load an offline character to use the trainer."
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Load an offline character."
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Not connected"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Online mode"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs crates/trainer/src/screens/settings.rs
-msgid "Reading the game files…"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Restart Eterra's Gift to connect again."
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Restart Eterra's Gift to connect again. Home and Mods remain available."
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Retry"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Start Last Epoch and load an offline character."
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "The edit may have reached the game but couldn't be confirmed. Check the item in the game, then Retry. The edit won't be sent again. Drafts and Undo were cleared."
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "The helper is leaving Last Epoch."
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "The trainer couldn't connect. Retry when the game is ready."
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Trainer is off"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Trainer stopped"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Turn the trainer on in Settings and restart Eterra's Gift."
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Turning off trainer effects."
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Waiting for Last Epoch"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Waiting for a character"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Waiting for an offline character"
-msgstr ""
-
-#: crates/trainer/src/screens/connection.rs
-msgid "Waiting for the character to finish changing area."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor.rs
-msgid "Item read again. The previous write was not retried."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor.rs
-msgid "the game gave no usable values"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "Added by \"I know what I'm doing\". The game would not add it here."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "Allowed by \"I know what I'm doing\". The game doesn't roll it here."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "Compatible with this slot"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "Currently {name}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "Fits this item."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "Incompatible: the item already has this affix."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "Incompatible: this affix belongs in the other slot (prefix or suffix)."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "Incompatible: this affix requires another class."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "Incompatible: this affix rolls on another kind of item."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "Incompatible: this kind of affix (experimental, personal, set) stays in its own slots."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "No free prefix slot. Adding more needs \"I know what I'm doing\" in Settings."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "No free suffix slot. Adding more needs \"I know what I'm doing\" in Settings."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "Replace affix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "Select an affix slot."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "The game data is incomplete for this affix, so where it rolls can't be checked."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "This affix has no verified definition in the current build."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "This affix is incompatible with the selected item or slot."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "Use this affix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "{fits} It takes the corrupted slot: {name} becomes a normal affix."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/choosing.rs
-msgid "{name} cannot become a normal affix to free the corrupted slot: {problem}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/header.rs
-msgid "Apply or discard the implicit roll drafts first. A new base replaces the implicits."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/header.rs
-msgid "Change the base. Implicits and requirements follow it."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/header.rs
-msgid "Draft the affix up to its highest tier, at most T7. Primordial affixes stay."
-msgid_plural "Draft {n} affixes up to their highest tier, at most T7. Primordial affixes stay."
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/editor/header.rs
-msgid "Draft the roll up to 255, the game's perfect roll."
-msgid_plural "Draft {n} rolls up to 255, the game's perfect roll."
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/editor/header.rs
-msgid "Every affix is at its highest tier below T8."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/header.rs
-msgid "Every roll that can change is at its best."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/header.rs
-msgid "Lowers {name} to T{tier}."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/header.rs
-msgid "Lowers {n} affixes below T6."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/header.rs
-msgid "No affix on this item has a T6."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/header.rs
-msgid "Normal, magic and rare follow the unsealed affix count. Exalted needs an affix at T6 or higher."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/header.rs
-msgid "Raises {name} to T6."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/header.rs
-msgid "Restores {name} to T{tier}."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/header.rs
-msgid "Restores {n} affixes to their tiers in game."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/header.rs
-msgid "Switching to or from exalted changes affix tiers. Normal, magic and rare follow the unsealed affix count."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/header.rs
-msgid "Uniques, set items and legendaries keep their base. Change the unique to change it."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/header.rs
-msgid "{affixes}, {modifiers}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/identity.rs
-msgid "Apply or discard the other drafts first. A new unique brings its own modifiers."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/identity.rs
-msgid "Change which unique or set item this is"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/identity.rs
-msgid "Holds no affixes. Remove them first."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/identity.rs
-msgid "Keeps Weaver's Will it never holds, which may crash the game and reset the item."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/identity.rs
-msgid "Keeps legendary potential and Weaver's Will it never holds, which may crash the game and reset the item."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/identity.rs
-msgid "Keeps legendary potential it never holds, which may crash the game and reset the item."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/identity.rs
-msgid "Never legendary in the game."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/identity.rs
-msgid "Undo apply can't reverse it."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/identity.rs
-msgctxt "rarity"
-msgid "Legendary"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/ledger.rs
-msgid "Apply to game"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/ledger.rs
-msgid "Apply {n} draft"
-msgid_plural "Apply {n} drafts"
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/editor/ledger.rs
-msgid "Changes"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/ledger.rs
-msgid "Changes ({n})"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/ledger.rs crates/ui/ui/strings/forge.slint
-msgid "Discard draft"
-msgid_plural "Discard {n} drafts"
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/editor/ledger.rs
-msgid "Draft discarded."
-msgid_plural "{n} drafts discarded."
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/editor/ledger.rs
-msgid "Draft for {name} discarded."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/ledger.rs
-msgid "Last draft change undone."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/ledger.rs
-msgid "No drafts"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/ledger.rs
-msgid "Nothing left to undo. Undo apply writes back the values from before the last Apply."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/ledger.rs
-msgid "Undo apply"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/ledger.rs
-msgid "Undo the last draft change (Ctrl+Z)"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/ledger.rs
-msgid "Write back the values from before the last Apply"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/lists.rs
-msgid "Add an affix as a draft"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/lists.rs
-msgid "Free: {prefixes}, {suffixes}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/lists.rs
-msgid "Free: {prefixes}, {suffixes}. An affix makes it legendary."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/lists.rs
-msgid "From game data. The game didn't describe them, so they can't reroll."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/lists.rs
-msgid "From the drafted base. Roll positions carry over when it applies."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/lists.rs
-msgid "No affix slots on a set item."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/lists.rs
-msgid "No affix slots on a set item. Adding needs \"I know what I'm doing\"."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/lists.rs
-msgid "No affix slots on a unique idol."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/lists.rs
-msgid "No affix slots on a unique idol. Adding needs \"I know what I'm doing\"."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/lists.rs
-msgid "Select an affix to see its tiers."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/lists.rs
-msgid "Set by the base. Their values can reroll, and a new base replaces them."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/lists.rs
-msgid "This item has no affixes."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/sync.rs
-msgid "Corrupted base"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/sync.rs
-msgid "The forge item changed, so its draft was discarded."
-msgid_plural "The forge item changed, so its {n} drafts were discarded."
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/editor/sync.rs
-msgid "The item changed in the game and no longer has {missing}, so that draft was discarded."
-msgid_plural "The item changed in the game and no longer has {missing}, so those drafts were discarded."
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/editor/sync.rs
-msgid "This unique isn't in the game data. Read the game files again in Settings."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tables.rs
-msgid "Draft preview"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tables.rs
-msgid "Linked with {names}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tables.rs
-msgid "Preview unavailable: {details}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "\"{name}\" matches the item already."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs crates/ui/ui/strings/forge.slint
-msgid "Affixes"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "Apply or discard the drafts first: a template drafts the whole item."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs crates/trainer/src/screens/forge/rows.rs
-msgid "Base"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "Deleted \"{name}\"."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "Drafted \"{name}\": {n} draft. Review it, then Apply."
-msgid_plural "Drafted \"{name}\": {n} drafts. Review them, then Apply."
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "Drafted only the unique from \"{name}\": a new unique brings its own modifiers. Apply it, then draft the template again for the rest."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "Left out: {items}."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "Name the template first."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "Replaced \"{name}\"."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "Saved \"{name}\" in place of \"{kept}\"."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "Saved \"{name}\"."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "Templates are not kept in this run."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "That template holds a unique, set or legendary item, and this item is none of them."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "That template is for another kind of item."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "That template's unique does not fit this item."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "The item can't take drafts until the game is ready."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "The template could not be deleted: {error}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "The template could not be saved: {error}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "Wait for the write in progress to finish, then draft the template."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs crates/ui/ui/strings/forge.slint
-msgid "Whole item"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "{name} (read only)"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/templates.rs
-msgid "{name} ({problem})"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "A legendary's legendary potential is fixed."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs crates/ui/ui/strings/forge.slint
-msgid "Add affix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Change the level requirement. The game works it out again when the item reloads or changes."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Compatibility could not be confirmed. Turn on \"I know what I'm doing\" in Settings to use it."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Compatibility couldn't be confirmed."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs crates/ui/ui/strings/forge.slint
-msgid "Confirmed"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Corrupted"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Don't do it"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Enchanting gives an idol Weaver's Touch. 0 takes it off. Only uncorrupted Grand, Large, Ornate, Huge and Adorned idols use it."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Exalted"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Forging potential"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs crates/ui/ui/strings/forge.slint
-msgid "Implicits"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Incompatible with this item or slot."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Incompatible with this item or slot. Turn on \"I know what I'm doing\" in Settings to use it."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Legendary potential"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs crates/ui/ui/strings/forge.slint
-msgid "Level requirement"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Level {level}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Needs \"I know what I'm doing\"."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Not corrupted"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Not ruined"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Nothing was applied."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Place an item in the forge first."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Ruin"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Ruined"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "The game grows and upgrades affixes with it, up to its maximum. 0 takes it off. After a reload, a unique that hasn't grown an affix yet shows it as legendary potential."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "The game has odd rules for these two: once Weaver's Will starts adding affixes, it may crash the game and reset the item."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "The game would not add it here. Turn on \"I know what I'm doing\" in Settings to add it anyway."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "The new base would make affixes incompatible. Allow incompatible affixes in the base picker to apply it anyway."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "This affix can't be written: it's missing from the game data, or its type is unknown."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "This edit needs \"I know what I'm doing\" in Settings. Nothing was applied."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Turn on \"I know what I'm doing\" in Settings to change this."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "T{tier}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs crates/ui/ui/strings/mods.slint
-msgid "Undo"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs crates/trainer/src/screens/forge/picker.rs crates/ui/ui/strings/forge.slint
-msgid "Unique modifiers"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Weaver's Touch"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Weaver's Will"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "Weaver's Will on a legendary. 0 takes it off."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "{name}: {problem}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs crates/trainer/src/screens/forge/picker.rs crates/trainer/src/screens/settings.rs
-msgid "{n} affix"
-msgid_plural "{n} affixes"
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "{n} draft"
-msgid_plural "{n} drafts"
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "{n} incompatible affix"
-msgid_plural "{n} incompatible affixes"
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "{n} prefix"
-msgid_plural "{n} prefixes"
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "{n} suffix"
-msgid_plural "{n} suffixes"
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "{n} unique modifier"
-msgid_plural "{n} unique modifiers"
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/editor/tr.rs
-msgid "{problem} Nothing was applied."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "A set item holds no affixes. Remove them first."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "Applying to game… Waiting for independent readback."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "Edit readback confirmed: {names}."
-msgid_plural "{n} drafts applied. Edit readback confirmed for each: {names}."
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "Enter integer roll positions from 0 to 255 for implicits whose values roll."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "Enter integer roll positions from 0 to 255 for mapped unique modifiers."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "Implicit rolls changed in the game after you drafted them. Discard those drafts and edit them again. Nothing was applied."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "Last applied edit restored"
-msgid_plural "{n} applied edits restored"
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "Previous values restored; readback confirmed."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "Restored"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "That affix is no longer in that slot."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "That unique does not fit this item."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "The forge item is no longer available."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "The game confirmed the edit, but the item could not be shown afterwards. It shows again the next time the game reports it. Remaining drafts and Undo were cleared."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "The game did not keep this edit, and the item could not be shown afterwards. It shows again the next time the game reports it. Drafts and Undo were cleared; details are in the fault log."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "The game did not keep this edit; the item shows what it holds now. Drafts and Undo were cleared."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "The session is not ready to write."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "This affix supports at most tier {tier}."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "This change is one-way: the game would not give the old rarity back, so Undo apply cannot reverse it."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "This draft includes an edit that is not available in this build. Nothing was applied."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "This edit is not available in this build. Nothing was applied."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "This item's base cannot change."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "Undo is no longer valid for the observed item or current settings."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "Unique modifier rolls changed in the game after you drafted them. Discard those drafts and edit them again. Nothing was applied."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "{completed} of {total} drafts applied and confirmed. {message}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "{completed} of {total} drafts applied and confirmed; {step} was not applied. {message}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "{completed} of {total} edits restored. {message}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "{name} changed in the game after you drafted it. Discard that draft and edit it again. Nothing was applied."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/editor/writes.rs
-msgid "{name} does not apply to this item."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/feature.rs
-msgid "something went wrong unexpectedly. Details are in the fault log."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/feature.rs
-msgid "{error} Details are in the fault log."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "An item edit is already pending."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "Implicit (the game's text is unavailable)"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "Only unique rolls have a tooltip preview."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "Reading unique descriptions…"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "The confirmed Undo is no longer available. Check the item and override setting."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "The item changed before its preview could be read."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "The item changed before its values could be read."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "The item changed. Discard the stale draft and edit it again."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "The trainer cannot accept another command."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "The trainer cannot accept another preview request."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "The trainer cannot accept another value request."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "The trainer cannot accept the edit. Nothing was submitted."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "The worker ended without a terminal write outcome."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "The worker stopped without a completed write record."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "This connection offers no supported item edits."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "This edit is unavailable in this build."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "This preview draft is unsupported."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "This roll is unsupported."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "Updating preview…"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/game.rs
-msgid "{value} {stat}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Corrupted prefix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Corrupted suffix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Descriptions unavailable."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs crates/trainer/src/screens/forge/picker.rs
-msgid "Experimental"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Experimental prefix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Experimental suffix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs crates/trainer/src/screens/forge/picker.rs
-msgid "Idol enchantment"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Idol enchantment prefix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Idol enchantment suffix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs crates/trainer/src/screens/forge/picker.rs
-msgid "Personal"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Personal prefix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Personal suffix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Prefix (special affix {value})"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs crates/trainer/src/screens/forge/picker.rs
-msgid "Reforged set"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Reforged set prefix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Reforged set suffix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Roll position"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Roll {roll}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Special affix {value}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Suffix (special affix {value})"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "T1 only"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "T1–T{max}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs crates/trainer/src/screens/forge/picker.rs
-msgid "Unique modifier"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Unique modifier prefix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Unique modifier suffix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Unknown #{id}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Unknown seal {value}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Unknown tier {value}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Unknown type {value}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs crates/trainer/src/screens/forge/picker.rs
-msgid "Weaver idol"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Weaver idol prefix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs
-msgid "Weaver idol suffix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/item.rs crates/trainer/src/screens/forge/picker.rs
-msgctxt "affix category"
-msgid "Corrupted"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Acolyte"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Ailment"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "All sources"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Any class"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Any kind"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Any level"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Any slot"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Any tag"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Armor"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Attributes"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Block"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Bow"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Buff"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Channelling"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Class: {classes}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Cold"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Critical strike"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Curse"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Damage"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Damage over time"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Dodge"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Elemental"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Endurance"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Fire"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Fits this item"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Fits this item (level {level})"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "From {name}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "From {unique} ({slot})"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Full health"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Game affixes"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Health"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "High health"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Item type {id}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Lightning"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Low health"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Mage"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Mana"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Melee"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Minion"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Necrotic"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "No affix fits this item."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "No affix matches these filters."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "No affix matches this search with these filters."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "No affix matches this search."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "No class requirement"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "On hit"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Physical"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Poison"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Potion"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs crates/ui/ui/strings/forge.slint
-msgid "Prefix or suffix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Prefixes"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Primalist"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Requires level {level}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Resistance"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Rogue"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Rolls on {slots}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Rolls on {slots} and {more} more"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Sentinel"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Show {n} unique modifier"
-msgid_plural "Show {n} unique modifiers"
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Skill"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Slot: {name}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Speed"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Spell"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Standard"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Stun"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Suffixes"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Tags: {tags}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "These affixes roll on another slot."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Throwing"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Totem"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Transform"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "T{tier} {range}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Unique modifiers need \"I know what I'm doing\" in Settings."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Up to level {level}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Void"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "Ward"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/picker.rs
-msgid "{slot} +{more}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/project.rs
-msgid "Catalog unavailable."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/project.rs
-msgid "Unique #{id}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/project.rs
-msgid "Unnamed item"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/project.rs crates/trainer/src/screens/forge/rows.rs crates/ui/ui/strings/forge.slint
-msgid "Value"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Actual values are unavailable for this value."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Actual values unavailable ({reason}). Editing the roll position."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Actual values unavailable: {reason}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Added at tier {tier}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Added at tier {tier}, {seal}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Added when you apply"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Change {name}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Enter a value from {minimum} to {maximum}."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Fixed value"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Fixed: the roll does not change this value."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Identity"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "In game {value}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Its value can be set once Apply has added it."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Loading actual values…"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "No other base of this item type is known. Refresh game data in Settings."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "No other unique or set item of this item type is known. Refresh game data in Settings."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Range {minimum} – {maximum}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Refresh game data in Settings to edit this value."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Removed"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Removed when you apply"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Replace with another affix"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Roll unavailable"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Sets only the {flag} flag. The game's own {name} effects are not applied."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs crates/ui/ui/strings/forge.slint
-msgid "The game changed this affix after you drafted it."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "The game changed this value after you drafted it."
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Tier {from} → {to}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Value {from} → {to}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Value {n}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "Value → {to}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "was {value}"
-msgstr ""
-
-#: crates/trainer/src/screens/forge/rows.rs
-msgid "{value} is outside the game's range of {minimum}–{maximum}."
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "Apply"
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "Apply {n} change"
-msgid_plural "Apply {n} changes"
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "Confirmed."
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "Connect an offline character first."
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "Couldn't read from the game: it answered with other fields."
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "Couldn't read from the game: {details}"
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "Couldn't turn off: {reason}"
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "Couldn't turn on: {reason}"
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "In game: {value}"
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "Not changed: {details}"
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs crates/ui/ui/strings/trainer.slint
-msgid "Not read yet"
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "On in the game."
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "One-hit kills are on."
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "The game answered with other fields."
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "The game kept {kept}."
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "Turning off…"
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "Turning on…"
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "Turns on when {name} enters play."
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "Type a number from {minimum} to {maximum}, or ∞."
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "Type a number from {minimum} to {maximum}."
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "Up and Down change it by {step}"
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "Waiting to turn on…"
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "{choice} selected in the game."
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgid "{details} Read again to see what the game holds."
-msgstr ""
-
-#: crates/trainer/src/screens/pages.rs
-msgctxt "a field and the value the game kept"
-msgid "{field} {value}"
-msgstr ""
-
-#: crates/trainer/src/screens/profiles.rs
-msgid "Changes apply at once and are kept in {name}'s profile."
-msgstr ""
-
-#: crates/trainer/src/screens/profiles.rs
-msgid "Changes apply at once and last this session. Keep them as {name}'s profile to have them every time."
-msgstr ""
-
-#: crates/trainer/src/screens/profiles.rs
-msgid "No profiles yet. Connect with an offline character in play to keep one."
-msgstr ""
-
-#: crates/trainer/src/screens/profiles.rs
-msgid "What you turn on here turns on when {name} enters play."
-msgstr ""
-
-#: crates/trainer/src/screens/profiles.rs
-msgid "{name} ({class}, {cycle})"
-msgstr ""
-
-#: crates/trainer/src/screens/session.rs
-msgid "No offline character is connected."
-msgstr ""
-
-#: crates/trainer/src/screens/session.rs
-msgid "Not available in this version yet."
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "Affixes and uniques read from the game's files, read again when the game updates."
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "Allows edits the game wouldn't make: incompatible affixes and bases, Weaver, enchantment and corrupted affixes in any fitting slot, other idol sizes, Weaver's Will on any unique and Weaver's Touch on any idol."
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "Automatic"
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "Checked: {time}"
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "Connect automatically"
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "Connect when an offline character is loaded."
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "Edit offline characters and their items in the running game. A helper loads into Last Epoch and leaves when you disconnect or the character leaves play."
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "Game definitions"
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "I know what I'm doing"
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "Last Epoch wasn't found"
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "Last Epoch wasn't found."
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "Manual"
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs crates/ui/ui/strings/shell.slint
-msgid "Off"
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs crates/ui/ui/strings/shell.slint
-msgid "On"
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs crates/ui/ui/strings/trainer.slint
-msgid "Read again"
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "Read the game's files again"
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "The game files could not be read: {reason}"
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs crates/ui/src/shell/navigation.rs
-msgid "Trainer"
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "Trainer connection"
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "Updated: {time}"
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "Use expendable items. The game may drop or rearrange what it doesn't support."
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "not recorded"
-msgstr ""
-
-#: crates/trainer/src/screens/settings.rs
-msgid "the trainer"
-msgstr ""
-
-#: crates/trainer/src/screens/trainer_pages.rs
-msgid "{name}: one-hit kills"
 msgstr ""
 
 #: crates/ui/src/pages/logs.rs

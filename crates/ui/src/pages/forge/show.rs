@@ -7,12 +7,12 @@ use crate::{
     AffixRowView, AppliedEntryView, CellKind, CellRef, DraftEntryView, FieldView, ForgeState, ItemRarity, MenuOptionView, MessageTone, ModifierRowView, PickerView,
     TemplateRowView, TierOption, ValueCell,
 };
-use eg_trainer::screens::forge::editor::{AppliedEntry, Cell, ForgeEditor, MessageKind, Picker, tr};
-use eg_trainer::screens::forge::feature::State;
-use eg_trainer::screens::forge::game::{self, Lookup};
-use eg_trainer::screens::forge::item::{ForgeItem, Seal};
-use eg_trainer::screens::forge::picker::{self, KindFilter, SourceChoice};
-use eg_trainer::screens::forge::rows::{AffixRow, FieldKind, ValueEditor};
+use eg_trainer_screens::forge::editor::{AppliedEntry, Cell, ForgeEditor, MessageKind, Picker, tr};
+use eg_trainer_screens::forge::feature::State;
+use eg_trainer_screens::forge::game::{self, Lookup};
+use eg_trainer_screens::forge::item::{ForgeItem, Seal};
+use eg_trainer_screens::forge::picker::{self, KindFilter, SourceChoice};
+use eg_trainer_screens::forge::rows::{AffixRow, FieldKind, ValueEditor};
 use slint::{ModelRc, SharedString};
 use spiderland::{CheckedSlice, Slice, Tracked, Version};
 use spiderland_slint::{InnerRows, Rows};

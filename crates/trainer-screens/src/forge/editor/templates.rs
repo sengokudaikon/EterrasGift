@@ -1,7 +1,7 @@
 //! Item templates: saved from the item, and drafted onto it as ordinary drafts.
 
 use super::*;
-use crate::item::template;
+use eg_trainer::item::template;
 
 impl ForgeEditor {
     /// A template's caption, each its own text: what it holds, e.g. ["Whole item", "4 affixes", "Health, Movement Speed, …"].

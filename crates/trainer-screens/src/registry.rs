@@ -1,7 +1,7 @@
 //! Trainer page presentation of the shared feature registry. Native availability comes
 //! from the connected backend; `presented` means that a row view exists.
-use crate::features::{DESCRIPTORS, FeatureDescriptor, FeatureKey, HookId, Infinity};
-pub use crate::features::{FeatureField, FeatureKind, FeatureValue, PAGES, TrainerArea as Area, TrainerPage};
+use eg_trainer::features::{DESCRIPTORS, FeatureDescriptor, FeatureKey, HookId, Infinity};
+pub use eg_trainer::features::{FeatureField, FeatureKind, FeatureValue, PAGES, TrainerArea as Area, TrainerPage};
 
 /// A feature as the pages list it: its registry descriptor, and whether a row view exists for it.
 #[derive(Clone, Copy, Debug, PartialEq)]

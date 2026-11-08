@@ -3,8 +3,8 @@
 
 use super::game::Catalog;
 use super::item::{self, AffixDefinition, AffixKind, Category, ForgeItem, ValueTable};
-use crate::backend::{BackendSnapshot, CatalogState, ForgeState, Phase};
-use crate::definitions::catalog::{Availability, GameCatalog};
+use eg_trainer::backend::{BackendSnapshot, CatalogState, ForgeState, Phase};
+use eg_trainer::definitions::catalog::{Availability, GameCatalog};
 use phrases::phrases;
 use std::sync::Arc;
 
@@ -26,7 +26,7 @@ pub(super) fn project_catalog(data: &GameCatalog) -> Catalog {
     // Presentation-only data. Native write planning always uses the canonical
     // GameCatalog in the worker, never this projection or guessed ranges/text.
     let mut catalog = Catalog::default();
-    let pair = |range: crate::definitions::catalog::ValueRange| (range.minimum, range.maximum);
+    let pair = |range: eg_trainer::definitions::catalog::ValueRange| (range.minimum, range.maximum);
     catalog.limits = Some(super::game::ItemLimits {
         forging_potential: pair(data.limits.forging_potential),
         legendary_potential: pair(data.limits.legendary_potential),
@@ -178,7 +178,7 @@ pub(super) fn project_catalog(data: &GameCatalog) -> Catalog {
     }
     catalog
 }
-pub(super) fn value_table(table: &crate::item::values::ValueTable) -> ValueTable {
+pub(super) fn value_table(table: &eg_trainer::item::values::ValueTable) -> ValueTable {
     ValueTable {
         label: Value.into(),
         samples: table

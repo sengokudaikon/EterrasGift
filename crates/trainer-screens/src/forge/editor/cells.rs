@@ -33,7 +33,7 @@ impl ForgeEditor {
     /// The cell's value can change now: its mapping is known and nothing locks drafts.
     pub fn can_edit_value(&self, cell: Cell) -> bool {
         let supports = |target| {
-            self.game.supports(&ItemEdit::Roll(crate::item::edit::RollEdit {
+            self.game.supports(&ItemEdit::Roll(eg_trainer::item::edit::RollEdit {
                 target,
                 changes: vec![],
                 allow_incompatible: self.unrestricted(),

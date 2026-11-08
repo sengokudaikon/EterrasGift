@@ -17,7 +17,7 @@ use eg_companion::settings::FOLDER_CHECKS;
 use eg_core::game_log::{GameLogState, GameReadiness};
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::SettingsService;
-use eg_trainer::screens::settings as trainer_settings;
+use eg_trainer_screens::settings as trainer_settings;
 use eg_ui::decorations::freeze_clock;
 use eg_ui::pages::settings::{LiveStatus, ModuleChoice, ModuleLink, Settings};
 use eg_ui::shell::Page;
@@ -320,7 +320,7 @@ fn main() {
         live_watch: std::cell::Cell::new(false),
     };
     // Applied entries carry the local time; captures hold one.
-    eg_trainer::screens::forge::editor::freeze_clock(Some("23:54"));
+    eg_trainer_screens::forge::editor::freeze_clock(Some("23:54"));
     let asked = |name: &str| std::env::args().any(|arg| arg == name);
     let all = !["--logs", "--trainer-backend", "--picker", "--forge"].iter().any(|name| asked(name));
     if asked("--logs") {

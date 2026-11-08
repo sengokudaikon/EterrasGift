@@ -79,7 +79,7 @@ impl ForgeEditor {
     pub fn can_change_affix_list(&self) -> bool {
         self.can_mutate()
             && self.item.is_some()
-            && self.game.supports(&ItemEdit::RemoveAffix(crate::item::edit::RemoveAffixEdit {
+            && self.game.supports(&ItemEdit::RemoveAffix(eg_trainer::item::edit::RemoveAffixEdit {
                 slot: 0,
                 id: 0,
                 restore_potential: None,
@@ -162,7 +162,7 @@ impl ForgeEditor {
 
     pub fn can_change_affix(&self) -> bool {
         self.can_mutate()
-            && self.game.supports(&ItemEdit::Affix(crate::item::edit::AffixEdit {
+            && self.game.supports(&ItemEdit::Affix(eg_trainer::item::edit::AffixEdit {
                 slot: 0,
                 id: 0,
                 tier: 1,

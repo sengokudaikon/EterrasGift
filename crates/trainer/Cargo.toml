@@ -13,8 +13,6 @@ unity-files.workspace = true
 win-platform = { workspace = true, features = ["time"] }
 eg-trainer-wire = { path = "../trainer-wire" }
 eg-core.workspace = true
-spiderland.workspace = true
-strum.workspace = true
 phrases.workspace = true
 eg-game-access = { path = "../game-access" }
 eg-game-files = { path = "../game-files" }
@@ -28,6 +26,9 @@ serde_json.workspace = true
 testing = []
 
 [dev-dependencies]
+# The backend's tests drive the field editors' session port (eg_trainer_screens::backend_session) against the worker. A
+# dev-dependency back on this crate is allowed: integration tests link the same eg-trainer the screens do.
+eg-trainer-screens.workspace = true
 tempfile.workspace = true
 
 [lints]

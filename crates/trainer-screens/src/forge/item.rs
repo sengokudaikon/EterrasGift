@@ -31,8 +31,8 @@ pub fn crafted_name(rarity: u8) -> &'static str {
     }
 }
 
-pub use crate::item::edit::{AffixKind, ItemEdit, RollTarget, SealState as Seal};
-use crate::{
+pub use eg_trainer::item::edit::{AffixKind, ItemEdit, RollTarget, SealState as Seal};
+use eg_trainer::{
     definitions::catalog::GameCatalog,
     item::edit::{self, ExpectedObservation},
 };
@@ -140,7 +140,7 @@ pub struct AffixDefinition {
     pub title: Option<String>,
 }
 
-pub use crate::definitions::catalog::AffixEffect;
+pub use eg_trainer::definitions::catalog::AffixEffect;
 
 /// What an affix's lines say, each once.
 pub fn effects_said(effects: &[AffixEffect]) -> String {
@@ -243,7 +243,7 @@ pub struct AffixState {
 
 /// One line of the unique tooltip or one implicit, as the game formats it: its text, its range caption and the rolls it
 /// reads.
-pub use crate::backend::ModifierSnapshot;
+pub use eg_trainer::backend::ModifierSnapshot;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct UniqueState {
@@ -251,7 +251,7 @@ pub struct UniqueState {
     pub rolls: Vec<u8>,
     pub modifiers: Vec<ModifierSnapshot>,
     /// The game could not format its own unique data.
-    pub formatting: crate::screens::forge::game::Lookup<()>,
+    pub formatting: crate::forge::game::Lookup<()>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -265,7 +265,7 @@ pub struct ItemStatus {
     pub ruined: bool,
 }
 
-pub use crate::item::edit::StatusField;
+pub use eg_trainer::item::edit::StatusField;
 
 impl ItemStatus {
     pub fn read(&self, field: StatusField) -> u8 {
@@ -384,7 +384,7 @@ pub trait EditPresentation {
         self.prepare_view(before)
             .ok()
             .and_then(|p| {
-                let reverse = crate::item::undo::ForgeUndo::reverse_intent(&p, p.projected()).ok()?;
+                let reverse = eg_trainer::item::undo::ForgeUndo::reverse_intent(&p, p.projected()).ok()?;
                 let after = before.with_snapshot(p.projected().clone()).ok()?;
                 Some(reverse.is_valid(&after))
             })
@@ -401,7 +401,7 @@ impl EditPresentation for ItemEdit {
     fn prepare_view_with_override(&self, before: &ForgeItem, override_enabled: bool) -> Result<edit::PreparedEdit, edit::EditError> {
         let context = before.context.as_ref().ok_or(edit::EditError::InvalidObservation)?;
         let bindings = |lines: Option<&[ModifierSnapshot]>| match lines {
-            Some(lines) => crate::definitions::catalog::Availability::Available(
+            Some(lines) => eg_trainer::definitions::catalog::Availability::Available(
                 lines
                     .iter()
                     .map(|m| edit::RollBinding {
@@ -410,7 +410,7 @@ impl EditPresentation for ItemEdit {
                     })
                     .collect(),
             ),
-            None => crate::definitions::catalog::Availability::Unavailable {
+            None => eg_trainer::definitions::catalog::Availability::Unavailable {
                 reason: DescriptionsUnavailable.into(),
             },
         };
@@ -450,7 +450,7 @@ impl ForgeItem {
         item.copy_snapshot(snapshot);
         item
     }
-    pub fn with_snapshot(&self, snapshot: crate::backend::ForgeSnapshot) -> Result<Self, edit::EditError> {
+    pub fn with_snapshot(&self, snapshot: eg_trainer::backend::ForgeSnapshot) -> Result<Self, edit::EditError> {
         let context = self.context.as_ref().ok_or(edit::EditError::InvalidObservation)?;
         let mut after = self.clone();
         after.copy_snapshot(&snapshot);
@@ -467,7 +467,7 @@ impl ForgeItem {
     }
     /// Takes every value the game reported. One the editor cannot represent is noted on its affix, never a reason to
     /// hide the item; the worker's planner refuses edits that would write it.
-    fn copy_snapshot(&mut self, snapshot: &crate::backend::ForgeSnapshot) {
+    fn copy_snapshot(&mut self, snapshot: &eg_trainer::backend::ForgeSnapshot) {
         self.item_type = u16::from(snapshot.item_type);
         self.idol = (25..=33).contains(&snapshot.item_type);
         self.sub_type = snapshot.sub_type;
@@ -525,7 +525,7 @@ impl ForgeItem {
                     id: i.id,
                     rolls: vec![],
                     modifiers: vec![],
-                    formatting: crate::screens::forge::game::Lookup::Ready(()),
+                    formatting: crate::forge::game::Lookup::Ready(()),
                 });
             view.rolls = i.rolls.clone();
             view
@@ -633,15 +633,15 @@ pub fn broken_by_base(item: &ForgeItem, item_type: u16, sub_type: u16, class_req
     let Some(context) = &item.context else { return Vec::new() };
     let catalog = &context.catalog;
     let now = context.expected.snapshot();
-    let rebased = crate::backend::ForgeSnapshot {
+    let rebased = eg_trainer::backend::ForgeSnapshot {
         item_type: u8::try_from(item_type).unwrap_or(now.item_type),
         sub_type,
         class_requirement: class_requirement.unwrap_or(now.class_requirement),
         ..now.clone()
     };
     // Each affix is judged alone, without the other affixes' definitions: by the item's own class requirement only.
-    let allowed = |item: &crate::backend::ForgeSnapshot, affix: &crate::backend::AffixSnapshot, definition| {
-        let alone = crate::backend::ForgeSnapshot {
+    let allowed = |item: &eg_trainer::backend::ForgeSnapshot, affix: &eg_trainer::backend::AffixSnapshot, definition| {
+        let alone = eg_trainer::backend::ForgeSnapshot {
             affixes: vec![affix.clone()],
             ..item.clone()
         };
@@ -873,10 +873,10 @@ mod tests {
             id: 7,
             rolls: vec![12],
             modifiers: vec![],
-            formatting: crate::screens::forge::game::Lookup::Ready(()),
+            formatting: crate::forge::game::Lookup::Ready(()),
         });
         let mut error = unique.clone();
-        error.unique.as_mut().unwrap().formatting = crate::screens::forge::game::Lookup::Unavailable("unavailable".into());
+        error.unique.as_mut().unwrap().formatting = crate::forge::game::Lookup::Unavailable("unavailable".into());
         assert!(unique.same_state(&error));
         error.unique.as_mut().unwrap().id = 8;
         assert!(!unique.same_state(&error));

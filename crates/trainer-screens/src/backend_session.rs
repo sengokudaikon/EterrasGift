@@ -3,9 +3,9 @@
 
 use super::profiles::Profile;
 use super::session::{FieldError, FieldRequest, FieldWrite, GameField, HookState, NotAvailable, Settling, TrainerSession};
-use crate::backend::{BackendHandle, BackendSnapshot, Command, Pending, Phase};
-use crate::features::profiles::ProfileKey;
-use crate::features::{FeatureIntents, HookId};
+use eg_trainer::backend::{BackendHandle, BackendSnapshot, Command, Pending, Phase};
+use eg_trainer::features::profiles::ProfileKey;
+use eg_trainer::features::{FeatureIntents, HookId};
 use phrases::phrases;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -66,8 +66,8 @@ impl BackendSession {
             Ok(receipt) => receipt,
             Err(error) => {
                 return refused(match error {
-                    crate::backend::SubmitError::Full => WorkerBusy.get(),
-                    crate::backend::SubmitError::Stopped => WorkerStopped.get(),
+                    eg_trainer::backend::SubmitError::Full => WorkerBusy.get(),
+                    eg_trainer::backend::SubmitError::Stopped => WorkerStopped.get(),
                 });
             }
         };
@@ -80,7 +80,7 @@ impl BackendSession {
             let result = receipt.wait().await;
             result.map_err(|error| FieldError {
                 details: error.message,
-                nothing_sent: error.delivery != Some(crate::backend::Delivery::MayHaveRun),
+                nothing_sent: error.delivery != Some(eg_trainer::backend::Delivery::MayHaveRun),
             })?;
             backend
                 .peek(|snapshot| {
@@ -153,7 +153,7 @@ impl TrainerSession for BackendSession {
     fn unavailable(&self, id: &str) -> Option<&'static str> {
         let served = self
             .with(|snapshot| {
-                use crate::features::{FeatureKey, NativeSupport};
+                use eg_trainer::features::{FeatureKey, NativeSupport};
                 match FeatureKey::parse(id).map(|key| key.descriptor().native_support()) {
                     Some(NativeSupport::GameplayOverride(hook)) => snapshot.capabilities.gameplay_hooks[hook as usize],
                     Some(NativeSupport::FieldEditor(set)) => snapshot.capabilities.fields[set as usize],
@@ -232,9 +232,9 @@ impl TrainerSession for BackendSession {
     fn set_hook_values(&self, id: &str, values: &[f64]) {
         if let Some(id) = HookId::parse(id) {
             let command = Command::SetHookValues { id, values: values.to_vec() };
-            let descriptor = crate::features::FeatureKey::Hook(id).descriptor();
-            let choice = descriptor.kind == crate::features::FeatureKind::Choice;
-            if choice || matches!(descriptor.native_support(), crate::features::NativeSupport::GameplayOverride(_)) {
+            let descriptor = eg_trainer::features::FeatureKey::Hook(id).descriptor();
+            let choice = descriptor.kind == eg_trainer::features::FeatureKind::Choice;
+            if choice || matches!(descriptor.native_support(), eg_trainer::features::NativeSupport::GameplayOverride(_)) {
                 let on = if choice { values != [0.0] } else { self.is_hook_wanted(id.as_str()) };
                 self.switch(id, on, command);
             } else {

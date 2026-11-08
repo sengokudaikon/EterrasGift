@@ -10,13 +10,13 @@ use eg_trainer::item::template::TemplateStore;
 use eg_trainer::item::values::{
     BoundPreview, BoundTooltip, DisplayScalarParser, MappingBuilder, MappingRequest, MappingStart, MappingTarget, RawMappingPage, RawValueSample, UniqueRollPreview, ValueTable,
 };
-use eg_trainer::screens::forge::{
+use eg_trainer::write::{ForgePlan, WriteControl, WriteOutcome, WriteStatus};
+use eg_trainer_screens::forge::{
     editor::{Cell, ForgeEditor},
     feature::Intent,
     item::Seal,
     rows::Loading,
 };
-use eg_trainer::write::{ForgePlan, WriteControl, WriteOutcome, WriteStatus};
 use eg_ui::pages::forge::ForgeHandle;
 use eg_ui::{ForgeState, Nav, PickerFilter, Tip};
 use slint::platform::{PointerEventButton, WindowEvent};
@@ -711,7 +711,7 @@ impl Forge {
                 faults: None,
                 logs: None,
                 templates,
-                settings: Settings::new(SettingsService::inline(store), vec![eg_trainer::screens::settings::descriptor(true)], None, None),
+                settings: Settings::new(SettingsService::inline(store), vec![eg_trainer_screens::settings::descriptor(true)], None, None),
                 start: Page::Forge,
             },
         );

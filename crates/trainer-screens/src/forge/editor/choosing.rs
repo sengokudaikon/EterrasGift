@@ -50,7 +50,7 @@ impl ForgeEditor {
         let Some(item) = self.item.as_ref() else {
             return (Vec::new(), None);
         };
-        let shared = u8::try_from(item.item_type).map_or(&[][..], |item_type| crate::item::edit::shared_slots(item_type, item.sub_type));
+        let shared = u8::try_from(item.item_type).map_or(&[][..], |item_type| eg_trainer::item::edit::shared_slots(item_type, item.sub_type));
         let own = std::iter::once(item.item_type).chain(shared.iter().filter_map(|slot| u16::try_from(*slot).ok())).collect();
         (own, item.status.map(|status| status.level_requirement))
     }
@@ -364,7 +364,7 @@ impl ForgeEditor {
             None
         };
         let item = match (held, item.affixes.iter().find(|affix| affix.seal == Seal::Corrupted)) {
-            (Some(row), Some(affix)) => ItemEdit::Affix(crate::item::edit::AffixEdit {
+            (Some(row), Some(affix)) => ItemEdit::Affix(eg_trainer::item::edit::AffixEdit {
                 slot: affix.slot as i32,
                 id: i32::from(affix.id),
                 tier: i32::from(affix.tier),
@@ -408,7 +408,7 @@ impl ForgeEditor {
                 NO_FREE_SLOT[definition.kind as usize].into()
             });
         }
-        let edit = ItemEdit::AddAffix(crate::item::edit::AddAffixEdit {
+        let edit = ItemEdit::AddAffix(eg_trainer::item::edit::AddAffixEdit {
             id: (definition.id) as i32,
             tier: i32::from(tier),
             roll: i32::from(roll),

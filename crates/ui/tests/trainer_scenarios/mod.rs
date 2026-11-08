@@ -4,9 +4,9 @@ use super::*;
 use eg_ui::{RowAction, RowActionKind};
 
 pub(super) fn trainer_captures(session: &Session) {
-    use eg_trainer::screens::profiles::Profile;
-    use eg_trainer::screens::registry::{Area, FEATURES};
-    use eg_trainer::screens::session::{FieldRequest, FieldWrite, GameField, HookState, TrainerSession, not_connected};
+    use eg_trainer_screens::profiles::Profile;
+    use eg_trainer_screens::registry::{Area, FEATURES};
+    use eg_trainer_screens::session::{FieldRequest, FieldWrite, GameField, HookState, TrainerSession, not_connected};
     use eg_ui::{Connection, TrainerAccess, TrainerState};
     use std::cell::{Cell, RefCell};
     use std::collections::{BTreeMap, BTreeSet};

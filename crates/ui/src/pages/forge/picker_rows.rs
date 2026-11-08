@@ -1,8 +1,8 @@
 //! The affix picker's rows, built as the list asks for each.
 
 use crate::{PickerRowView, PillTone, PillView};
-use eg_trainer::screens::forge::game::Catalog;
-use eg_trainer::screens::forge::picker::{self, Tone};
+use eg_trainer_screens::forge::game::Catalog;
+use eg_trainer_screens::forge::picker::{self, Tone};
 use slint::{Model, ModelNotify, ModelRc, ModelTracker, VecModel};
 use std::any::Any;
 use std::cell::RefCell;

@@ -24,7 +24,7 @@ impl ForgeEditor {
                 }
             }
         }
-        (!changes.is_empty()).then_some(ItemEdit::Roll(crate::item::edit::RollEdit {
+        (!changes.is_empty()).then_some(ItemEdit::Roll(eg_trainer::item::edit::RollEdit {
             target: RollTarget::Unique,
             changes: item::roll_changes(changes),
             allow_incompatible: self.unrestricted(),
@@ -61,7 +61,7 @@ impl ForgeEditor {
                 phrases! { DraftPreview: "Draft preview" }
                 self.preview_status = DraftPreview.into();
             }
-            Lookup::Loading => self.say_preview(crate::screens::forge::game::PreviewLoading.get(), false, false),
+            Lookup::Loading => self.say_preview(crate::forge::game::PreviewLoading.get(), false, false),
             Lookup::Unavailable(details) => {
                 phrases! { PreviewUnavailable: "Preview unavailable: {details}" }
                 self.say_preview(&PreviewUnavailable.with(&[("details", &details)]), true, false)
@@ -97,7 +97,7 @@ impl ForgeEditor {
             return;
         }
         let changes = match self.unique_edit() {
-            Some(ItemEdit::Roll(crate::item::edit::RollEdit { changes, .. })) => changes,
+            Some(ItemEdit::Roll(eg_trainer::item::edit::RollEdit { changes, .. })) => changes,
             _ => Vec::new(),
         };
         let unrestricted = self.unrestricted();
@@ -131,7 +131,7 @@ impl ForgeEditor {
             let request = RollRequest {
                 target: RollTarget::Affix,
                 index: slot,
-                draft: (id != row.state.id || tier != row.state.tier || seal != row.state.seal).then_some(ItemEdit::Affix(crate::item::edit::AffixEdit {
+                draft: (id != row.state.id || tier != row.state.tier || seal != row.state.seal).then_some(ItemEdit::Affix(eg_trainer::item::edit::AffixEdit {
                     slot: (slot) as i32,
                     id: (id) as i32,
                     tier: (tier) as i32,
@@ -154,7 +154,7 @@ impl ForgeEditor {
                     target: RollTarget::Unique,
                     index,
                     draft: (!dependencies.is_empty()).then(|| {
-                        ItemEdit::Roll(crate::item::edit::RollEdit {
+                        ItemEdit::Roll(eg_trainer::item::edit::RollEdit {
                             target: RollTarget::Unique,
                             changes: item::roll_changes(dependencies.iter().copied()),
                             allow_incompatible: unrestricted,

@@ -3,8 +3,8 @@
 //! worker's snapshots and asks for commands; nothing here waits on the game.
 
 use super::backend_session::sentence;
-use crate::backend::{Activity, BackendSnapshot, Command, ErrorKind, HelperResidency, HelperRestartRequired, Phase, ProfileLock};
 use eg_core::{bloom::BloomPhase, game_log::GameReadiness};
+use eg_trainer::backend::{Activity, BackendSnapshot, Command, ErrorKind, HelperResidency, HelperRestartRequired, Phase, ProfileLock};
 use phrases::phrases;
 use spiderland::{Effects, Feature, Tracked};
 use std::sync::Arc;

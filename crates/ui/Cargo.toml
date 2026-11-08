@@ -16,6 +16,7 @@ spiderland.workspace = true
 strum.workspace = true
 spiderland-slint.workspace = true
 eg-trainer = { path = "../trainer" }
+eg-trainer-screens.workspace = true
 rfd.workspace = true
 jiff.workspace = true
 serde_json.workspace = true

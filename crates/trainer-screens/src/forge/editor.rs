@@ -8,9 +8,9 @@ use super::item::EditPresentation;
 use super::item::{self, AffixDefinition, AffixKind, Category, Compatibility, ForgeItem, ItemEdit, Moves, RollRequest, RollTarget, Seal, StatusField};
 use super::picker::{self, Chip, Filters, Index, KindFilter, LevelChoice, PICKER_CATEGORIES, PICKER_CLASSES, Query, SourceChoice};
 use super::rows::{AffixRow, FieldDraft, FieldKind, FieldOption, RollRow, ValueEditor, base_key, base_of};
-use crate::backend::BackendSnapshot;
-use crate::item::template::{ItemTemplate, TemplateAffix, TemplateItem, TemplateStatus};
 use eg_core::lists::{Conjunction, list};
+use eg_trainer::backend::BackendSnapshot;
+use eg_trainer::item::template::{ItemTemplate, TemplateAffix, TemplateItem, TemplateStatus};
 use phrases::{Phrase, phrases};
 use spiderland::Tracked;
 

@@ -8,7 +8,7 @@ use phrases::phrases;
 use std::pin::Pin;
 
 /// Where a hook of the live profile stands in the game: the worker's own report.
-pub use crate::backend::HookRun as HookState;
+pub use eg_trainer::backend::HookRun as HookState;
 
 /// A field as the game answered: unnamed for a fixed editor, named by the game for a listed one (what the character holds).
 #[derive(Clone, Debug, PartialEq)]

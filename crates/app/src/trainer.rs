@@ -4,12 +4,12 @@ use eg_core::fault::FaultLog;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::{ModuleSettings, SettingsService};
 use eg_trainer::connect::host::{DesktopConnector, GameProcesses, HelperPackage};
-use eg_trainer::screens::settings as trainer_settings;
 use eg_trainer::{
     backend::{self, BackendHandle, BackendOptions, Command, SubmitError, SystemClock},
     connect::sources::FileLogFactory,
     features::profiles::{ProfileBook, ProfileSaver},
 };
+use eg_trainer_screens::settings as trainer_settings;
 use eg_ui::pages::settings::ModuleChoice;
 use std::{
     cell::Cell,

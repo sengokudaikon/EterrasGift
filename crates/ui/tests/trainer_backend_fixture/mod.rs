@@ -524,7 +524,7 @@ pub(super) fn capture(session: &Session) {
             faults: Some(eg_core::fault::FaultLog::with_fallbacks(&folder.join("app"), Some(&folder.join("logs")), vec![])),
             logs: None,
             templates: None,
-            settings: Settings::new(SettingsService::inline(store), vec![eg_trainer::screens::settings::descriptor(true)], None, None),
+            settings: Settings::new(SettingsService::inline(store), vec![eg_trainer_screens::settings::descriptor(true)], None, None),
             start: Page::Forge,
         },
     );
@@ -1302,7 +1302,7 @@ pub(super) fn capture_waiting(session: &Session) {
             faults: None,
             logs: None,
             templates: None,
-            settings: Settings::new(SettingsService::inline(store), vec![eg_trainer::screens::settings::descriptor(true)], None, None),
+            settings: Settings::new(SettingsService::inline(store), vec![eg_trainer_screens::settings::descriptor(true)], None, None),
             start: Page::Forge,
         },
     );
@@ -1380,7 +1380,7 @@ pub(super) fn capture_logs(session: &Session) {
             trainer: true,
             planned: false,
             trainer_backend: Some(handle.clone()),
-            settings: Settings::new(SettingsService::inline(store), vec![eg_trainer::screens::settings::descriptor(true)], None, None),
+            settings: Settings::new(SettingsService::inline(store), vec![eg_trainer_screens::settings::descriptor(true)], None, None),
             faults: None,
             templates: None,
             logs: Some(LogFiles {
@@ -1504,7 +1504,7 @@ pub(super) fn capture_profiles(session: &Session) {
             faults: None,
             logs: None,
             templates: None,
-            settings: Settings::new(SettingsService::inline(store), vec![eg_trainer::screens::settings::descriptor(true)], None, None),
+            settings: Settings::new(SettingsService::inline(store), vec![eg_trainer_screens::settings::descriptor(true)], None, None),
             start: Page::Combat,
         },
     );

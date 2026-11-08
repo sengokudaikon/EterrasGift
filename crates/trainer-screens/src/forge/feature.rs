@@ -8,9 +8,9 @@ use super::item::Seal;
 use super::picker::KindFilter;
 use super::project::{project_catalog, project_item};
 use super::rows::FieldKind;
-use crate::backend::{BackendError, BackendSnapshot, ForgeSnapshot, ForgeState, Phase};
-use crate::definitions::catalog::GameCatalog;
-use crate::item::template::ItemTemplate;
+use eg_trainer::backend::{BackendError, BackendSnapshot, ForgeSnapshot, ForgeState, Phase};
+use eg_trainer::definitions::catalog::GameCatalog;
+use eg_trainer::item::template::ItemTemplate;
 use phrases::phrases;
 use spiderland::{Effects, Feature, Panicked, Pulse, Tracked};
 use std::sync::Arc;
@@ -580,8 +580,8 @@ impl Feature for Forge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::{CatalogState, GameFiles, ProfileLock};
-    use crate::session::Cleanup;
+    use eg_trainer::backend::{CatalogState, GameFiles, ProfileLock};
+    use eg_trainer::session::Cleanup;
     use spiderland::step;
     use std::collections::BTreeMap;
 

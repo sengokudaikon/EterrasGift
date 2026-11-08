@@ -2,10 +2,10 @@
 
 use super::show::cell_of;
 use crate::{CellAction, ForgeState, PickerFilter};
-use eg_trainer::screens::forge::editor::Cell;
-use eg_trainer::screens::forge::feature::{Forge, Intent, State};
-use eg_trainer::screens::forge::item::Seal;
-use eg_trainer::screens::forge::picker::KindFilter;
+use eg_trainer_screens::forge::editor::Cell;
+use eg_trainer_screens::forge::feature::{Forge, Intent, State};
+use eg_trainer_screens::forge::item::Seal;
+use eg_trainer_screens::forge::picker::KindFilter;
 use slint::Model;
 use spiderland::{Store, callbacks};
 

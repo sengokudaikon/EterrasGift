@@ -18,6 +18,7 @@ spiderland-slint.workspace = true
 task-runtime.workspace = true
 eg-ui.workspace = true
 eg-trainer.workspace = true
+eg-trainer-screens.workspace = true
 # The trainer helper DLL, embedded in the exe and built for its explicit target. A path, not `workspace = true`:
 # inheriting drops `artifact` and `target`. Only the DLL is taken, never the helper's library, so the IL2CPP and hook
 # code it links stays out of the app; no other app crate depends on them. The pinned `target` keeps the DLL's features

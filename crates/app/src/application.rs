@@ -11,7 +11,7 @@ use eg_companion::logs::LogFiles;
 use eg_core::fault::FaultLog;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::{SaveOutcome, SettingsService, Snapshot};
-use eg_trainer::screens::settings as trainer_settings;
+use eg_trainer_screens::settings as trainer_settings;
 use eg_ui::pages::settings::Settings;
 use eg_ui::shell::Page;
 use eg_ui::{App, MainWindow};
