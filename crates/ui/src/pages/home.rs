@@ -53,6 +53,7 @@ pub fn bind(
             },
         ),
     );
+    crate::trail::follow(&store, "home");
     // The window's callback keeps the store alive, for as long as the window lasts.
     callbacks!(state, store, {
         on_start: |mode| Intent::Start(mode_of(mode)),

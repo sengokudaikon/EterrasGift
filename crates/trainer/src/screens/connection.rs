@@ -91,6 +91,8 @@ pub fn unbound() -> ConnectionView {
 /// The connection as a feature: see the module's documentation.
 pub struct ConnectionFeature;
 
+/// Named for the fault trail (`eg_core::fault::TRAIL`).
+#[derive(strum::IntoStaticStr)]
 pub enum Intent {
     /// A new snapshot from the worker.
     Observed(Arc<BackendSnapshot>),

@@ -11,6 +11,7 @@ pub mod decorations;
 pub mod pages;
 pub mod shell;
 pub mod system;
+mod trail;
 
 /// The translations the build script bundled from `lang/`, as the Rust phrases read them.
 mod translations {

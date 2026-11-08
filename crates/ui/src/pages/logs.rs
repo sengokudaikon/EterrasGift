@@ -53,6 +53,7 @@ pub(crate) fn bind(window: &MainWindow, files: Option<LogFiles>, backend: Option
             },
         ),
     );
+    crate::trail::follow(&store, "logs");
     let state = window.global::<LogsState>();
     callbacks!(state, store, {
         on_refresh: || Intent::Refresh,

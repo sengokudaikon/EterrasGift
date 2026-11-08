@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 file-ops.workspace = true
 spiderland.workspace = true
+strum.workspace = true
 phrases.workspace = true
 task-runtime.workspace = true
 jiff.workspace = true

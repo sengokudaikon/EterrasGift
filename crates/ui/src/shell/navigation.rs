@@ -370,6 +370,8 @@ impl State {
     }
 }
 
+/// Named for the fault trail (`eg_core::fault::TRAIL`).
+#[derive(strum::IntoStaticStr)]
 pub enum Intent {
     Click(usize),
     Key(usize, NavKey),

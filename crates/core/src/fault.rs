@@ -3,9 +3,11 @@
 use crate::paths;
 use jiff::Timestamp;
 use serde_json::{Map, Value, json};
+use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError, TryLockError};
 
 /// What a module knows about a fault, for its report: an error code and its details, what became of a change it sent,
 /// and the state it expected, the change and what it read back. Each object is written as it is.
@@ -75,6 +77,8 @@ impl FaultLog {
         optional("expected", details.expected);
         optional("edit", details.edit);
         optional("readback", details.readback);
+        let trail = TRAIL.lines();
+        optional("trail", (!trail.is_empty()).then(|| trail.into()));
         report.insert(
             "application".into(),
             json!({
@@ -94,6 +98,68 @@ impl FaultLog {
             file.sync_all().ok()?;
             Some(path)
         })
+    }
+}
+
+/// What the window did last, in every report: the intents its pages ran, in order, each by its name alone, since one can carry
+/// a whole snapshot. The window's stores add to it as they run, so a fault in a page's work names the intent it was on, or
+/// the last one before.
+pub static TRAIL: Trail = Trail::new();
+
+/// The last [`Trail::LENGTH`] intents, one that runs again straight after itself counted rather than kept twice.
+pub struct Trail(Mutex<VecDeque<Step>>);
+
+struct Step {
+    at: Timestamp,
+    page: &'static str,
+    intent: &'static str,
+    times: u32,
+}
+
+impl Trail {
+    const LENGTH: usize = 48;
+
+    const fn new() -> Trail {
+        Trail(Mutex::new(VecDeque::new()))
+    }
+
+    /// Adds `page`'s `intent`, as it is about to run.
+    pub fn record(&self, page: &'static str, intent: &'static str) {
+        let mut steps = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let at = Timestamp::now();
+        if let Some(last) = steps.back_mut()
+            && (last.page, last.intent) == (page, intent)
+        {
+            last.at = at;
+            last.times = last.times.saturating_add(1);
+            return;
+        }
+        if steps.len() == Self::LENGTH {
+            steps.pop_front();
+        }
+        steps.push_back(Step { at, page, intent, times: 1 });
+    }
+
+    /// The intents, oldest first, as a report writes them. None while another thread is adding one, so a report never waits.
+    pub fn lines(&self) -> Vec<String> {
+        let steps = match self.0.try_lock() {
+            Ok(steps) => steps,
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(TryLockError::WouldBlock) => return Vec::new(),
+        };
+        steps
+            .iter()
+            .map(|step| {
+                let times = if step.times > 1 { format!(" ({} times)", step.times) } else { String::new() };
+                format!("{} {} {}{times}", step.at.strftime("%H:%M:%S%.3f"), step.page, step.intent)
+            })
+            .collect()
+    }
+}
+
+impl std::fmt::Debug for Trail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.lines()).finish()
     }
 }
 
@@ -130,5 +196,32 @@ mod tests {
         let path = log.write("Startup", Some(&format!(r"{profile}\AppData\x.dll is missing")), None, None).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains(&profile.replace('\\', "\\\\")) && text.contains(r"%USERPROFILE%\\AppData\\x.dll"), "{text}");
+    }
+
+    #[test]
+    fn the_trail_keeps_the_last_intents_and_counts_one_that_runs_again() {
+        let trail = Trail::new();
+        trail.record("logs", "Watch");
+        trail.record("logs", "Watch");
+        trail.record("forge", "Observed");
+        let lines = trail.lines();
+        assert!(lines[0].ends_with(" logs Watch (2 times)") && lines[1].ends_with(" forge Observed"), "{lines:?}");
+        for _ in 0..Trail::LENGTH {
+            trail.record("forge", "Apply");
+            trail.record("forge", "Observed");
+        }
+        let lines = trail.lines();
+        assert_eq!(lines.len(), Trail::LENGTH);
+        assert!(lines.last().unwrap().ends_with(" forge Observed"));
+    }
+
+    #[test]
+    fn a_report_carries_the_trail() {
+        let temp = tempfile::tempdir().unwrap();
+        let log = FaultLog::with_fallbacks(temp.path(), Some(temp.path()), vec![]);
+        TRAIL.record("a test", "WroteAReport");
+        let report: Value = serde_json::from_slice(&std::fs::read(log.write("Test", None, None, None).unwrap()).unwrap()).unwrap();
+        let trail = report["trail"].as_array().unwrap();
+        assert!(trail.iter().any(|line| line.as_str().unwrap().ends_with(" a test WroteAReport")), "{trail:?}");
     }
 }

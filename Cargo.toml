@@ -27,6 +27,8 @@ raw-window-handle = "0.6.2"
 # The user's locale, read as Slint reads it to pick a bundled translation (eg_ui::select_language).
 sys-locale = "0.3.2"
 tempfile = "3.27.0"
+# Variant names for the fault trail (eg_core::fault::TRAIL); Slint already builds it.
+strum = { version = "0.28.0", features = ["derive"] }
 tokio = { version = "=1.53.3", features = ["rt", "net", "io-util", "time", "sync"] }
 
 task-runtime = { path = "libs/task-runtime" }

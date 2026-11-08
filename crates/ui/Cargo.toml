@@ -13,6 +13,7 @@ eg-core.workspace = true
 phrases.workspace = true
 eg-companion.workspace = true
 spiderland.workspace = true
+strum.workspace = true
 spiderland-slint.workspace = true
 eg-trainer = { path = "../trainer" }
 rfd.workspace = true

@@ -29,6 +29,8 @@ phrases! {
 /// Home as a feature: see the module's documentation.
 pub struct Home;
 
+/// Named for the fault trail (`eg_core::fault::TRAIL`).
+#[derive(strum::IntoStaticStr)]
 pub enum Intent {
     /// Home came into view.
     Shown,

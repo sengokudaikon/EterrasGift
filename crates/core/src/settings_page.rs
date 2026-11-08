@@ -240,6 +240,8 @@ pub enum Submission {
     Retry,
 }
 
+/// Named for the fault trail (`eg_core::fault::TRAIL`).
+#[derive(strum::IntoStaticStr)]
 pub enum Intent {
     ToggleModule(usize, bool),
     ToggleSetting(usize, usize, bool),

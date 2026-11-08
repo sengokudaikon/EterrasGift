@@ -109,6 +109,7 @@ pub(crate) fn bind(window: &MainWindow, settings: Settings, close_first: usize, 
     view.set_sections(host.sections.model());
     view.set_locations(host.locations.model());
     let store = Store::<SettingsPage>::new(state, Windowed::new(window, host));
+    crate::trail::follow(&store, "settings");
 
     // A close always waits here and goes ahead from `Effect::Close`, so it can wait for saves in flight.
     window.window().on_close_requested({

@@ -195,6 +195,7 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
     view.set_profiles(host.profiles.model());
     view.set_item_forge(false);
     let store = Store::<TrainerPages>::new(State::new((*features).clone(), planned, spacing), Windowed::new(window, host));
+    crate::trail::follow(&store, "trainer");
     callbacks!(view, store, {
         on_open: |id| Intent::Open(Page::from_id(&id).and_then(area)),
         on_select_profile: |index| Intent::SelectProfile(index),

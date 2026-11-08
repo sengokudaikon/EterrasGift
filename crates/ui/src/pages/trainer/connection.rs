@@ -70,6 +70,7 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, de
             },
         ),
     );
+    crate::trail::follow(&store, "connection");
     callbacks!(window.global::<Connection>(), store, {
         on_connect: || Intent::Connect,
     });

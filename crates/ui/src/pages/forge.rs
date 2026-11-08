@@ -61,6 +61,7 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, background: Background,
         preview: Timer::default(),
     };
     let store = Store::new(state, Windowed::new(window, host));
+    crate::trail::follow(&store, "forge");
     connect::connect(&window.global::<ForgeState>(), &store);
     shell.forward(&store.intents(), |page| Intent::PageChanged { forge: page == Page::Forge });
     ForgeHandle { store }

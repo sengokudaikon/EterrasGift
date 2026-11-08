@@ -38,6 +38,8 @@ pub struct Focus {
     pub part: i32,
 }
 
+/// Named for the fault trail (`eg_core::fault::TRAIL`).
+#[derive(strum::IntoStaticStr)]
 pub enum Intent {
     /// What the worker has published, and whether it still runs.
     Observed {

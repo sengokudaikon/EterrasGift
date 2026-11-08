@@ -269,6 +269,8 @@ pub fn library_stopped_words() -> &'static str {
     LibraryStopped.get()
 }
 
+/// Named for the fault trail (`eg_core::fault::TRAIL`).
+#[derive(strum::IntoStaticStr)]
 pub enum Intent {
     /// Which page came into view: this one, or another.
     PageChanged {

@@ -14,6 +14,7 @@ win-platform = { workspace = true, features = ["time"] }
 eg-trainer-wire = { path = "../trainer-wire" }
 eg-core.workspace = true
 spiderland.workspace = true
+strum.workspace = true
 phrases.workspace = true
 eg-game-access = { path = "../game-access" }
 eg-game-files = { path = "../game-files" }

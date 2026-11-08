@@ -58,6 +58,7 @@ pub fn bind(window: &MainWindow, navigation: Navigation) -> ShellHandle {
     nav.set_footer(host.footer.model());
     nav.set_flyout_pages(host.flyout.model());
     let store = Store::<Shell>::new(State::new(navigation), Windowed::new(window, host));
+    crate::trail::follow(&store, "shell");
 
     callbacks!(nav, store, {
         on_toggle_pane: || Intent::TogglePane,

@@ -174,6 +174,8 @@ pub fn read(files: Option<&LogFiles>, source: Source, status: String) -> Content
 /// The log viewer as a feature: see the module's documentation.
 pub struct Logs;
 
+/// Named for the fault trail (`eg_core::fault::TRAIL`).
+#[derive(strum::IntoStaticStr)]
 pub enum Intent {
     /// The page came into view.
     Shown,

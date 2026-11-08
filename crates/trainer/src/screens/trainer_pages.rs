@@ -148,6 +148,8 @@ impl TrainerSession for Commands<'_> {
 /// The trainer's pages as a feature: see the module's documentation.
 pub struct TrainerPages;
 
+/// Named for the fault trail (`eg_core::fault::TRAIL`).
+#[derive(strum::IntoStaticStr)]
 pub enum Intent {
     Open(Option<Area>),
     SelectProfile(i32),
