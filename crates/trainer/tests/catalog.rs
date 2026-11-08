@@ -1,7 +1,5 @@
-use eg_trainer::definitions::catalog::{CatalogBuilder, CatalogIdentity, EXTRACTION_VERSION, ItemNameSource};
-use eg_trainer::definitions::entries::{
-    Availability, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ItemTypeDefinition, SubTypeDefinition, UniqueDefinition,
-};
+use eg_trainer::definitions::catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog, ItemNameSource};
+use eg_trainer::definitions::entries::{Availability, CatalogEntries, DefinitionName, DefinitionNameSource, ItemTypeDefinition, SubTypeDefinition, UniqueDefinition};
 use eg_trainer_wire::{
     definitions::{ItemLimits, ValueRange},
     forge::{ForgeSnapshot, ItemStatus, UniqueIdentity},
@@ -24,15 +22,23 @@ fn limits() -> ItemLimits {
         level_requirement: range,
     }
 }
-fn builder() -> CatalogBuilder {
-    CatalogBuilder::new(
-        CatalogIdentity {
-            binary_hash: "A".repeat(64),
-            metadata_hash: "B".repeat(64),
-            locale: locale(),
-            extraction_version: EXTRACTION_VERSION,
-        },
+fn identity() -> CatalogIdentity {
+    CatalogIdentity {
+        binary_hash: "A".repeat(64),
+        metadata_hash: "B".repeat(64),
+        locale: locale(),
+        extraction_version: EXTRACTION_VERSION,
+    }
+}
+/// A catalog of `count` bases and nothing else.
+fn catalog(count: u8) -> GameCatalog {
+    GameCatalog::new(
+        identity(),
         limits(),
+        CatalogEntries {
+            bases: (0..count).map(base).collect(),
+            ..CatalogEntries::default()
+        },
     )
     .unwrap()
 }
@@ -58,48 +64,31 @@ fn base(id: u8) -> ItemTypeDefinition {
         }],
     }
 }
-fn bases(cursor: u32, total: u32) -> CatalogPage {
-    CatalogPage {
-        locale: locale(),
-        kind: CatalogKind::Bases,
-        cursor,
-        total,
-        entries: CatalogEntries::Bases((cursor..total.min(cursor + 16)).map(|id| base(id as u8)).collect()),
-    }
-}
-fn empty(kind: CatalogKind) -> CatalogPage {
-    CatalogPage {
-        locale: locale(),
-        kind,
-        cursor: 0,
-        total: 0,
-        entries: match kind {
-            CatalogKind::Bases => CatalogEntries::Bases(vec![]),
-            CatalogKind::Affixes => CatalogEntries::Affixes(vec![]),
-            CatalogKind::Uniques => CatalogEntries::Uniques(vec![]),
-            CatalogKind::Rarities => CatalogEntries::Rarities(vec![]),
-        },
-    }
-}
-fn finish_empty_categories(builder: &mut CatalogBuilder) {
-    for kind in [CatalogKind::Affixes, CatalogKind::Uniques, CatalogKind::Rarities] {
-        builder.push(empty(kind)).unwrap();
-    }
-}
-
 #[test]
-fn complete_capture_assembles_two_pages_and_preserves_owned_provenance() {
-    let mut builder = builder();
-    assert_eq!(builder.next_cursor(CatalogKind::Bases), Some(0));
-    builder.push(bases(0, 17)).unwrap();
-    assert_eq!(builder.next_cursor(CatalogKind::Bases), Some(16));
-    builder.push(bases(16, 17)).unwrap();
-    assert_eq!(builder.next_cursor(CatalogKind::Bases), None);
-    finish_empty_categories(&mut builder);
-    let catalog = builder.finish().unwrap();
+fn a_catalog_is_made_whole_and_keeps_owned_provenance() {
+    let catalog = catalog(17);
     assert_eq!(catalog.bases.len(), 17);
     assert_eq!(catalog.identity.locale, locale());
     assert_eq!(catalog.bases[&16].sub_types[0].name.source, DefinitionNameSource::InternalName);
+    assert_eq!(catalog.check(), Ok(()));
+}
+
+#[test]
+fn one_entry_or_identity_that_fails_fails_the_catalog() {
+    let entries = |bases: Vec<ItemTypeDefinition>| CatalogEntries {
+        bases,
+        ..CatalogEntries::default()
+    };
+    assert!(GameCatalog::new(identity(), limits(), entries(vec![base(3), base(3)])).is_err(), "two bases share an ID");
+    let mut twice = base(3);
+    twice.sub_types.push(twice.sub_types[0].clone());
+    assert!(GameCatalog::new(identity(), limits(), entries(vec![twice])).is_err(), "a base lists a subtype twice");
+    let mut other = identity();
+    other.extraction_version += 1;
+    assert!(GameCatalog::new(other, limits(), entries(vec![base(3)])).is_err(), "another extraction");
+    let mut made = catalog(2);
+    made.bases.get_mut(&1).unwrap().item_type = 0;
+    assert!(made.check().is_err(), "a base kept under another's ID");
 }
 
 fn item() -> ForgeSnapshot {
@@ -130,10 +119,7 @@ fn item() -> ForgeSnapshot {
 
 #[test]
 fn fallback_names_have_explicit_provenance_without_altering_raw_item_or_fingerprint() {
-    let mut builder = builder();
-    builder.push(bases(0, 1)).unwrap();
-    finish_empty_categories(&mut builder);
-    let catalog = builder.finish().unwrap();
+    let catalog = catalog(1);
     let mut item = item();
     let original = item.clone();
     let resolved = catalog.resolve_item_name(&item).unwrap();
@@ -154,10 +140,7 @@ fn fallback_names_have_explicit_provenance_without_altering_raw_item_or_fingerpr
 
 #[test]
 fn unique_names_require_matching_identity_base_subtype_and_set_semantics() {
-    let mut builder = builder();
-    builder.push(bases(0, 1)).unwrap();
-    finish_empty_categories(&mut builder);
-    let mut catalog = builder.finish().unwrap();
+    let mut catalog = catalog(1);
     catalog.uniques.insert(
         41,
         UniqueDefinition {

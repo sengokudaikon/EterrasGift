@@ -7,11 +7,9 @@
 //! ability (58), player (98), tracker (123) and idol altar (130) properties their own registries.
 
 use crate::definitions::catalog::{
-    AffixDefinition, AffixEffect, AffixSource, AffixTier, Availability, CatalogBuilder, CatalogEntries, CatalogIdentity, CatalogKind, CatalogPage, DefinitionName,
-    DefinitionNameSource, EXTRACTION_VERSION, GameCatalog, GameLocale, ImplicitDefinition, ItemLimits, ItemTypeDefinition, NumericProperty, RarityDefinition, SubTypeDefinition,
-    UniqueDefinition, UniqueNumericData, ValueRange,
+    AffixDefinition, AffixEffect, AffixSource, AffixTier, Availability, CatalogEntries, CatalogIdentity, DefinitionName, DefinitionNameSource, EXTRACTION_VERSION, GameCatalog,
+    GameLocale, ImplicitDefinition, ItemLimits, ItemTypeDefinition, NumericProperty, RarityDefinition, SubTypeDefinition, UniqueDefinition, UniqueNumericData, ValueRange,
 };
-use crate::definitions::entries::MAX_PAGE_ENTRIES;
 use crate::definitions::stat_text::{StatKey, StatTexts};
 use crate::definitions::unique_mods;
 use eg_game_files::definitions::{Ailment, Definitions};
@@ -368,7 +366,7 @@ impl FileCatalog {
         })
     }
 
-    /// A saved catalog back, with what it was read from. The definitions are checked again by the session's builder.
+    /// A saved catalog back, with what it was read from. The definitions are checked again when a session's catalog is made from them.
     pub fn restore(saved: GameCatalog, build: String, sources: Vec<(PathBuf, Option<FileStamp>)>) -> Self {
         Self {
             binary_hash: saved.identity.binary_hash,
@@ -424,7 +422,7 @@ impl FileCatalog {
         self.binary_hash.eq_ignore_ascii_case(binary_hash) && self.metadata_hash.eq_ignore_ascii_case(metadata_hash)
     }
 
-    /// The catalog for a session's locale, through the same builder and checks as every catalog.
+    /// The catalog for a session's locale, checked as every catalog is.
     pub fn catalog(&self, locale: GameLocale) -> Result<GameCatalog, ProtocolError> {
         let identity = CatalogIdentity {
             binary_hash: self.binary_hash.clone(),
@@ -432,29 +430,6 @@ impl FileCatalog {
             locale: locale.clone(),
             extraction_version: EXTRACTION_VERSION,
         };
-        let mut builder = CatalogBuilder::new(identity, self.limits)?;
-        fn pages<T: Clone>(builder: &mut CatalogBuilder, locale: &GameLocale, kind: CatalogKind, items: &[T], wrap: fn(Vec<T>) -> CatalogEntries) -> Result<(), ProtocolError> {
-            let total = items.len() as u32;
-            for (index, chunk) in items.chunks(MAX_PAGE_ENTRIES).enumerate() {
-                builder.push(CatalogPage {
-                    locale: locale.clone(),
-                    kind,
-                    cursor: (index * MAX_PAGE_ENTRIES) as u32,
-                    total,
-                    entries: wrap(chunk.to_vec()),
-                })?;
-            }
-            if items.is_empty() {
-                builder.push(CatalogPage {
-                    locale: locale.clone(),
-                    kind,
-                    cursor: 0,
-                    total: 0,
-                    entries: wrap(Vec::new()),
-                })?;
-            }
-            Ok(())
-        }
         // A language's names replace the stored ones; the saved catalog (SAVED_LOCALE) keeps them.
         let named = |text: &String| DefinitionName {
             text: text.clone(),
@@ -487,11 +462,16 @@ impl FileCatalog {
                 }
             }
         }
-        pages(&mut builder, &locale, CatalogKind::Bases, &bases, CatalogEntries::Bases)?;
-        pages(&mut builder, &locale, CatalogKind::Affixes, &affixes, CatalogEntries::Affixes)?;
-        pages(&mut builder, &locale, CatalogKind::Uniques, &uniques, CatalogEntries::Uniques)?;
-        pages(&mut builder, &locale, CatalogKind::Rarities, &self.rarities, CatalogEntries::Rarities)?;
-        builder.finish()
+        GameCatalog::new(
+            identity,
+            self.limits,
+            CatalogEntries {
+                bases,
+                affixes,
+                uniques,
+                rarities: self.rarities.clone(),
+            },
+        )
     }
 }
 

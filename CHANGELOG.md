@@ -5,6 +5,7 @@ code and its tests, and what is still to build in [the helper's backlog](crates/
 
 ## 2026-11-08
 
+- Trainer: a session's game catalog is checked without being encoded, and is saved whole; a catalog saved by an older version is read from the game files again once.
 - Forge: Home and End go to the first and last entry of its menus.
 - Mods: a build the window's close stopped starts again when the window stays after all.
 - Logs: a fault report lists what the window did last, each page's intents by name.

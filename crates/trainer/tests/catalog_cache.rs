@@ -81,17 +81,9 @@ fn replace_checksum(bytes: &mut Vec<u8>) {
     let checksum = file_ops::hashes::of_bytes(bytes);
     bytes.extend_from_slice(checksum.as_bytes());
 }
-fn pages_start(bytes: &[u8]) -> usize {
-    let mut pos = 12;
-    for _ in 0..4 {
-        let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
-        pos += 4 + len;
-    }
-    pos + 4 + 40 + 4
-}
 
 #[test]
-fn roundtrip_multi_page_catalog_and_last_pointer_preserves_owned_data() {
+fn roundtrip_catalog_and_last_pointer_preserves_owned_data() {
     let temp = tempfile::tempdir().unwrap();
     let cache = CatalogCache::new(temp.path());
     let expected = catalog();
@@ -163,7 +155,7 @@ fn wrong_identity_inside_valid_checksum_file_and_last_pointer_is_rejected() {
 }
 
 #[test]
-fn corruption_truncation_tails_and_schema_changes_never_return_catalogs() {
+fn corruption_truncation_and_tails_never_return_catalogs_and_another_schema_is_a_miss() {
     let temp = tempfile::tempdir().unwrap();
     let cache = CatalogCache::new(temp.path());
     let expected = catalog();
@@ -178,11 +170,18 @@ fn corruption_truncation_tails_and_schema_changes_never_return_catalogs() {
     corrupted[50] ^= 1;
     fs::write(&path, &corrupted).unwrap();
     assert!(cache.load(&expected.identity).is_err());
-    let mut bad_schema = original.clone();
-    bad_schema[8..12].copy_from_slice(&2u32.to_le_bytes());
-    replace_checksum(&mut bad_schema);
-    fs::write(&path, bad_schema).unwrap();
-    assert!(cache.load(&expected.identity).is_err());
+    for schema in [1u32, 3] {
+        let mut other = original.clone();
+        other[8..12].copy_from_slice(&schema.to_le_bytes());
+        replace_checksum(&mut other);
+        fs::write(&path, other).unwrap();
+        assert!(cache.load(&expected.identity).unwrap().is_none(), "schema {schema} is another version's");
+    }
+    let mut magic = original.clone();
+    magic[0] ^= 1;
+    replace_checksum(&mut magic);
+    fs::write(&path, magic).unwrap();
+    assert!(matches!(cache.load(&expected.identity), Err(CacheError::InvalidData)));
     let mut tail = original.clone();
     tail.insert(tail.len() - 64, 0);
     replace_checksum(&mut tail);
@@ -192,22 +191,21 @@ fn corruption_truncation_tails_and_schema_changes_never_return_catalogs() {
 }
 
 #[test]
-fn recomputed_checksum_cannot_bypass_cross_page_duplicate_validation() {
+fn recomputed_checksum_cannot_bypass_duplicate_validation() {
     let temp = tempfile::tempdir().unwrap();
     let cache = CatalogCache::new(temp.path());
     let expected = catalog();
     cache.save(&expected).unwrap();
     let path = cache.path_for(&expected.identity).unwrap();
     let mut bytes = fs::read(&path).unwrap();
-    let start = pages_start(&bytes);
-    let first_length = u32::from_le_bytes(bytes[start..start + 4].try_into().unwrap()) as usize;
-    let second = start + 4 + first_length;
-    let entry_offset = 12 + 4 + expected.identity.locale.language.len() + 4 + expected.identity.locale.game_version.len() + 4;
-    assert_eq!(bytes[second + 4 + entry_offset], 16);
-    bytes[second + 4 + entry_offset] = 0;
+    // Base 16 becomes a second base 0: its ID comes just before its name.
+    let name = [7u32.to_le_bytes().as_slice(), b"Base 16"].concat();
+    let at = bytes.windows(name.len()).position(|w| w == name).unwrap() - 1;
+    assert_eq!(bytes[at], 16);
+    bytes[at] = 0;
     replace_checksum(&mut bytes);
     fs::write(path, bytes).unwrap();
-    assert!(cache.load(&expected.identity).is_err());
+    assert!(matches!(cache.load(&expected.identity), Err(CacheError::InvalidData)));
 }
 
 #[test]

@@ -1,25 +1,26 @@
-//! The catalog's entries (bases, affixes, uniques, rarities) and the bounded page form the cache keeps them in.
+//! The catalog's entries (bases, affixes, uniques, rarities), the rules each meets, and the form the cache keeps them in.
 //! Names retain their source; unavailable formatter/numeric data is explicit and never replaced with guessed values.
 //!
-//! Pages: LE u32 kind/cursor/total, locale language/version texts, entry count,
-//! then typed entries in declaration order below. Texts and vectors have LE u32
-//! lengths; integers/f32 are LE, bools are single 0/1 bytes. Availability is a
-//! single byte (0 = reason text, 1 = value). Optional equipment lists use a 0/1
-//! byte then the list when present, an optional affix source a 0/1 byte then
-//! u16 unique and text line, an affix's effects a list of three texts and two bools. DefinitionName is text then u32 source.
-//! Pages contain exactly min(16, total-cursor) entries. The caller must pin
-//! locale/total and reject duplicate identities across pages of one capture.
-//! This schema preserves unknown enum/flag values and signed/reversed ranges.
+//! The form: the four lists in that order, each an LE u32 count then its entries in declaration order below. Texts and
+//! vectors have LE u32 lengths; integers/f32 are LE, bools are single 0/1 bytes. Availability is a single byte (0 =
+//! reason text, 1 = value). Optional equipment lists use a 0/1 byte then the list when present, an optional affix source
+//! a 0/1 byte then u16 unique and text line, an affix's effects a list of three texts and two bools. DefinitionName is
+//! text then u32 source. This schema preserves unknown enum/flag values and signed/reversed ranges.
+//!
+//! The rules are the form's: writing an entry checks it, and a catalog is checked by measuring what it would write
+//! (`check`), so a catalog that exists is one the cache can keep.
 
 use std::collections::BTreeSet;
 
+use crate::definitions::catalog::{GameCatalog, MAX_CATALOG_BYTES};
 pub use eg_trainer_wire::forge::MAX_IMPLICITS;
-use eg_trainer_wire::{
-    locale::GameLocale,
-    protocol::{MAX_RESPONSE_SIZE, ProtocolError},
-};
+use eg_trainer_wire::protocol::ProtocolError;
 
-pub const MAX_PAGE_ENTRIES: usize = 16;
+pub const MAX_BASES: usize = 256;
+pub const MAX_AFFIXES: usize = 20_000;
+pub const MAX_UNIQUES: usize = 10_000;
+/// The game's rarities, numbered below this.
+pub const MAX_RARITIES: usize = 10;
 pub const MAX_TEXT_BYTES: usize = 4096;
 pub const MAX_SUB_TYPES: usize = 1024;
 pub const MAX_EQUIPMENT_TYPES: usize = 128;
@@ -28,39 +29,6 @@ pub const MAX_PROPERTIES: usize = 128;
 pub const MAX_UNIQUE_SUB_TYPES: usize = 128;
 pub const MAX_DESCRIPTIONS: usize = 128;
 pub const MAX_DISPLAY_ORDER: usize = 128;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u32)]
-pub enum CatalogKind {
-    Bases = 0,
-    Affixes = 1,
-    Uniques = 2,
-    Rarities = 3,
-}
-
-impl CatalogKind {
-    pub const fn maximum_total(self) -> u32 {
-        match self {
-            Self::Bases => 256,
-            Self::Affixes => 20_000,
-            Self::Uniques => 10_000,
-            Self::Rarities => 10,
-        }
-    }
-}
-
-impl TryFrom<u32> for CatalogKind {
-    type Error = ProtocolError;
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::Bases),
-            1 => Ok(Self::Affixes),
-            2 => Ok(Self::Uniques),
-            3 => Ok(Self::Rarities),
-            _ => Err(ProtocolError::InvalidData),
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Availability<T> {
@@ -208,101 +176,84 @@ pub struct RarityDefinition {
     pub name: Availability<DefinitionName>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum CatalogEntries {
-    Bases(Vec<ItemTypeDefinition>),
-    Affixes(Vec<AffixDefinition>),
-    Uniques(Vec<UniqueDefinition>),
-    Rarities(Vec<RarityDefinition>),
-}
-
-impl CatalogEntries {
-    pub fn len(&self) -> usize {
-        match self {
-            Self::Bases(v) => v.len(),
-            Self::Affixes(v) => v.len(),
-            Self::Uniques(v) => v.len(),
-            Self::Rarities(v) => v.len(),
-        }
-    }
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-    pub const fn kind(&self) -> CatalogKind {
-        match self {
-            Self::Bases(_) => CatalogKind::Bases,
-            Self::Affixes(_) => CatalogKind::Affixes,
-            Self::Uniques(_) => CatalogKind::Uniques,
-            Self::Rarities(_) => CatalogKind::Rarities,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct CatalogPage {
-    pub locale: GameLocale,
-    pub kind: CatalogKind,
-    pub cursor: u32,
-    pub total: u32,
-    pub entries: CatalogEntries,
+/// A catalog's definitions, each kind in a list of its own.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CatalogEntries {
+    pub bases: Vec<ItemTypeDefinition>,
+    pub affixes: Vec<AffixDefinition>,
+    pub uniques: Vec<UniqueDefinition>,
+    pub rarities: Vec<RarityDefinition>,
 }
 
 fn invalid<T>() -> Result<T, ProtocolError> {
     Err(ProtocolError::InvalidData)
 }
 
-fn validate(page: &CatalogPage) -> Result<(), ProtocolError> {
-    if page.kind != page.entries.kind()
-        || page.total > page.kind.maximum_total()
-        || page.cursor > page.total
-        || page.entries.len() != (page.total - page.cursor).min(MAX_PAGE_ENTRIES as u32) as usize
-        || page.locale.language.trim().is_empty()
-    {
-        return invalid();
-    }
-    let ids: Vec<u16> = match &page.entries {
-        CatalogEntries::Bases(v) => {
-            for base in v {
-                if base.sub_types.iter().map(|s| s.sub_type).collect::<BTreeSet<_>>().len() != base.sub_types.len() {
-                    return invalid();
-                }
-            }
-            v.iter().map(|v| u16::from(v.item_type)).collect()
-        }
-        CatalogEntries::Affixes(v) => {
-            for affix in v {
-                if usize::from(affix.tier_count) > MAX_AFFIX_TIERS {
-                    return invalid();
-                }
-                if let Availability::Available(tiers) = &affix.numeric
-                    && tiers.len() != usize::from(affix.tier_count)
-                {
-                    return invalid();
-                }
-            }
-            v.iter().map(|v| v.id).collect()
-        }
-        CatalogEntries::Uniques(v) => v.iter().map(|v| v.id).collect(),
-        CatalogEntries::Rarities(v) => {
-            if v.iter().any(|v| v.id >= 10) {
-                return invalid();
-            }
-            v.iter().map(|v| u16::from(v.id)).collect()
-        }
-    };
-    if ids.iter().collect::<BTreeSet<_>>().len() != ids.len() {
-        return invalid();
-    }
-    Ok(())
+/// Checks `catalog`'s entries against every rule of their form, by measuring it: nothing is written.
+pub(crate) fn check(catalog: &GameCatalog) -> Result<(), ProtocolError> {
+    write(&mut Writer { out: None, len: 0 }, catalog)
 }
 
-struct Writer(Vec<u8>);
-impl Writer {
-    fn bytes(&mut self, bytes: &[u8]) -> Result<(), ProtocolError> {
-        if self.0.len().checked_add(bytes.len()).is_none_or(|len| len > MAX_RESPONSE_SIZE) {
+/// `catalog`'s entries in their form, each checked as it is written.
+pub fn encode(catalog: &GameCatalog) -> Result<Vec<u8>, ProtocolError> {
+    let mut w = Writer { out: Some(Vec::new()), len: 0 };
+    write(&mut w, catalog)?;
+    Ok(w.out.unwrap_or_default())
+}
+
+/// Entries back from their form, bounded before anything is allocated. Whether they make a catalog is
+/// [`GameCatalog::new`]'s to say.
+pub fn decode(bytes: &[u8]) -> Result<CatalogEntries, ProtocolError> {
+    if bytes.len() > MAX_CATALOG_BYTES {
+        return invalid();
+    }
+    let mut r = Reader(bytes);
+    let entries = CatalogEntries {
+        bases: r.list(MAX_BASES, read_base)?,
+        affixes: r.list(MAX_AFFIXES, read_affix)?,
+        uniques: r.list(MAX_UNIQUES, read_unique)?,
+        rarities: r.list(MAX_RARITIES, |r| {
+            Ok(RarityDefinition {
+                id: r.u8()?,
+                name: r.available(SelfReader::name)?,
+            })
+        })?,
+    };
+    if !r.0.is_empty() {
+        return invalid();
+    }
+    Ok(entries)
+}
+
+fn write(w: &mut Writer, catalog: &GameCatalog) -> Result<(), ProtocolError> {
+    w.list(catalog.bases.values(), MAX_BASES, write_base)?;
+    w.list(catalog.affixes.values(), MAX_AFFIXES, write_affix)?;
+    w.list(catalog.uniques.values(), MAX_UNIQUES, write_unique)?;
+    w.list(catalog.rarities.values(), MAX_RARITIES, |w, v| {
+        if usize::from(v.id) >= MAX_RARITIES {
             return invalid();
         }
-        self.0.extend_from_slice(bytes);
+        w.u8(v.id)?;
+        w.available(&v.name, Writer::name)
+    })
+}
+
+/// Writes the form, or with no `out` only measures it, so checking and saving apply one set of rules. The whole stays
+/// within [`MAX_CATALOG_BYTES`].
+struct Writer {
+    out: Option<Vec<u8>>,
+    len: usize,
+}
+impl Writer {
+    fn bytes(&mut self, bytes: &[u8]) -> Result<(), ProtocolError> {
+        self.len = self
+            .len
+            .checked_add(bytes.len())
+            .filter(|len| *len <= MAX_CATALOG_BYTES)
+            .ok_or(ProtocolError::InvalidData)?;
+        if let Some(out) = &mut self.out {
+            out.extend_from_slice(bytes);
+        }
         Ok(())
     }
     fn u8(&mut self, n: u8) -> Result<(), ProtocolError> {
@@ -333,7 +284,11 @@ impl Writer {
         self.u32(text.len() as u32)?;
         self.bytes(text.as_bytes())
     }
-    fn list<T>(&mut self, items: &[T], cap: usize, mut write: impl FnMut(&mut Self, &T) -> Result<(), ProtocolError>) -> Result<(), ProtocolError> {
+    fn list<'a, T: 'a, I>(&mut self, items: I, cap: usize, mut write: impl FnMut(&mut Self, &T) -> Result<(), ProtocolError>) -> Result<(), ProtocolError>
+    where
+        I: IntoIterator<Item = &'a T, IntoIter: ExactSizeIterator>,
+    {
+        let items = items.into_iter();
         if items.len() > cap {
             return invalid();
         }
@@ -505,6 +460,9 @@ fn read_implicit(r: &mut Reader<'_>) -> Result<ImplicitDefinition, ProtocolError
 type SelfReader<'a> = Reader<'a>;
 
 fn write_base(w: &mut Writer, base: &ItemTypeDefinition) -> Result<(), ProtocolError> {
+    if base.sub_types.iter().map(|s| s.sub_type).collect::<BTreeSet<_>>().len() != base.sub_types.len() {
+        return invalid();
+    }
     w.u8(base.item_type)?;
     w.name(&base.name)?;
     w.list(&base.sub_types, MAX_SUB_TYPES, |w, s| {
@@ -537,6 +495,9 @@ fn read_base(r: &mut Reader<'_>) -> Result<ItemTypeDefinition, ProtocolError> {
     })
 }
 fn write_affix(w: &mut Writer, a: &AffixDefinition) -> Result<(), ProtocolError> {
+    if usize::from(a.tier_count) > MAX_AFFIX_TIERS || matches!(&a.numeric, Availability::Available(tiers) if tiers.len() != usize::from(a.tier_count)) {
+        return invalid();
+    }
     w.u16(a.id)?;
     w.text(&a.raw_name)?;
     w.text(&a.raw_display_name)?;
@@ -651,65 +612,4 @@ fn read_unique(r: &mut Reader<'_>) -> Result<UniqueDefinition, ProtocolError> {
             })
         })?,
     })
-}
-
-pub fn encode(page: &CatalogPage) -> Result<Vec<u8>, ProtocolError> {
-    validate(page)?;
-    let mut w = Writer(Vec::new());
-    w.u32(page.kind as u32)?;
-    w.u32(page.cursor)?;
-    w.u32(page.total)?;
-    w.text(&page.locale.language)?;
-    w.text(&page.locale.game_version)?;
-    match &page.entries {
-        CatalogEntries::Bases(v) => w.list(v, MAX_PAGE_ENTRIES, write_base)?,
-        CatalogEntries::Affixes(v) => w.list(v, MAX_PAGE_ENTRIES, write_affix)?,
-        CatalogEntries::Uniques(v) => w.list(v, MAX_PAGE_ENTRIES, write_unique)?,
-        CatalogEntries::Rarities(v) => w.list(v, MAX_PAGE_ENTRIES, |w, v| {
-            w.u8(v.id)?;
-            w.available(&v.name, Writer::name)
-        })?,
-    }
-    Ok(w.0)
-}
-
-pub fn decode(payload: &[u8]) -> Result<CatalogPage, ProtocolError> {
-    if payload.len() > MAX_RESPONSE_SIZE {
-        return invalid();
-    }
-    let mut r = Reader(payload);
-    let kind = CatalogKind::try_from(r.u32()?)?;
-    let cursor = r.u32()?;
-    let total = r.u32()?;
-    // Reject impossible headers before reading or allocating any nested entries.
-    if total > kind.maximum_total() || cursor > total {
-        return invalid();
-    }
-    let locale = GameLocale {
-        language: r.text()?,
-        game_version: r.text()?,
-    };
-    let entries = match kind {
-        CatalogKind::Bases => CatalogEntries::Bases(r.list(MAX_PAGE_ENTRIES, read_base)?),
-        CatalogKind::Affixes => CatalogEntries::Affixes(r.list(MAX_PAGE_ENTRIES, read_affix)?),
-        CatalogKind::Uniques => CatalogEntries::Uniques(r.list(MAX_PAGE_ENTRIES, read_unique)?),
-        CatalogKind::Rarities => CatalogEntries::Rarities(r.list(MAX_PAGE_ENTRIES, |r| {
-            Ok(RarityDefinition {
-                id: r.u8()?,
-                name: r.available(SelfReader::name)?,
-            })
-        })?),
-    };
-    if !r.0.is_empty() {
-        return invalid();
-    }
-    let page = CatalogPage {
-        locale,
-        kind,
-        cursor,
-        total,
-        entries,
-    };
-    validate(&page)?;
-    Ok(page)
 }

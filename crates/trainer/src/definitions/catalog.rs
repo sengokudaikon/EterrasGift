@@ -1,20 +1,19 @@
-//! Complete, owned definition captures and explicit forge-name resolution.
+//! Complete, owned definition catalogs and explicit forge-name resolution.
 //!
-//! Page identity and population are pinned, but this is not an atomic game snapshot.
-//! The adapter requires definition graphs to remain immutable during a capture.
-//! No partial catalog is published and no name fallback overwrites the raw observation.
+//! A catalog is made whole from complete lists ([`GameCatalog::new`]), every entry checked; no partial catalog is
+//! published and no name fallback overwrites the raw observation.
 
 use crate::definitions::entries;
 pub use crate::definitions::entries::{
-    AffixDefinition, AffixEffect, AffixSource, AffixTier, Availability, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ImplicitDefinition,
-    ItemTypeDefinition, NumericProperty, RarityDefinition, SubTypeDefinition, UniqueDefinition, UniqueNumericData,
+    AffixDefinition, AffixEffect, AffixSource, AffixTier, Availability, CatalogEntries, DefinitionName, DefinitionNameSource, ImplicitDefinition, ItemTypeDefinition,
+    NumericProperty, RarityDefinition, SubTypeDefinition, UniqueDefinition, UniqueNumericData,
 };
 pub use eg_trainer_wire::{
     definitions::{ItemLimits, ValueRange},
     locale::GameLocale,
 };
 use eg_trainer_wire::{forge::ForgeSnapshot, protocol::ProtocolError};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 pub const EXTRACTION_VERSION: u32 = 8;
 pub const MAX_CATALOG_BYTES: usize = 64 * 1024 * 1024;
@@ -25,6 +24,16 @@ pub struct CatalogIdentity {
     pub metadata_hash: String,
     pub locale: GameLocale,
     pub extraction_version: u32,
+}
+
+impl CatalogIdentity {
+    /// Whether a catalog can have it: two SHA-256 hashes, a locale the wire can carry, and this extraction.
+    pub fn check(&self) -> Result<(), ProtocolError> {
+        if !file_ops::hashes::is_sha256(&self.binary_hash) || !file_ops::hashes::is_sha256(&self.metadata_hash) || self.extraction_version != EXTRACTION_VERSION {
+            return Err(ProtocolError::InvalidData);
+        }
+        eg_trainer_wire::locale::encode(&self.locale).map(drop)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -52,6 +61,41 @@ pub struct ResolvedItemName {
 }
 
 impl GameCatalog {
+    /// The catalog of complete lists: every entry meets its form's rules ([`entries`]) and no two of a kind share an ID.
+    /// One that fails fails the catalog.
+    pub fn new(identity: CatalogIdentity, limits: ItemLimits, entries: CatalogEntries) -> Result<Self, ProtocolError> {
+        let catalog = Self {
+            identity,
+            limits,
+            bases: keyed(entries.bases, |v| v.item_type)?,
+            affixes: keyed(entries.affixes, |v| v.id)?,
+            uniques: keyed(entries.uniques, |v| v.id)?,
+            rarities: keyed(entries.rarities, |v| v.id)?,
+        };
+        catalog.check()?;
+        Ok(catalog)
+    }
+
+    /// Whether it meets every rule [`Self::new`] checks. Its fields are public, so one changed or made by hand may not.
+    pub fn check(&self) -> Result<(), ProtocolError> {
+        self.check_keys()?;
+        entries::check(self)
+    }
+
+    /// Its identity and limits, and each entry under its own ID: all but the entries' own rules, which writing them checks.
+    pub(crate) fn check_keys(&self) -> Result<(), ProtocolError> {
+        self.identity.check()?;
+        eg_trainer_wire::definitions::encode(&self.limits)?;
+        if self.bases.iter().any(|(k, v)| *k != v.item_type)
+            || self.affixes.iter().any(|(k, v)| *k != v.id)
+            || self.uniques.iter().any(|(k, v)| *k != v.id)
+            || self.rarities.iter().any(|(k, v)| *k != v.id)
+        {
+            return Err(ProtocolError::InvalidData);
+        }
+        Ok(())
+    }
+
     pub fn resolve_item_name(&self, item: &ForgeSnapshot) -> Option<ResolvedItemName> {
         if !item.name.is_empty() {
             return Some(ResolvedItemName {
@@ -84,93 +128,13 @@ impl GameCatalog {
     }
 }
 
-#[derive(Default)]
-struct Progress {
-    total: Option<u32>,
-    cursor: u32,
-    ids: BTreeSet<u16>,
-}
-
-/// Consumes canonical pages in cursor order for each kind; a rejected page poisons the builder.
-/// There is no retry or recovery that could combine fragments from two failed captures.
-pub struct CatalogBuilder {
-    catalog: GameCatalog,
-    progress: [Progress; 4],
-    bytes: usize,
-    failed: bool,
-}
-
-impl CatalogBuilder {
-    pub fn new(identity: CatalogIdentity, limits: ItemLimits) -> Result<Self, ProtocolError> {
-        if !file_ops::hashes::is_sha256(&identity.binary_hash) || !file_ops::hashes::is_sha256(&identity.metadata_hash) || identity.extraction_version != EXTRACTION_VERSION {
+/// `items` by their IDs, none twice.
+fn keyed<K: Ord, T>(items: Vec<T>, id: impl Fn(&T) -> K) -> Result<BTreeMap<K, T>, ProtocolError> {
+    let mut keyed = BTreeMap::new();
+    for item in items {
+        if keyed.insert(id(&item), item).is_some() {
             return Err(ProtocolError::InvalidData);
         }
-        eg_trainer_wire::locale::encode(&identity.locale)?;
-        eg_trainer_wire::definitions::encode(&limits)?;
-        Ok(Self {
-            catalog: GameCatalog {
-                identity,
-                limits,
-                bases: BTreeMap::new(),
-                affixes: BTreeMap::new(),
-                uniques: BTreeMap::new(),
-                rarities: BTreeMap::new(),
-            },
-            progress: std::array::from_fn(|_| Progress::default()),
-            bytes: 0,
-            failed: false,
-        })
     }
-
-    pub fn push(&mut self, page: CatalogPage) -> Result<(), ProtocolError> {
-        let result = self.push_checked(page);
-        self.failed |= result.is_err();
-        result
-    }
-
-    fn push_checked(&mut self, page: CatalogPage) -> Result<(), ProtocolError> {
-        if self.failed || page.locale != self.catalog.identity.locale {
-            return Err(ProtocolError::InvalidData);
-        }
-        // The encoder applies the same complete validation to locally constructed pages as
-        // the wire decoder. Its bounded size also supplies a conservative aggregate budget.
-        let bytes = entries::encode(&page)?.len();
-        self.bytes = self.bytes.checked_add(bytes).filter(|n| *n <= MAX_CATALOG_BYTES).ok_or(ProtocolError::InvalidData)?;
-        let progress = &mut self.progress[page.kind as usize];
-        if progress.total.is_some_and(|total| total != page.total) || page.cursor != progress.cursor || progress.total.is_some_and(|total| progress.cursor == total) {
-            return Err(ProtocolError::InvalidData);
-        }
-        progress.total = Some(page.total);
-        let ids: Vec<u16> = match &page.entries {
-            CatalogEntries::Bases(v) => v.iter().map(|v| u16::from(v.item_type)).collect(),
-            CatalogEntries::Affixes(v) => v.iter().map(|v| v.id).collect(),
-            CatalogEntries::Uniques(v) => v.iter().map(|v| v.id).collect(),
-            CatalogEntries::Rarities(v) => v.iter().map(|v| u16::from(v.id)).collect(),
-        };
-        for id in ids {
-            if !progress.ids.insert(id) {
-                return Err(ProtocolError::InvalidData);
-            }
-        }
-        progress.cursor += page.entries.len() as u32;
-        match page.entries {
-            CatalogEntries::Bases(v) => self.catalog.bases.extend(v.into_iter().map(|v| (v.item_type, v))),
-            CatalogEntries::Affixes(v) => self.catalog.affixes.extend(v.into_iter().map(|v| (v.id, v))),
-            CatalogEntries::Uniques(v) => self.catalog.uniques.extend(v.into_iter().map(|v| (v.id, v))),
-            CatalogEntries::Rarities(v) => self.catalog.rarities.extend(v.into_iter().map(|v| (v.id, v))),
-        }
-        Ok(())
-    }
-
-    pub fn next_cursor(&self, kind: CatalogKind) -> Option<u32> {
-        let progress = &self.progress[kind as usize];
-        (!self.failed && progress.total.is_none_or(|total| progress.cursor < total)).then_some(progress.cursor)
-    }
-
-    pub fn finish(self) -> Result<GameCatalog, ProtocolError> {
-        if self.failed || self.progress.iter().any(|p| p.total != Some(p.cursor)) {
-            return Err(ProtocolError::InvalidData);
-        }
-        Ok(self.catalog)
-    }
+    Ok(keyed)
 }
