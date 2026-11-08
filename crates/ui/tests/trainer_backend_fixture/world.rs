@@ -1078,6 +1078,7 @@ pub(in super::super) fn item_captures(session: &Session) {
     const VALUE_X: f32 = 150.0;
     const NAME_X: f32 = 300.0;
     const TIER_X: f32 = 530.0;
+    const SEAL_X: f32 = 610.0;
 
     // A click on a tier cell opens the tier menu with the tier the item holds (`tier-menu`).
     let forge = Forge::open(session, World::boots(), 1100, 700);
@@ -1090,6 +1091,33 @@ pub(in super::super) fn item_captures(session: &Session) {
         "T6",
         "Down and Enter pick the next tier"
     );
+    drop(forge);
+    // End and Home pick the last tier and the first.
+    let affix = |forge: &Forge| forge.ui.global::<ForgeState>().get_affixes().row_data(0).unwrap();
+    let forge = Forge::open(session, World::boots(), 1100, 700);
+    session.click(TIER_X, row_y(0));
+    session.key(Key::End);
+    session.key(Key::Return);
+    forge.settle();
+    assert_eq!(affix(&forge).tier, "T8", "End and Enter pick the last tier");
+    session.click(TIER_X, row_y(0));
+    session.key(Key::Home);
+    session.key(Key::Return);
+    forge.settle();
+    assert_eq!(affix(&forge).tier, "T1", "Home and Enter pick the first");
+    drop(forge);
+    // A click on a seal cell opens the seal menu on the affix's seal (`item-seal-menu`); Down and Enter pick the next one,
+    // and Up and Space the one before.
+    let forge = Forge::open(session, World::boots(), 1100, 700);
+    session.click(SEAL_X, row_y(0));
+    session.capture(&forge.ui, "item-seal-menu");
+    session.key(Key::DownArrow);
+    session.key(Key::Return);
+    assert_eq!(affix(&forge).seal, "Sealed", "Down and Enter pick the next seal");
+    session.click(SEAL_X, row_y(0));
+    session.key(Key::UpArrow);
+    session.key(Key::Space);
+    assert_eq!(affix(&forge).seal, "Normal", "Up and Space pick the one before");
     drop(forge);
     // Down from one tier cell to the next: both tips say "Change tier", and the one left behind closing a moment later
     // must not take the new cell's with it (the tip is its opener's, not its text's).
@@ -1455,6 +1483,22 @@ pub(in super::super) fn item_captures(session: &Session) {
         assert!(forge.ui.global::<ForgeState>().get_identity_drafted());
         session.capture(&forge.ui, &format!("item-identity-draft-{width}"));
     }
+
+    // From the keyboard, Down and Enter draft the next unique in the identity picker, and the next base in the base picker.
+    let forge = Forge::open(session, World::unique_ring(), 1100, 700);
+    session.click(200.0, 84.0);
+    session.key(Key::DownArrow);
+    session.key(Key::Return);
+    forge.settle();
+    assert!(forge.ui.global::<ForgeState>().get_identity_drafted(), "Down and Enter pick another unique");
+    drop(forge);
+    let forge = Forge::open(session, World::ring(false), 1100, 700);
+    session.click(155.0, 117.0);
+    session.key(Key::DownArrow);
+    session.key(Key::Return);
+    forge.settle();
+    assert!(forge.ui.global::<ForgeState>().get_base_drafted(), "Down and Enter pick another base");
+    drop(forge);
 
     // Keeping legendary potential on an identity that never holds it needs the override, with the risk in words
     // (`item-identity-override-*`).
