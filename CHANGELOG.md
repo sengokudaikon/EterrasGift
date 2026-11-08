@@ -3,6 +3,11 @@
 What the rewrite can do, newest first, one line per feature. Add a line when a feature lands; details live in the
 code and its tests, and what is still to build in [the helper's backlog](crates/trainer-helper/BACKLOG.md).
 
+## 2026-11-09
+
+- Build: an edit to Settings, Logs or a trainer page no longer rebuilds the trainer's worker: they are in eg-companion and the new eg-trainer-screens.
+- Settings: Restart still works after the game data service stopped on a fault, as after the mod library stopped; a fault while reading mod projects now fails the app's exit code.
+
 ## 2026-11-08
 
 - Trainer: a session's game catalog is checked without being encoded, and is saved whole; a catalog saved by an older version is read from the game files again once.
