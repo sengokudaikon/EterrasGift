@@ -1,5 +1,5 @@
 //! Unique tooltip lines and private-copy draft previews, using the game's producers.
-use crate::game::{GameError, Images, MethodError, MethodQuery, Root, RuntimeAccess, array_data, metadata_text, target, unsupported};
+use crate::game::{GameError, Images, MethodError, MethodQuery, Root, RuntimeAccess, array_data, invoke::call, metadata_text, target, unsupported};
 use eg_trainer_wire::mapping::{ForgeDescriptionRequest, MAX_MODIFIERS, ModifierSnapshot, UniquePreviewRequest};
 use il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, ValueTypeContract, raw};
 use std::{collections::BTreeSet, ffi::CStr, ptr::NonNull};
@@ -17,14 +17,7 @@ impl RuntimeAccess {
         // SAFETY: The rooted modifier and checked zero-argument getter retain the exact boxed scalar class through unboxing.
         unsafe {
             let method = self.mapping_method(api, object, name, &[], Some(self.system_class(returns)?))?;
-            let context = InvocationContext::new(attached, api);
-            let method = context
-                .bind(NonNull::new(method.cast_mut()).ok_or_else(|| unsupported("unique scalar method"))?)
-                .map_err(|e| unsupported(e.to_string()))?;
-            match method.invoke(Some(object), &mut []).map_err(|e| unsupported(e.to_string()))? {
-                InvocationOutcome::Returned(ReturnValue::Scalar { value, .. }) => Ok(value),
-                _ => Err(unsupported("unique scalar getter failed or threw")),
-            }
+            call(attached, api, method, Some(object), &mut [], "unique scalar method", "unique scalar getter failed or threw")
         }
     }
     // The preformatted producer returns a closed List<game reference>. Validate

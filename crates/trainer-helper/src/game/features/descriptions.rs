@@ -1,5 +1,5 @@
 //! Optional implicit text from the methods the game's own item tooltip uses.
-use crate::game::{Class, GameError, Images, Method, MethodError, MethodQuery, Others, Params, Returns, Root, RuntimeAccess, target, unsupported};
+use crate::game::{Class, GameError, Images, Method, MethodError, MethodQuery, Others, Params, Returns, Root, RuntimeAccess, invoke::call, target, unsupported};
 use eg_trainer_wire::mapping::{ForgeDescriptionRequest, MAX_TEXT_BYTES, ModifierSnapshot};
 use il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use std::{ffi::CStr, ptr::NonNull};
@@ -38,17 +38,8 @@ impl RuntimeAccess {
         receiver: Option<&Root<'_, '_>>,
         args: &mut [Argument<'_, 'a, 'r>],
     ) -> Result<Option<Root<'a, 'r>>, GameError> {
-        // SAFETY: The method was signature-checked; InvocationContext roots the receiver, arguments and returned reference across the call.
-        unsafe {
-            let context = InvocationContext::new(attached, api);
-            let method = context
-                .bind(NonNull::new(method.cast_mut()).ok_or_else(|| unsupported("tooltip method"))?)
-                .map_err(|e| unsupported(e.to_string()))?;
-            match method.invoke(receiver, args).map_err(|e| unsupported(e.to_string()))? {
-                InvocationOutcome::Returned(ReturnValue::Reference(value)) => Ok(value),
-                _ => Err(unsupported("tooltip invocation failed or threw")),
-            }
-        }
+        // SAFETY: The method was signature-checked; the call roots the receiver, arguments and returned reference.
+        unsafe { call(attached, api, method, receiver, args, "tooltip method", "tooltip invocation failed or threw") }
     }
     pub(super) unsafe fn description_text(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, info: &Root<'_, '_>, name: &CStr) -> Result<String, GameError> {
         // SAFETY: The rooted receiver and checked getter stay live until its rooted string result is copied.

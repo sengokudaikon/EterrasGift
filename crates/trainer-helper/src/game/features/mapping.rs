@@ -1,5 +1,7 @@
 //! Detached affix, unique and implicit roll sampling through the game's own tooltip producers and formatters.
-use crate::game::{Class, GameError, Images, Method, MethodError, MethodQuery, Root, RuntimeAccess, accessors::item::ForgeGraph, array_data, metadata_text, target, unsupported};
+use crate::game::{
+    Class, GameError, Images, Method, MethodError, MethodQuery, Root, RuntimeAccess, accessors::item::ForgeGraph, array_data, invoke::call, metadata_text, target, unsupported,
+};
 use eg_trainer_wire::{
     forge::ForgeSnapshot,
     mapping::{AffixMappingQuery, MAX_CONTEXT_BYTES, MappingAddress, MappingStart, MappingTarget, ModifierMappingQuery, RawMappingPage, RawValueSample},
@@ -52,14 +54,15 @@ impl RuntimeAccess {
         // SAFETY: The checked method and rooted receiver remain live while the exact scalar result is unboxed.
         unsafe {
             let method = self.mapping_method(api, object, name, &[], Some(self.system_class(c"Single")?))?;
-            let context = InvocationContext::new(attached, api);
-            let method = context
-                .bind(NonNull::new(method.cast_mut()).ok_or_else(|| unsupported("mapping scalar method"))?)
-                .map_err(contract)?;
-            match method.invoke(Some(object), &mut []).map_err(contract)? {
-                InvocationOutcome::Returned(ReturnValue::Scalar { value: Scalar::F32(value), .. }) if value.is_finite() => Ok(value),
-                _ => Err(unsupported("mapping scalar failed, threw or was nonfinite")),
-            }
+            call(
+                attached,
+                api,
+                method,
+                Some(object),
+                &mut [],
+                "mapping scalar method",
+                "mapping scalar failed, threw or was nonfinite",
+            )
         }
     }
     unsafe fn mapping_void(
@@ -72,14 +75,15 @@ impl RuntimeAccess {
     ) -> Result<(), GameError> {
         // SAFETY: The method was signature-checked and the rooted receiver remains live throughout this synchronous invocation.
         unsafe {
-            let context = InvocationContext::new(attached, api);
-            let method = context
-                .bind(NonNull::new(method.cast_mut()).ok_or_else(|| unsupported("mapping void method"))?)
-                .map_err(contract)?;
-            match method.invoke(Some(object), args).map_err(contract)? {
-                InvocationOutcome::Returned(ReturnValue::Void) => Ok(()),
-                _ => Err(unsupported("detached constructor/refresh failed or threw")),
-            }
+            call(
+                attached,
+                api,
+                method,
+                Some(object),
+                args,
+                "mapping void method",
+                "detached constructor/refresh failed or threw",
+            )
         }
     }
     unsafe fn mapping_bytes(&self, array: &Root<'_, '_>, maximum: u32) -> Result<Vec<u8>, GameError> {

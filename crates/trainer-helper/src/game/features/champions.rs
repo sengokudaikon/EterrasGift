@@ -37,7 +37,10 @@ fn caller(code: &[u8], start: u64, original: u64) -> Result<u64, GameError> {
     let mut decoder = Decoder::with_ip(64, code, start, DecoderOptions::NONE);
     while decoder.can_decode() {
         let instruction = decoder.decode();
-        if instruction.is_invalid() || instruction.code() == Code::Int3 {
+        if instruction.is_invalid() {
+            return Err(unsupported("champion roll decode"));
+        }
+        if instruction.code() == Code::Int3 {
             break;
         }
         if instruction.ip() == start + at as u64 {
