@@ -3,6 +3,7 @@
 
 use eg_trainer_wire::{
     definitions::{self, ItemLimits, ValueRange},
+    field_edits::{self, FieldSet},
     forge::{self, AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
     hooks::{GameplayHook, HookObservation, PatchState},
     locale::{self, GameLocale},
@@ -11,7 +12,7 @@ use eg_trainer_wire::{
         RawValueSample, UniquePreviewRequest, UniqueRollChange,
     },
     new_affixes::{self, NewAffix, StatLine},
-    protocol::{Discovery, DispatcherSpec, ProtocolError, REQUEST_HEADER_SIZE, Request, RequestFrame, Response, ResponseCode},
+    protocol::{Discovery, DispatcherSpec, ProtocolError, REQUEST_HEADER_SIZE, Request, RequestFrame, Response, ResponseCode, RuntimeStatus},
     write::{AffixRollChange, AffixRolls, ForgeMutation, ForgeWrite, RollArray, StatusField},
 };
 use std::fmt::Debug;
@@ -390,4 +391,180 @@ fn a_registered_affix_is_refused_outside_its_contract() {
         affixes: vec![new_affix()],
     };
     assert!(Request::decode(&no_character.encode()).is_err(), "no character to check");
+}
+
+/// Every message this file builds, as `label hex` lines: each request (with the forms of a request the others leave out),
+/// and each payload.
+fn recorded() -> Vec<String> {
+    let hex = |bytes: &[u8]| bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    let dispatcher = dispatcher();
+    let mut requests = requests();
+    requests.push(Request::RegisterAffixes {
+        dispatcher,
+        expected_manager: 9,
+        affixes: vec![
+            new_affix(),
+            NewAffix {
+                standard_effect: 0.0,
+                display_name: String::new(),
+                properties: new_affix().properties[..1].to_vec(),
+                ..new_affix()
+            },
+        ],
+    });
+    let fields = field_edits::Snapshot {
+        set: FieldSet::FactionStanding,
+        manager: 0x77,
+        container: 0x88,
+        fields: (0..12)
+            .map(|index| field_edits::Field {
+                key: 100 + index,
+                identity: 200 + index,
+                item_type: 3,
+                sub_type: index as u16,
+                label: format!("派 {index}"),
+                value: index as i32 * 3,
+            })
+            .collect(),
+    };
+    for set in FieldSet::ALL {
+        requests.push(Request::ReadFields {
+            dispatcher,
+            expected_manager: 0x77,
+            set,
+        });
+    }
+    requests.push(Request::WriteFields {
+        dispatcher,
+        edit: Box::new(field_edits::Edit {
+            values: (0..12).map(|index| (index % 2 == 0).then_some(999_999)).collect(),
+            expected: fields.clone(),
+        }),
+    });
+    let mut lines: Vec<String> = requests
+        .iter()
+        .enumerate()
+        .map(|(index, request)| format!("request {index:02} {}", hex(&request.encode())))
+        .collect();
+    let preview = mapping::UniqueRollPreview {
+        modifiers: vec![ModifierSnapshot {
+            index: 3,
+            text: "黄".into(),
+            range: String::new(),
+            roll_ids: vec![],
+            editable: false,
+        }],
+    };
+    let page = RawMappingPage {
+        language: "en".into(),
+        context: vec![0, 255, 7],
+        address: MappingAddress {
+            target: MappingTarget::Affix,
+            index: 31,
+            line: None,
+        },
+        start: MappingStart::Samples(254),
+        samples: vec![
+            RawValueSample {
+                raw_quantity: -0.25,
+                display: "-25%".into(),
+                unit: "%".into(),
+                effects: vec![],
+            },
+            RawValueSample {
+                raw_quantity: 1e300,
+                display: "∞".into(),
+                unit: "%".into(),
+                effects: vec!["a".into(), String::new()],
+            },
+        ],
+    };
+    let observations = [
+        HookObservation {
+            patch: PatchState::Original,
+            enabled: false,
+            value: 0,
+        },
+        HookObservation {
+            patch: PatchState::Patched,
+            enabled: true,
+            value: u128::MAX,
+        },
+    ];
+    let range = |minimum, maximum| ValueRange { minimum, maximum };
+    let payloads: [(&str, Vec<u8>); 12] = [
+        ("item", forge::encode(Some(&item())).unwrap()),
+        ("no item", forge::encode(None).unwrap()),
+        (
+            "locale",
+            locale::encode(&GameLocale {
+                language: "zh-Hans".into(),
+                game_version: String::new(),
+            })
+            .unwrap(),
+        ),
+        (
+            "limits",
+            definitions::encode(&ItemLimits {
+                forging_potential: range(0, 255),
+                legendary_potential: range(1, 4),
+                weavers_will: range(3, 28),
+                weavers_touch: range(0, 0),
+                level_requirement: range(1, 100),
+            })
+            .unwrap(),
+        ),
+        ("mapping page", mapping::encode_mapping(&page).unwrap()),
+        ("modifiers", mapping::encode_modifiers(&preview.modifiers).unwrap()),
+        ("preview", mapping::encode_preview(&preview).unwrap()),
+        ("hook observations", HookObservation::encode_all(&observations)),
+        ("fields", fields.encode().unwrap()),
+        (
+            "discovery",
+            Discovery {
+                build_id: "0f".repeat(32),
+                dispatcher,
+            }
+            .encode(4242)
+            .unwrap(),
+        ),
+        (
+            "status",
+            RuntimeStatus {
+                online: true,
+                manager: u64::MAX - 1,
+                features_on: 5,
+            }
+            .encode()
+            .unwrap()
+            .to_vec(),
+        ),
+        (
+            "response",
+            Response {
+                code: ResponseCode::CharacterLoading,
+                payload: vec![1, 2, 3],
+            }
+            .encode()
+            .unwrap(),
+        ),
+    ];
+    lines.extend(payloads.iter().map(|(label, bytes)| format!("{label} {}", hex(bytes))));
+    lines
+}
+
+/// The pipe's bytes stay what they were: a change to them is deliberate, and `EG_BLESS_WIRE=1` records it.
+#[test]
+fn every_message_is_byte_for_byte_what_was_recorded() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/framing/golden.txt");
+    let actual = recorded();
+    if std::env::var_os("EG_BLESS_WIRE").is_some() {
+        std::fs::write(path, format!("{}\n", actual.join("\n"))).unwrap();
+        return;
+    }
+    let golden = std::fs::read_to_string(path).unwrap();
+    let expected: Vec<&str> = golden.lines().collect();
+    let differing: Vec<_> = actual.iter().map(String::as_str).zip(&expected).filter(|(actual, expected)| actual != *expected).collect();
+    assert!(differing.is_empty(), "the pipe's bytes changed:\n{differing:#?}");
+    assert_eq!(actual.len(), expected.len(), "messages added or removed");
 }
