@@ -41,7 +41,7 @@ pub fn bind(
         return;
     };
     let store = Store::<Home>::new(
-        State::default(),
+        State::new(shell.current() == Page::Home),
         Windowed::new(
             window,
             Window {

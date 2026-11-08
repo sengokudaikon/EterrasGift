@@ -206,6 +206,14 @@ pub struct State {
 }
 
 impl State {
+    /// A page that shows from the first, or not: `start` reads it at once if it does.
+    pub fn new(shown: bool) -> State {
+        State {
+            visible: shown,
+            ..State::default()
+        }
+    }
+
     pub fn source(&self) -> Source {
         self.source
     }
@@ -236,6 +244,12 @@ impl Feature for Logs {
 
     fn subscriptions(state: &State) -> impl IntoIterator<Item = Subscription> {
         state.visible.then_some(Subscription::Tick)
+    }
+
+    fn start(state: &mut State, effects: &mut Effects<Effect>) {
+        if state.visible {
+            read_again(state, effects);
+        }
     }
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
@@ -310,6 +324,14 @@ mod tests {
             panic!("one read expected, not {effects:?}");
         };
         *generation
+    }
+
+    #[test]
+    fn a_page_that_shows_from_the_first_reads_at_once() {
+        assert!(spiderland::start::<Logs>(&mut State::new(false)).is_empty());
+        let mut state = State::new(true);
+        assert_eq!(generation(&spiderland::start::<Logs>(&mut state)), 1);
+        assert!(state.is_loading());
     }
 
     #[test]

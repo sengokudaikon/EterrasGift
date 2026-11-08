@@ -42,7 +42,7 @@ struct Window {
 
 pub(crate) fn bind(window: &MainWindow, files: Option<LogFiles>, backend: Option<BackendHandle>, background: Background, shell: &ShellHandle) {
     let store = Store::<Logs>::new(
-        State::default(),
+        State::new(shell.current() == Page::Logs),
         Windowed::new(
             window,
             Window {

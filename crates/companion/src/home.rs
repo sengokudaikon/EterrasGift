@@ -66,6 +66,14 @@ pub struct State {
 }
 
 impl State {
+    /// Home showing from the first, or not: `start` looks at the game at once if it does.
+    pub fn new(shown: bool) -> State {
+        State {
+            visible: shown,
+            ..State::default()
+        }
+    }
+
     /// What `present` reads, so its version says when the view needs doing again.
     pub fn model(&self) -> &Tracked<HomeModel> {
         &self.model
@@ -83,6 +91,14 @@ pub enum Subscription {
     Follow,
 }
 
+/// Home came into view: it looks at the game, and its first move of the tree only places it.
+fn show(state: &mut State, effects: &mut Effects<Effect>) {
+    state.visible = true;
+    state.entering = true;
+    state.tree = None;
+    effects.push(Effect::Refresh);
+}
+
 impl Feature for Home {
     type State = State;
     type Intent = Intent;
@@ -90,18 +106,19 @@ impl Feature for Home {
     type Output = spiderland::Never;
     type Subscription = Subscription;
 
+    fn start(state: &mut State, effects: &mut Effects<Effect>) {
+        if state.visible {
+            show(state, effects);
+        }
+    }
+
     fn subscriptions(state: &State) -> impl IntoIterator<Item = Subscription> {
         [Some(Subscription::Hear), state.visible.then_some(Subscription::Follow)].into_iter().flatten()
     }
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
         match intent {
-            Intent::Shown => {
-                state.visible = true;
-                state.entering = true;
-                state.tree = None;
-                effects.push(Effect::Refresh);
-            }
+            Intent::Shown => show(state, effects),
             Intent::Hidden => {
                 // Another page's decorations are its own from here on.
                 state.visible = false;
@@ -356,6 +373,14 @@ mod tests {
 
     fn report(started: bool) -> LaunchReport {
         LaunchReport { started, message: "said".into() }
+    }
+
+    #[test]
+    fn home_showing_from_the_first_looks_at_once() {
+        assert!(spiderland::start::<Home>(&mut State::new(false)).is_empty());
+        let mut state = State::new(true);
+        assert_eq!(spiderland::start::<Home>(&mut state), [Effect::Refresh]);
+        assert_eq!(spiderland::subscriptions::<Home>(&state), [Subscription::Hear, Subscription::Follow]);
     }
 
     #[test]

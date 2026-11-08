@@ -116,11 +116,9 @@ impl ShellHandle {
         self.store.forward(to, move |&Entered(page)| entered(page));
     }
 
-    /// Tells a page whether it shows: now, if it does, and from then on each time another page comes to show.
+    /// Tells a page whether it shows each time another page comes to show. Whether it shows at first is [`Self::current`],
+    /// for its initial state.
     pub fn forward_shown<I: 'static>(&self, page: Page, to: &Intents<I>, shown: impl Fn(bool) -> I + 'static) {
-        if self.current() == page {
-            to.send(shown(true));
-        }
         self.forward(to, move |entered| shown(entered == page));
     }
 }

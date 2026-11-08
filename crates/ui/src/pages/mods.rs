@@ -86,7 +86,7 @@ pub(crate) fn bind(window: &MainWindow, page: ModsPage, background: Background, 
     view.set_settings(host.setting_rows.model());
     view.set_log_lines(host.log_rows.model());
     view.set_readiness_facts(host.facts.model());
-    let store = Store::<Mods>::new(State::new(jiff::Timestamp::now()), Windowed::new(window, host));
+    let store = Store::<Mods>::new(State::new(jiff::Timestamp::now(), shell.current() == Page::Mods), Windowed::new(window, host));
     crate::trail::follow(&store, "mods");
     callbacks!(view, store, {
         on_stop_work: || Intent::StopWork,

@@ -423,7 +423,8 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(now: jiff::Timestamp) -> Self {
+    /// The page at `now`, showing from the first or not: `start` reads the library at once if it does.
+    pub fn new(now: jiff::Timestamp, shown: bool) -> Self {
         State {
             inventory: Tracked::default(),
             version: None,
@@ -442,7 +443,7 @@ impl State {
             message: None,
             stopped: false,
             read: false,
-            visible: false,
+            visible: shown,
             running: false,
             modded_run: false,
             launching: false,
@@ -500,7 +501,7 @@ fn say(state: &mut State, text: impl Into<String>, error: bool) {
     }
 }
 
-fn enqueue(state: &mut State, effects: &mut Effects<Effect, Output>, change: Change, settings: Vec<SettingKey>, clears_build: bool, mutation: bool, failure: Failure) {
+fn enqueue<O>(state: &mut State, effects: &mut Effects<Effect, O>, change: Change, settings: Vec<SettingKey>, clears_build: bool, mutation: bool, failure: Failure) {
     state.revision += 1;
     let revision = state.revision;
     if mutation {
@@ -525,7 +526,7 @@ fn edit(state: &mut State, effects: &mut Effects<Effect, Output>, change: Change
     enqueue(state, effects, change, Vec::new(), false, true, Failure::Kept);
 }
 
-fn read_again(state: &mut State, effects: &mut Effects<Effect, Output>) {
+fn read_again<O>(state: &mut State, effects: &mut Effects<Effect, O>) {
     enqueue(state, effects, Change::Read, Vec::new(), false, false, Failure::Kept);
 }
 
@@ -776,6 +777,12 @@ impl Feature for Mods {
 
     fn subscriptions(state: &State) -> impl IntoIterator<Item = Subscription> {
         state.visible.then_some(Subscription::Tick)
+    }
+
+    fn start(state: &mut State, effects: &mut Effects<Effect>) {
+        if state.visible {
+            read_again(state, effects);
+        }
     }
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect, Output>) {
@@ -1370,7 +1377,15 @@ mod tests {
     }
 
     fn state() -> State {
-        State::new(jiff::Timestamp::UNIX_EPOCH)
+        State::new(jiff::Timestamp::UNIX_EPOCH, false)
+    }
+
+    #[test]
+    fn a_page_that_shows_from_the_first_reads_at_once() {
+        assert!(spiderland::start::<Mods>(&mut state()).is_empty());
+        let mut shown = State::new(jiff::Timestamp::UNIX_EPOCH, true);
+        assert_eq!(revisions(&spiderland::start::<Mods>(&mut shown)).len(), 1);
+        assert_eq!(spiderland::subscriptions::<Mods>(&shown), [Subscription::Tick]);
     }
 
     fn observation() -> Observation {
