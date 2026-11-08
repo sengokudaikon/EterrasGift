@@ -6,10 +6,11 @@ use crate::settings::{AppSettings, Locations, SettingsStore};
 use file_ops::json;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use task_runtime::{CancellationToken, JoinHandle, Tasks};
-use tokio::sync::{mpsc, watch};
+use task_runtime::{Serial, Tasks};
+use tokio::sync::watch;
 
 type Patch = Box<dyn FnOnce(&mut Map<String, Value>) -> Result<(), String> + Send>;
 
@@ -111,9 +112,17 @@ impl Snapshot {
     }
 }
 
+/// Where a change is written.
+enum Writer {
+    /// The one writer: saves in submission order, each on the blocking pool, and everything accepted is saved before it
+    /// ends. It ends when every handle is gone, or when the runtime closes around a service nobody closed.
+    Queued(Serial<SettingsStore>),
+    /// On the submitter's thread, inside the admission lock.
+    Inline(Box<SettingsStore>),
+}
+
 struct Control {
-    sender: Option<mpsc::UnboundedSender<(u64, Change)>>,
-    inline: Option<SettingsStore>,
+    writer: Writer,
     closed: bool,
     paused: bool,
 }
@@ -136,7 +145,6 @@ struct Owner {
     control: Mutex<Control>,
     shared: Arc<Shared>,
     tasks: Option<Tasks>,
-    worker: Mutex<Option<JoinHandle<()>>>,
 }
 
 #[derive(Clone)]
@@ -168,22 +176,19 @@ impl SettingsService {
             snapshot,
             listeners: Mutex::default(),
         });
-        let (sender, receiver) = mpsc::unbounded_channel();
-        // Refused only on a runtime already closing: with the receiver gone, every submit then reports the fault.
-        let worker = tasks
-            .as_ref()
-            .and_then(|tasks| tasks.spawn(serve(shared.clone(), store.clone(), receiver, tasks.token())).ok());
-        let inline = tasks.is_none();
+        let writer = match &tasks {
+            // On a runtime already closing it refuses every change, and each submit then reports the fault.
+            Some(tasks) => Writer::Queued(Serial::start(store, tasks)),
+            None => Writer::Inline(Box::new(store)),
+        };
         Self(Arc::new(Owner {
             control: Mutex::new(Control {
-                sender: (!inline).then_some(sender),
-                inline: inline.then_some(store),
+                writer,
                 closed: false,
                 paused: false,
             }),
             shared,
             tasks,
-            worker: Mutex::new(worker),
         }))
     }
 
@@ -202,9 +207,17 @@ impl SettingsService {
             snapshot.submitted += 1;
             revision = snapshot.submitted;
         });
-        if let Some(store) = &mut control.inline {
-            execute(&self.0.shared, store, revision, change);
-        } else if control.sender.as_ref().unwrap().send((revision, change)).is_err() {
+        let refused = match &mut control.writer {
+            Writer::Inline(store) => {
+                write(&self.0.shared, store, revision, change);
+                false
+            }
+            Writer::Queued(writer) => {
+                let shared = self.0.shared.clone();
+                writer.enqueue(move |store| write(&shared, store, revision, change)).is_err()
+            }
+        };
+        if refused {
             self.0.shared.snapshot.send_modify(|snapshot| {
                 snapshot.completed = revision;
                 snapshot.outcome = SaveOutcome::Faulted("The settings worker stopped.".into());
@@ -277,13 +290,16 @@ impl SettingsService {
 
     /// Stops admission, drains every accepted save, then joins the worker. Does not silently retry failed writes.
     pub fn close(&self) -> Snapshot {
-        {
+        let writer = {
             let mut control = self.0.control.lock().unwrap();
             control.closed = true;
-            control.sender = None;
-        }
-        if let (Some(worker), Some(tasks)) = (self.0.worker.lock().unwrap().take(), &self.0.tasks) {
-            let _ = tasks.block_on(worker);
+            match &control.writer {
+                Writer::Queued(writer) => Some(writer.clone()),
+                Writer::Inline(_) => None,
+            }
+        };
+        if let Some(writer) = writer {
+            writer.close();
         }
         self.snapshot()
     }
@@ -319,41 +335,16 @@ impl ModuleSettings {
     }
 }
 
-/// The one writer: saves in submission order, each on the blocking pool, and everything accepted is saved before it ends.
-/// It ends when every sender is gone, or when the runtime closes around a service nobody closed.
-async fn serve(shared: Arc<Shared>, store: SettingsStore, mut commands: mpsc::UnboundedReceiver<(u64, Change)>, closing: CancellationToken) {
-    let mut store = Some(store);
-    while let Some((revision, change)) = next(&mut commands, &closing).await {
-        let Some(mut owned) = store.take() else {
-            shared.snapshot.send_modify(|snapshot| snapshot.completed = revision);
-            shared.completed();
-            continue;
-        };
-        let writer = shared.clone();
-        let saved = tokio::task::spawn_blocking(move || {
-            execute(&writer, &mut owned, revision, change);
-            owned
-        })
-        .await;
-        match saved {
-            Ok(owned) => store = Some(owned),
-            // Only a listener can get here: `execute` turns a panic in the change itself into its outcome.
-            Err(_) => shared.snapshot.send_modify(|snapshot| {
-                snapshot.completed = revision;
-                snapshot.outcome = SaveOutcome::Faulted("The settings worker panicked; no further changes will be written.".into());
-            }),
-        }
+/// One change, on the writer's thread or, inline, the submitter's. Nothing panics past it, so the store is never lost and
+/// every revision completes: `execute` turns a panic in the change itself into its outcome, and one in a listener faults
+/// the writer here.
+fn write(shared: &Shared, store: &mut SettingsStore, revision: u64, change: Change) {
+    if catch_unwind(AssertUnwindSafe(|| execute(shared, store, revision, change))).is_err() {
+        shared.snapshot.send_modify(|snapshot| {
+            snapshot.completed = revision;
+            snapshot.outcome = SaveOutcome::Faulted("The settings worker panicked; no further changes will be written.".into());
+        });
     }
-}
-
-async fn next(commands: &mut mpsc::UnboundedReceiver<(u64, Change)>, closing: &CancellationToken) -> Option<(u64, Change)> {
-    if !commands.is_closed() {
-        if let Some(next) = closing.run_until_cancelled(commands.recv()).await {
-            return next;
-        }
-        commands.close();
-    }
-    commands.recv().await
 }
 
 fn execute(shared: &Shared, store: &mut SettingsStore, revision: u64, change: Change) {
@@ -364,7 +355,7 @@ fn execute(shared: &Shared, store: &mut SettingsStore, revision: u64, change: Ch
         return;
     }
     let locations = matches!(&change, Change::Locations(_));
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let result = catch_unwind(AssertUnwindSafe(|| {
         let desired = store.plan(|candidate| apply(candidate, change))?;
         store.stage(desired, locations);
         // Immediate module choices become observable before disk IO completes. Persisted/active state stays separate.

@@ -13,17 +13,19 @@ use eg_core::fault::FaultLog;
 use file_ops::json::{self as json_file, Bom, LoadError};
 use file_ops::stamp::FileStamp;
 use serde_json::{Value, json};
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use task_runtime::{CancellationToken, Tasks};
-use tokio::sync::{mpsc, oneshot, watch};
+use task_runtime::{CancellationToken, Serial, Tasks};
+use tokio::sync::watch;
 
 /// The index of the saved catalog: the game and the files it was read from.
 const INDEX_FILE: &str = "files.json";
 /// The game's names by language, saved beside the catalog and read only with its index.
 const NAMES_FILE: &str = "names.json";
 const INDEX_VERSION: u64 = 3;
+const STOPPED: &str = "The game data service has stopped.";
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum GameData {
@@ -38,16 +40,8 @@ pub enum GameData {
 /// The service's side for its users: the current state, and a way to ask for a game's catalog.
 #[derive(Clone)]
 pub struct GameDataHandle {
-    requests: Option<mpsc::UnboundedSender<Request>>,
+    service: Option<Serial<Service>>,
     state: watch::Receiver<GameData>,
-}
-
-struct Request {
-    /// The game's executable; none for the one kept.
-    executable: Option<PathBuf>,
-    /// Read the files even if a current catalog is kept or saved.
-    again: bool,
-    reply: Option<oneshot::Sender<GameData>>,
 }
 
 impl std::fmt::Debug for GameDataHandle {
@@ -65,7 +59,7 @@ impl GameDataHandle {
     /// A handle that follows a state published elsewhere and reads nothing: a harness whose game ships no Last Epoch
     /// files stands in for the service with it.
     pub fn published(state: watch::Receiver<GameData>) -> Self {
-        Self { requests: None, state }
+        Self { service: None, state }
     }
 
     pub fn subscribe(&self) -> watch::Receiver<GameData> {
@@ -89,20 +83,14 @@ impl GameDataHandle {
     }
 
     async fn ask(&self, executable: Option<&Path>, again: bool) -> GameData {
-        let Some(requests) = &self.requests else {
+        let Some(service) = &self.service else {
             return self.current();
         };
-        let stopped = || GameData::Unavailable("The game data service has stopped.".into());
-        let (reply, answer) = oneshot::channel();
-        let request = Request {
-            executable: executable.map(Path::to_path_buf),
-            again,
-            reply: Some(reply),
-        };
-        if requests.send(request).is_err() {
-            return stopped();
+        let executable = executable.map(Path::to_path_buf);
+        match service.enqueue(move |service| service.answer(executable, again)) {
+            Ok(answer) => answer.await.unwrap_or_else(|_| stopped()),
+            Err(_) => stopped(),
         }
-        answer.await.unwrap_or_else(|_| stopped())
     }
 }
 
@@ -111,51 +99,23 @@ impl GameDataHandle {
 /// waits for a read already under way; requests still queued are told it has stopped.
 pub fn start(executable: Option<PathBuf>, store: Option<PathBuf>, faults: Option<FaultLog>, tasks: &Tasks) -> GameDataHandle {
     let (publish, state) = watch::channel(GameData::NoGame);
-    let (requests, incoming) = mpsc::unbounded_channel::<Request>();
-    if executable.is_some() {
-        let _ = requests.send(Request {
-            executable,
-            again: false,
-            reply: None,
-        });
-    }
     let service = Service {
         store: store.map(Store::new),
         faults,
         publish,
         executable: None,
+        closing: tasks.token(),
     };
-    // Refused only on a runtime already closing: with the receiver gone, every request is told it has stopped.
-    let _ = tasks.spawn(answer(service, incoming, tasks.clone(), tasks.token()));
-    GameDataHandle { requests: Some(requests), state }
+    // Refused only on a runtime already closing: then every request is told it has stopped.
+    let service = Serial::start(service, tasks);
+    if executable.is_some() {
+        let _ = service.enqueue(move |service| service.answer(executable, false));
+    }
+    GameDataHandle { service: Some(service), state }
 }
 
-/// One read at a time, in the order asked.
-async fn answer(mut service: Service, mut incoming: mpsc::UnboundedReceiver<Request>, tasks: Tasks, closing: CancellationToken) {
-    let publish = service.publish.clone();
-    while let Some(Some(request)) = closing.run_until_cancelled(incoming.recv()).await {
-        let read = tasks.spawn_blocking(move || {
-            let state = match request.executable.or_else(|| service.executable.clone()) {
-                Some(executable) => service.serve(&executable, request.again),
-                None => GameData::NoGame,
-            };
-            if let Some(reply) = request.reply {
-                let _ = reply.send(state);
-            }
-            service
-        });
-        let Ok(read) = read else {
-            return;
-        };
-        match read.await {
-            Ok(kept) => service = kept,
-            // The hook has reported the panic. Waiting requests hear the service has stopped, and so does anyone watching.
-            Err(_) => {
-                publish.send_replace(GameData::Unavailable("The game data service has stopped.".into()));
-                return;
-            }
-        }
-    }
+fn stopped() -> GameData {
+    GameData::Unavailable(STOPPED.into())
 }
 
 struct Service {
@@ -164,9 +124,31 @@ struct Service {
     publish: watch::Sender<GameData>,
     /// The game the published state is for.
     executable: Option<PathBuf>,
+    /// The runtime's close: a request still queued then reads nothing.
+    closing: CancellationToken,
 }
 
 impl Service {
+    /// One request, in the order asked: the catalog for `executable`'s game, else the kept game's. `again` reads the files
+    /// even if a current catalog is kept or saved.
+    fn answer(&mut self, executable: Option<PathBuf>, again: bool) -> GameData {
+        if self.closing.is_cancelled() {
+            return stopped();
+        }
+        let Some(executable) = executable.or_else(|| self.executable.clone()) else {
+            return GameData::NoGame;
+        };
+        match catch_unwind(AssertUnwindSafe(|| self.serve(&executable, again))) {
+            Ok(state) => state,
+            // The hook has reported the panic. Anyone watching hears the service has stopped, and the panic stops it, so
+            // the requests still waiting hear so too.
+            Err(panic) => {
+                self.publish.send_replace(stopped());
+                resume_unwind(panic)
+            }
+        }
+    }
+
     fn serve(&mut self, executable: &Path, again: bool) -> GameData {
         let same_game = self.executable.as_deref().is_some_and(|kept| file_ops::paths::same_place(kept, executable));
         let kept = self.publish.borrow().clone();
@@ -412,11 +394,7 @@ mod tests {
         assert!(matches!(service.current(), GameData::Unavailable(_)));
         assert!(!owner.shutdown());
         let stopped = runtime.block_on(service.for_game(&game_in(game.path())));
-        assert_eq!(
-            stopped,
-            GameData::Unavailable("The game data service has stopped.".into()),
-            "and says so once the runtime has closed"
-        );
+        assert_eq!(stopped, GameData::Unavailable(STOPPED.into()), "and says so once the runtime has closed");
     }
 
     #[test]

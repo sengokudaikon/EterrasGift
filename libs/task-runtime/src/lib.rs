@@ -10,11 +10,14 @@
 //! - Cancellation is cooperative, through [`Tasks::token`]. Never `abort` a task: a write cut off partway leaves its files
 //!   in a state nobody can name.
 //! - A `JoinHandle` needs no runtime to be awaited, so the UI thread can await one inside `slint::spawn_local`.
+//! - State that one owner changes in order, such as a file only one writer may write, is a [`Serial`]: its jobs run one at
+//!   a time, and a close waits for the ones it accepted.
 //!
 
 #![forbid(unsafe_code)]
 
 pub mod process;
+mod serial;
 
 use std::future::Future;
 use std::io;
@@ -26,6 +29,7 @@ use tokio::runtime::{Builder, Handle};
 use tokio_util::task::TaskTracker;
 use tokio_util::task::task_tracker::TaskTrackerToken;
 
+pub use serial::{Refusal, Serial};
 pub use tokio::task::{JoinError, JoinHandle};
 pub use tokio_util::sync::{CancellationToken, DropGuard};
 
@@ -175,6 +179,19 @@ impl Tasks {
     /// that ended after the event loop stopped polling for it.
     pub fn faulted(&self) -> bool {
         self.faulted.load(Ordering::Acquire)
+    }
+
+    /// Runs synchronous work that was accepted before a close began, which must still run while the close waits for it
+    /// ([`Serial`]'s queued jobs). Only work that is already counted, by the task waiting for it, may come here.
+    fn run_accepted<T: Send + 'static>(&self, work: impl FnOnce() -> T + Send + 'static) -> JoinHandle<T> {
+        let held = self.hold();
+        self.tracker.spawn_blocking_on(
+            move || {
+                let _held = held;
+                work()
+            },
+            &self.handle,
+        )
     }
 
     fn admit(&self) -> Result<(), Closed> {

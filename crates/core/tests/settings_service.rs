@@ -276,6 +276,41 @@ fn a_worker_panic_is_terminal_and_does_not_leave_waiters_hanging() {
 }
 
 #[test]
+fn a_listener_panic_faults_the_writer_and_the_saves_behind_it_still_complete() {
+    let temp = tempfile::tempdir().unwrap();
+    let service = service(temp.path());
+    let (release, held) = mpsc::channel::<()>();
+    // Holds the writer, so the next two saves are queued behind the one whose listener panics.
+    let first = service
+        .module("editor")
+        .update(move |_| {
+            held.recv_timeout(DEADLINE).unwrap();
+            Ok(())
+        })
+        .unwrap();
+    let panicked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    service.on_completed({
+        let panicked = panicked.clone();
+        move || assert!(panicked.swap(true, std::sync::atomic::Ordering::AcqRel), "a listener's fault")
+    });
+    let second = service.module("editor").set_bool("second", true).unwrap();
+    let third = service.module("editor").set_bool("third", true).unwrap();
+    release.send(()).unwrap();
+    let snapshot = service.wait(third);
+    assert_eq!(snapshot.completed, third, "every queued save completes, so nothing waits for ever");
+    assert!(matches!(snapshot.outcome, SaveOutcome::Faulted(_)));
+    assert!(service.submit(Change::Retry).is_err(), "and nothing more is written");
+    assert!(second < third && first < second);
+    assert_eq!(service.close().completed, third);
+    let saved: serde_json::Value = serde_json::from_slice(&fs::read(temp.path().join("settings.json")).unwrap()).unwrap();
+    assert_eq!(
+        saved["moduleSettings"]["editor"],
+        json!({}),
+        "the save whose listener panicked was written; the ones after it were not"
+    );
+}
+
+#[test]
 fn location_acknowledgement_is_not_replaced_by_a_later_switch_result() {
     let temp = tempfile::tempdir().unwrap();
     let service = service(temp.path());
