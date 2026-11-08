@@ -90,7 +90,8 @@ struct ForgeHost {
     preview: Timer,
 }
 
-/// What the worker has now, sent ahead of a receipt's answer so the answer is judged on the state it left.
+/// What the worker has now, sent ahead of a receipt's answer so the answer is judged on the state it left. The two go as one
+/// batch, so the page is shown once, never with the snapshot and not yet the answer.
 fn observed(backend: &BackendHandle) -> Intent {
     Intent::Observed {
         snapshot: backend.latest(),
@@ -177,10 +178,8 @@ impl ForgeHost {
                 match self.backend.try_submit(*command) {
                     Ok(receipt) => {
                         let (backend, intents) = (self.backend.clone(), intents.clone());
-                        self.background.finish(receipt.wait(), move |result| {
-                            intents.send(observed(&backend));
-                            intents.send(Intent::WriteAnswered(result));
-                        });
+                        self.background
+                            .finish(receipt.wait(), move |result| intents.send_all([observed(&backend), Intent::WriteAnswered(result)]));
                     }
                     Err(_) => intents.send(Intent::WriteRefused { batch: false }),
                 }
@@ -190,11 +189,13 @@ impl ForgeHost {
                 Ok(mut read) => {
                     let (backend, intents) = (self.backend.clone(), intents.clone());
                     let reading = self.background.local(async move { read.wait().await }, move |result| {
-                        intents.send(observed(&backend));
-                        intents.send(Intent::MappingAnswered {
-                            id,
-                            error: result.err().map(|error| error.message),
-                        });
+                        intents.send_all([
+                            observed(&backend),
+                            Intent::MappingAnswered {
+                                id,
+                                error: result.err().map(|error| error.message),
+                            },
+                        ]);
                     });
                     self.mappings.retain(|_, reading| !reading.is_finished());
                     self.mappings.insert(id, reading);
@@ -211,10 +212,12 @@ impl ForgeHost {
                 Ok(receipt) => {
                     let (backend, intents) = (self.backend.clone(), intents.clone());
                     self.background.finish(receipt.wait(), move |result| {
-                        intents.send(observed(&backend));
-                        intents.send(Intent::PreviewAnswered {
-                            error: result.err().map(|error| error.message),
-                        });
+                        intents.send_all([
+                            observed(&backend),
+                            Intent::PreviewAnswered {
+                                error: result.err().map(|error| error.message),
+                            },
+                        ]);
                     });
                 }
                 Err(_) => intents.send(Intent::PreviewRefused),
