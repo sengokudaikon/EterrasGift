@@ -17,7 +17,10 @@
 
 #![forbid(unsafe_code)]
 
-use crate::protocol::{MAX_RESPONSE_SIZE, ProtocolError};
+use crate::{
+    codec::{Reader, Wire, Writer},
+    protocol::ProtocolError,
+};
 
 /// The most implicits an item carries: the helper's bound on what it reads, the desktop's on what it keeps.
 pub const MAX_IMPLICITS: usize = 8;
@@ -172,112 +175,117 @@ impl CheckedSnapshot {
             bytes: bytes.to_vec(),
         })
     }
-    pub(crate) fn bytes(&self) -> &[u8] {
-        &self.bytes
+}
+
+/// The item as a request expects it: its encoding behind a u32 length.
+impl Wire for CheckedSnapshot {
+    fn write(&self, w: &mut Writer) {
+        w.blob(&self.bytes);
+    }
+    fn read(r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
+        Self::decode(r.blob(crate::write::MAX_EXPECTED_BYTES)?)
     }
 }
 
 pub fn encode(snapshot: Option<&ForgeSnapshot>) -> Result<Vec<u8>, ProtocolError> {
-    let Some(snapshot) = snapshot else { return Ok(vec![0]) };
+    let mut w = Writer::default();
+    let Some(snapshot) = snapshot else {
+        w.flag(false);
+        return w.finish();
+    };
+    // Validation bounds every text to fit its u16 length.
     snapshot.validate()?;
-    let mut out = vec![1];
-    out.extend_from_slice(&snapshot.item.to_le_bytes());
-    out.extend_from_slice(&snapshot.individual_id.to_le_bytes());
-    out.extend_from_slice(&snapshot.fingerprint.to_le_bytes());
-    text(&mut out, &snapshot.name);
-    out.push(snapshot.item_type);
-    out.extend_from_slice(&snapshot.sub_type.to_le_bytes());
-    out.push(snapshot.rarity);
-    out.extend_from_slice(&snapshot.class_requirement.to_le_bytes());
-    out.push(snapshot.affixes.len() as u8);
+    w.flag(true);
+    w.u64(snapshot.item);
+    w.u32(snapshot.individual_id);
+    w.u64(snapshot.fingerprint);
+    w.short_text(&snapshot.name);
+    w.byte(snapshot.item_type);
+    w.u16(snapshot.sub_type);
+    w.byte(snapshot.rarity);
+    w.i32(snapshot.class_requirement);
+    w.byte(snapshot.affixes.len() as u8);
     for affix in &snapshot.affixes {
-        out.push(affix.slot);
-        out.extend_from_slice(&affix.id.to_le_bytes());
-        out.extend_from_slice(&affix.tier.to_le_bytes());
-        out.push(affix.roll);
-        out.extend_from_slice(&affix.kind.to_le_bytes());
-        out.extend_from_slice(&affix.seal.to_le_bytes());
-        text(&mut out, &affix.name);
-        out.extend_from_slice(&affix.special.to_le_bytes());
+        w.byte(affix.slot);
+        w.u16(affix.id);
+        w.u16(affix.tier);
+        w.byte(affix.roll);
+        w.i32(affix.kind);
+        w.i32(affix.seal);
+        w.short_text(&affix.name);
+        w.i32(affix.special);
     }
-    out.push(snapshot.implicit_rolls.len() as u8);
-    out.extend_from_slice(&snapshot.implicit_rolls);
-    out.push(u8::from(snapshot.identity.is_some()));
+    w.byte(snapshot.implicit_rolls.len() as u8);
+    w.raw(&snapshot.implicit_rolls);
+    w.flag(snapshot.identity.is_some());
     if let Some(identity) = &snapshot.identity {
-        out.extend_from_slice(&identity.id.to_le_bytes());
-        out.push(identity.rolls.len() as u8);
-        out.extend_from_slice(&identity.rolls);
+        w.u16(identity.id);
+        w.byte(identity.rolls.len() as u8);
+        w.raw(&identity.rolls);
     }
-    out.push(snapshot.status.forging_potential);
-    out.extend_from_slice(&snapshot.status.forging_potential_type.to_le_bytes());
-    out.extend_from_slice(&[
-        snapshot.status.legendary_potential,
-        snapshot.status.weavers_will,
-        snapshot.status.weavers_touch,
-        u8::from(snapshot.status.corrupted),
-        u8::from(snapshot.status.ruined),
-    ]);
-    out.extend_from_slice(&snapshot.status.level_requirement.to_le_bytes());
-    if out.len() > MAX_RESPONSE_SIZE {
-        return Err(ProtocolError::InvalidData);
-    }
-    Ok(out)
+    let status = &snapshot.status;
+    w.byte(status.forging_potential);
+    w.i32(status.forging_potential_type);
+    w.byte(status.legendary_potential);
+    w.byte(status.weavers_will);
+    w.byte(status.weavers_touch);
+    w.flag(status.corrupted);
+    w.flag(status.ruined);
+    w.i32(status.level_requirement);
+    w.finish()
 }
 
 pub fn decode(payload: &[u8]) -> Result<Option<ForgeSnapshot>, ProtocolError> {
-    if payload.len() > MAX_RESPONSE_SIZE {
-        return Err(ProtocolError::InvalidData);
-    }
-    let mut reader = Reader { remaining: payload };
-    if !reader.boolean()? {
-        reader.finish()?;
+    let mut r = Reader::reply(payload)?;
+    if !r.flag()? {
+        r.finish()?;
         return Ok(None);
     }
-    let item = u64::from_le_bytes(reader.array()?);
-    let individual_id = u32::from_le_bytes(reader.array()?);
-    let fingerprint = u64::from_le_bytes(reader.array()?);
-    let name = reader.text()?;
-    let item_type = reader.byte()?;
-    let sub_type = u16::from_le_bytes(reader.array()?);
-    let rarity = reader.byte()?;
-    let class_requirement = i32::from_le_bytes(reader.array()?);
-    let count = reader.count(MAX_AFFIXES)?;
+    let item = r.u64()?;
+    let individual_id = r.u32()?;
+    let fingerprint = r.u64()?;
+    let name = r.short_text(MAX_NAME_BYTES)?.to_owned();
+    let item_type = r.byte()?;
+    let sub_type = r.u16()?;
+    let rarity = r.byte()?;
+    let class_requirement = r.i32()?;
+    let count = r.count(MAX_AFFIXES)?;
     let mut affixes = Vec::with_capacity(count);
     for _ in 0..count {
         affixes.push(AffixSnapshot {
-            slot: reader.byte()?,
-            id: u16::from_le_bytes(reader.array()?),
-            tier: u16::from_le_bytes(reader.array()?),
-            roll: reader.byte()?,
-            kind: i32::from_le_bytes(reader.array()?),
-            seal: i32::from_le_bytes(reader.array()?),
-            name: reader.text()?,
-            special: i32::from_le_bytes(reader.array()?),
+            slot: r.byte()?,
+            id: r.u16()?,
+            tier: r.u16()?,
+            roll: r.byte()?,
+            kind: r.i32()?,
+            seal: r.i32()?,
+            name: r.short_text(MAX_NAME_BYTES)?.to_owned(),
+            special: r.i32()?,
         });
     }
-    let count = reader.count(MAX_IMPLICIT_ROLLS)?;
-    let implicit_rolls = reader.take(count)?.to_vec();
-    let identity = if reader.boolean()? {
-        let id = u16::from_le_bytes(reader.array()?);
-        let count = reader.count(MAX_UNIQUE_ROLLS)?;
+    let count = r.count(MAX_IMPLICIT_ROLLS)?;
+    let implicit_rolls = r.take(count)?.to_vec();
+    let identity = if r.flag()? {
+        let id = r.u16()?;
+        let count = r.count(MAX_UNIQUE_ROLLS)?;
         Some(UniqueIdentity {
             id,
-            rolls: reader.take(count)?.to_vec(),
+            rolls: r.take(count)?.to_vec(),
         })
     } else {
         None
     };
     let status = ItemStatus {
-        forging_potential: reader.byte()?,
-        forging_potential_type: i32::from_le_bytes(reader.array()?),
-        legendary_potential: reader.byte()?,
-        weavers_will: reader.byte()?,
-        weavers_touch: reader.byte()?,
-        corrupted: reader.boolean()?,
-        ruined: reader.boolean()?,
-        level_requirement: i32::from_le_bytes(reader.array()?),
+        forging_potential: r.byte()?,
+        forging_potential_type: r.i32()?,
+        legendary_potential: r.byte()?,
+        weavers_will: r.byte()?,
+        weavers_touch: r.byte()?,
+        corrupted: r.flag()?,
+        ruined: r.flag()?,
+        level_requirement: r.i32()?,
     };
-    reader.finish()?;
+    r.finish()?;
     let snapshot = ForgeSnapshot {
         item,
         individual_id,
@@ -294,55 +302,4 @@ pub fn decode(payload: &[u8]) -> Result<Option<ForgeSnapshot>, ProtocolError> {
     };
     snapshot.validate()?;
     Ok(Some(snapshot))
-}
-
-fn text(out: &mut Vec<u8>, value: &str) {
-    // The enclosing snapshot was already validated against the 4096-byte limit.
-    out.extend_from_slice(&(value.len() as u16).to_le_bytes());
-    out.extend_from_slice(value.as_bytes());
-}
-
-struct Reader<'a> {
-    remaining: &'a [u8],
-}
-
-impl<'a> Reader<'a> {
-    fn take(&mut self, count: usize) -> Result<&'a [u8], ProtocolError> {
-        let (head, tail) = self.remaining.split_at_checked(count).ok_or(ProtocolError::InvalidData)?;
-        self.remaining = tail;
-        Ok(head)
-    }
-
-    fn array<const N: usize>(&mut self) -> Result<[u8; N], ProtocolError> {
-        self.take(N)?.try_into().map_err(|_| ProtocolError::InvalidData)
-    }
-
-    fn byte(&mut self) -> Result<u8, ProtocolError> {
-        Ok(self.array::<1>()?[0])
-    }
-
-    fn boolean(&mut self) -> Result<bool, ProtocolError> {
-        match self.byte()? {
-            0 => Ok(false),
-            1 => Ok(true),
-            _ => Err(ProtocolError::InvalidData),
-        }
-    }
-
-    fn count(&mut self, limit: usize) -> Result<usize, ProtocolError> {
-        let count = usize::from(self.byte()?);
-        if count > limit { Err(ProtocolError::InvalidData) } else { Ok(count) }
-    }
-
-    fn text(&mut self) -> Result<String, ProtocolError> {
-        let length = usize::from(u16::from_le_bytes(self.array()?));
-        if length > MAX_NAME_BYTES {
-            return Err(ProtocolError::InvalidData);
-        }
-        std::str::from_utf8(self.take(length)?).map(str::to_owned).map_err(|_| ProtocolError::InvalidData)
-    }
-
-    fn finish(self) -> Result<(), ProtocolError> {
-        if self.remaining.is_empty() { Ok(()) } else { Err(ProtocolError::InvalidData) }
-    }
 }

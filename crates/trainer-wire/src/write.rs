@@ -5,8 +5,9 @@
 #![forbid(unsafe_code)]
 
 use crate::{
+    codec::{Reader, Wire, Writer, wire_enum},
     forge::{self, AffixSnapshot, ForgeSnapshot},
-    protocol::{DispatcherSpec, MAX_RESPONSE_SIZE, ProtocolError, REQUEST_HEADER_SIZE, Response, ResponseCode},
+    protocol::{DispatcherSpec, MAX_RESPONSE_SIZE, ProtocolError, REQUEST_HEADER_SIZE, Response, ResponseCode, op},
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -46,21 +47,15 @@ impl AffixRolls {
     }
 }
 
-/// The item's own roll arrays: the unique (or set) definition's rolls and the base's implicits.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum RollArray {
-    Unique = 1,
-    Implicit = 2,
+wire_enum! {
+    /// The item's own roll arrays: the unique (or set) definition's rolls and the base's implicits.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum RollArray: u8 {
+        Unique = 1,
+        Implicit = 2,
+    }
 }
 impl RollArray {
-    pub fn from_wire(value: u8) -> Result<Self, ProtocolError> {
-        match value {
-            1 => Ok(Self::Unique),
-            2 => Ok(Self::Implicit),
-            _ => invalid(),
-        }
-    }
     /// How many rolls the game's array holds at most.
     pub fn capacity(self) -> usize {
         match self {
@@ -231,30 +226,19 @@ impl ForgeMutation {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(i32)]
-pub enum StatusField {
-    ForgingPotential = 0,
-    LegendaryPotential = 1,
-    WeaversWill = 2,
-    Corrupted = 3,
-    Ruined = 4,
-    LevelRequirement = 5,
-    WeaversTouch = 6,
+wire_enum! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum StatusField: i32 {
+        ForgingPotential = 0,
+        LegendaryPotential = 1,
+        WeaversWill = 2,
+        Corrupted = 3,
+        Ruined = 4,
+        LevelRequirement = 5,
+        WeaversTouch = 6,
+    }
 }
 impl StatusField {
-    pub fn from_wire(value: u32) -> Result<Self, ProtocolError> {
-        match value {
-            0 => Ok(Self::ForgingPotential),
-            1 => Ok(Self::LegendaryPotential),
-            2 => Ok(Self::WeaversWill),
-            3 => Ok(Self::Corrupted),
-            4 => Ok(Self::Ruined),
-            5 => Ok(Self::LevelRequirement),
-            6 => Ok(Self::WeaversTouch),
-            _ => invalid(),
-        }
-    }
     pub fn value(self, item: &ForgeSnapshot) -> i32 {
         match self {
             Self::ForgingPotential => i32::from(item.status.forging_potential),
@@ -353,8 +337,188 @@ impl ForgeWrite {
         self.mutation.project(&mut projected);
         projected
     }
-    pub(crate) fn expected_bytes(&self) -> &[u8] {
-        self.expected.bytes()
+}
+
+/// A roll batch on the wire: its count, then each slot and value.
+impl Wire for AffixRolls {
+    fn write(&self, w: &mut Writer) {
+        w.byte(self.len);
+        for change in self.changes() {
+            w.byte(change.slot);
+            w.byte(change.value);
+        }
+    }
+    fn read(r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
+        let count = r.count(32)?;
+        if count == 0 {
+            return invalid();
+        }
+        let mut changes = Vec::with_capacity(count);
+        for _ in 0..count {
+            changes.push(AffixRollChange {
+                slot: r.byte()?,
+                value: r.byte()?,
+            });
+        }
+        Self::new(&changes)
+    }
+}
+
+impl ForgeMutation {
+    /// The operation that carries it.
+    pub(crate) fn operation(self) -> u32 {
+        match self {
+            Self::AddAffix { .. } => op::ADD_AFFIX,
+            Self::RemoveAffix { .. } => op::REMOVE_AFFIX,
+            Self::Affix { .. } => op::CHANGE_AFFIX,
+            Self::AffixRolls { .. } => op::CHANGE_AFFIX_ROLLS,
+            Self::ModifierRolls { .. } => op::CHANGE_MODIFIER_ROLLS,
+            Self::Status { .. } => op::SET_STATUS,
+            Self::Base { .. } => op::CHANGE_BASE,
+            Self::Identity { .. } => op::CHANGE_IDENTITY,
+        }
+    }
+    fn write(self, w: &mut Writer) {
+        match self {
+            Self::AddAffix {
+                id,
+                tier,
+                roll,
+                seal,
+                unrestricted,
+            } => {
+                w.u16(id);
+                w.byte(tier);
+                w.byte(roll);
+                w.byte(seal);
+                w.flag(unrestricted);
+            }
+            Self::RemoveAffix { slot, id, restore_potential } => {
+                w.byte(slot);
+                w.u16(id);
+                w.flag(restore_potential.is_some());
+                if let Some(potential) = restore_potential {
+                    w.byte(potential);
+                }
+            }
+            Self::Affix {
+                slot,
+                id,
+                tier,
+                roll,
+                seal,
+                unrestricted,
+            } => {
+                w.byte(slot);
+                w.u16(id);
+                w.byte(tier);
+                w.byte(roll);
+                w.byte(seal);
+                w.flag(unrestricted);
+            }
+            Self::AffixRolls { rolls, unrestricted } => {
+                w.flag(unrestricted);
+                w.put(&rolls);
+            }
+            Self::ModifierRolls { array, rolls, unrestricted } => {
+                w.byte(array as u8);
+                w.flag(unrestricted);
+                w.put(&rolls);
+            }
+            Self::Status { field, value, unrestricted } => {
+                w.byte(field as u8);
+                w.byte(value);
+                w.flag(unrestricted);
+            }
+            Self::Base {
+                item_type,
+                sub_type,
+                unrestricted,
+            } => {
+                w.byte(item_type);
+                w.u16(sub_type);
+                w.flag(unrestricted);
+            }
+            Self::Identity {
+                id,
+                sub_type,
+                rarity,
+                unrestricted,
+            } => {
+                w.u16(id);
+                w.byte(sub_type);
+                w.byte(rarity);
+                w.flag(unrestricted);
+            }
+        }
+    }
+    fn read(operation: u32, r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
+        Ok(match operation {
+            op::ADD_AFFIX => Self::AddAffix {
+                id: r.u16()?,
+                tier: r.byte()?,
+                roll: r.byte()?,
+                seal: r.byte()?,
+                unrestricted: r.flag()?,
+            },
+            op::REMOVE_AFFIX => Self::RemoveAffix {
+                slot: r.byte()?,
+                id: r.u16()?,
+                restore_potential: if r.flag()? { Some(r.byte()?) } else { None },
+            },
+            op::CHANGE_AFFIX => Self::Affix {
+                slot: r.byte()?,
+                id: r.u16()?,
+                tier: r.byte()?,
+                roll: r.byte()?,
+                seal: r.byte()?,
+                unrestricted: r.flag()?,
+            },
+            op::CHANGE_AFFIX_ROLLS => {
+                let unrestricted = r.flag()?;
+                Self::AffixRolls { rolls: r.get()?, unrestricted }
+            }
+            op::CHANGE_MODIFIER_ROLLS => {
+                let array = RollArray::try_from(r.byte()?)?;
+                let unrestricted = r.flag()?;
+                Self::ModifierRolls {
+                    array,
+                    rolls: r.get()?,
+                    unrestricted,
+                }
+            }
+            op::SET_STATUS => Self::Status {
+                field: StatusField::try_from(i32::from(r.byte()?))?,
+                value: r.byte()?,
+                unrestricted: r.flag()?,
+            },
+            op::CHANGE_BASE => Self::Base {
+                item_type: r.byte()?,
+                sub_type: r.u16()?,
+                unrestricted: r.flag()?,
+            },
+            op::CHANGE_IDENTITY => Self::Identity {
+                id: r.u16()?,
+                sub_type: r.byte()?,
+                rarity: r.byte()?,
+                unrestricted: r.flag()?,
+            },
+            _ => return invalid(),
+        })
+    }
+}
+
+impl ForgeWrite {
+    /// Its body after the dispatcher: the manager, the mutation's fields, then the expected item.
+    pub(crate) fn write(&self, w: &mut Writer) {
+        w.u64(self.expected_manager);
+        self.mutation.write(w);
+        w.put(&self.expected);
+    }
+    pub(crate) fn read(dispatcher: DispatcherSpec, operation: u32, r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
+        let manager = r.u64()?;
+        let mutation = ForgeMutation::read(operation, r)?;
+        Self::from_checked(dispatcher, manager, r.get()?, mutation)
     }
 }
 

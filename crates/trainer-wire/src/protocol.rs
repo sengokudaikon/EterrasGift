@@ -6,8 +6,8 @@
 #![forbid(unsafe_code)]
 
 use crate::{
-    forge,
-    write::{ForgeMutation, ForgeWrite, MAX_EXPECTED_BYTES},
+    codec::{Reader, Writer, wire_enum},
+    write::{ForgeWrite, MAX_EXPECTED_BYTES},
 };
 use std::{error::Error, fmt};
 
@@ -17,38 +17,11 @@ pub fn is_build_id(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-/// Every operation number the pipe carries, by name. A number never returns once retired.
-pub mod op {
-    pub const CHANGE_AFFIX: u32 = 1;
-    pub const CHANGE_AFFIX_ROLLS: u32 = 2;
-    pub const DESCRIBE_UNIQUE: u32 = 4;
-    pub const PREVIEW_UNIQUE: u32 = 5;
-    pub const DISCOVER: u32 = 6;
-    pub const STATUS: u32 = 7;
-    pub const MAP_ROLL: u32 = 9;
-    pub const SET_STATUS: u32 = 10;
-    pub const CHANGE_BASE: u32 = 11;
-    pub const DESCRIBE_IMPLICITS: u32 = 12;
-    pub const ADD_AFFIX: u32 = 13;
-    pub const REMOVE_AFFIX: u32 = 14;
-    pub const CLEAR_HOOKS: u32 = 15;
-    pub const CHANGE_IDENTITY: u32 = 17;
-    pub const READ_FORGE: u32 = 18;
-    pub const READ_LOCALE: u32 = 20;
-    pub const UNLOAD: u32 = 25;
-    pub const SET_GAMEPLAY_HOOK: u32 = 26;
-    pub const READ_GAMEPLAY_HOOK: u32 = 27;
-    pub const CHANGE_MODIFIER_ROLLS: u32 = 28;
-    pub const MAP_MODIFIER_ROLL: u32 = 29;
-    pub const REGISTER_AFFIXES: u32 = 30;
-    pub const READ_FIELDS: u32 = 31;
-    pub const WRITE_FIELDS: u32 = 32;
-    pub const READ_GAMEPLAY_HOOKS: u32 = 33;
-}
+pub use request::op;
 
 pub const MAGIC: u32 = 0x4546_4735;
 pub const REQUEST_HEADER_SIZE: usize = 12;
-mod request;
+pub(crate) mod request;
 pub const RESPONSE_HEADER_SIZE: usize = 12;
 /// Maximum payload size, excluding the response header.
 pub const MAX_RESPONSE_SIZE: usize = 1024 * 1024;
@@ -225,35 +198,18 @@ impl RequestFrame {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u32)]
-pub enum ResponseCode {
-    Done = 0,
-    Failed = 1,
-    NotReady = 2,
-    StaleItem = 3,
-    Refused = 4,
-    OfflineRequired = 5,
-    RestartRequired = 6,
-    /// Offline InGame instance between player wrappers; no operation started.
-    CharacterLoading = 7,
-}
-
-impl TryFrom<u32> for ResponseCode {
-    type Error = ProtocolError;
-
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        Ok(match value {
-            0 => Self::Done,
-            1 => Self::Failed,
-            2 => Self::NotReady,
-            3 => Self::StaleItem,
-            4 => Self::Refused,
-            5 => Self::OfflineRequired,
-            6 => Self::RestartRequired,
-            7 => Self::CharacterLoading,
-            _ => return Err(ProtocolError::InvalidData),
-        })
+wire_enum! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum ResponseCode: u32 {
+        Done = 0,
+        Failed = 1,
+        NotReady = 2,
+        StaleItem = 3,
+        Refused = 4,
+        OfflineRequired = 5,
+        RestartRequired = 6,
+        /// Offline InGame instance between player wrappers; no operation started.
+        CharacterLoading = 7,
     }
 }
 impl ResponseCode {
@@ -322,14 +278,11 @@ pub struct Discovery {
 impl Discovery {
     pub fn decode(payload: &[u8], expected_pid: u32) -> Result<Self, ProtocolError> {
         let mut reader = Reader::new(payload);
-        let build_id = reader.text()?.to_owned();
+        let build_id = reader.text(4096)?.to_owned();
         if reader.u32()? != expected_pid {
             return Err(ProtocolError::InvalidData);
         }
-        let dispatcher = DispatcherSpec {
-            rva: reader.u64()?,
-            bytes: reader.array()?,
-        };
+        let dispatcher = reader.get()?;
         reader.finish()?;
         let discovery = Self { build_id, dispatcher };
         discovery.validate()?;
@@ -337,12 +290,11 @@ impl Discovery {
     }
     pub fn encode(&self, pid: u32) -> Result<Vec<u8>, ProtocolError> {
         self.validate()?;
-        let mut out = Vec::new();
-        append_text(&mut out, &self.build_id)?;
-        out.extend_from_slice(&pid.to_le_bytes());
-        out.extend_from_slice(&self.dispatcher.rva.to_le_bytes());
-        out.extend_from_slice(&self.dispatcher.bytes);
-        Ok(out)
+        let mut w = Writer::default();
+        w.text(&self.build_id);
+        w.u32(pid);
+        w.put(&self.dispatcher);
+        Ok(w.0)
     }
     fn validate(&self) -> Result<(), ProtocolError> {
         if !is_build_id(&self.build_id) {
@@ -385,58 +337,5 @@ impl RuntimeStatus {
         out[4..12].copy_from_slice(&self.manager.to_le_bytes());
         out[12..].copy_from_slice(&self.features_on.to_le_bytes());
         Ok(out)
-    }
-}
-
-fn append_text(out: &mut Vec<u8>, value: &str) -> Result<(), ProtocolError> {
-    if value.is_empty() || value.len() > 4096 {
-        return Err(ProtocolError::InvalidData);
-    }
-    out.extend_from_slice(&(value.len() as u32).to_le_bytes());
-    out.extend_from_slice(value.as_bytes());
-    Ok(())
-}
-
-pub(crate) struct Reader<'a> {
-    remaining: &'a [u8],
-}
-
-impl<'a> Reader<'a> {
-    pub(crate) fn new(remaining: &'a [u8]) -> Self {
-        Self { remaining }
-    }
-
-    pub(crate) fn take(&mut self, length: usize) -> Result<&'a [u8], ProtocolError> {
-        let (value, remaining) = self.remaining.split_at_checked(length).ok_or(ProtocolError::InvalidData)?;
-        self.remaining = remaining;
-        Ok(value)
-    }
-
-    pub(crate) fn array<const N: usize>(&mut self) -> Result<[u8; N], ProtocolError> {
-        self.take(N)?.try_into().map_err(|_| ProtocolError::InvalidData)
-    }
-
-    pub(crate) fn byte(&mut self) -> Result<u8, ProtocolError> {
-        Ok(self.array::<1>()?[0])
-    }
-
-    pub(crate) fn u32(&mut self) -> Result<u32, ProtocolError> {
-        Ok(u32::from_le_bytes(self.array()?))
-    }
-
-    pub(crate) fn u64(&mut self) -> Result<u64, ProtocolError> {
-        Ok(u64::from_le_bytes(self.array()?))
-    }
-
-    fn text(&mut self) -> Result<&'a str, ProtocolError> {
-        let length = self.u32()? as usize;
-        if !(1..=4096).contains(&length) {
-            return Err(ProtocolError::InvalidData);
-        }
-        std::str::from_utf8(self.take(length)?).map_err(|_| ProtocolError::InvalidData)
-    }
-
-    pub(crate) fn finish(self) -> Result<(), ProtocolError> {
-        if self.remaining.is_empty() { Ok(()) } else { Err(ProtocolError::InvalidData) }
     }
 }

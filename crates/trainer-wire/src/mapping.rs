@@ -10,7 +10,10 @@
 
 #![forbid(unsafe_code)]
 
-use crate::protocol::{MAX_RESPONSE_SIZE, ProtocolError};
+use crate::{
+    codec::{Reader, Wire, Writer, invalid, wire_enum},
+    protocol::{DispatcherSpec, ProtocolError, request::Body},
+};
 use std::collections::BTreeSet;
 
 pub const MAX_TEXT_BYTES: usize = 32768;
@@ -22,22 +25,12 @@ pub const MAX_ROLL_IDS: usize = 8;
 pub const PAGE_SIZE: usize = 16;
 pub const SAMPLE_COUNT: usize = 256;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(i32)]
-pub enum MappingTarget {
-    Affix = 0,
-    Unique = 1,
-    Implicit = 2,
-}
-impl TryFrom<i32> for MappingTarget {
-    type Error = ProtocolError;
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::Affix),
-            1 => Ok(Self::Unique),
-            2 => Ok(Self::Implicit),
-            _ => invalid(),
-        }
+wire_enum! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum MappingTarget: i32 {
+        Affix = 0,
+        Unique = 1,
+        Implicit = 2,
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,21 +99,21 @@ pub struct UniqueRollPreview {
 /// Conditional presentation read. Tokens are compared against a freshly rooted graph.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForgeDescriptionRequest {
-    pub(crate) dispatcher: crate::protocol::DispatcherSpec,
+    pub(crate) dispatcher: DispatcherSpec,
     pub(crate) manager: u64,
     pub(crate) expected: crate::forge::CheckedSnapshot,
 }
 impl ForgeDescriptionRequest {
-    pub fn new(dispatcher: crate::protocol::DispatcherSpec, manager: u64, expected: crate::forge::ForgeSnapshot) -> Result<Self, ProtocolError> {
+    pub fn new(dispatcher: DispatcherSpec, manager: u64, expected: crate::forge::ForgeSnapshot) -> Result<Self, ProtocolError> {
         Self::from_checked(dispatcher, manager, crate::forge::CheckedSnapshot::new(expected)?)
     }
-    pub(crate) fn from_checked(dispatcher: crate::protocol::DispatcherSpec, manager: u64, expected: crate::forge::CheckedSnapshot) -> Result<Self, ProtocolError> {
+    pub(crate) fn from_checked(dispatcher: DispatcherSpec, manager: u64, expected: crate::forge::CheckedSnapshot) -> Result<Self, ProtocolError> {
         if manager == 0 {
             return invalid();
         }
         Ok(Self { dispatcher, manager, expected })
     }
-    pub fn dispatcher(&self) -> crate::protocol::DispatcherSpec {
+    pub fn dispatcher(&self) -> DispatcherSpec {
         self.dispatcher
     }
     pub fn expected(&self) -> &crate::forge::ForgeSnapshot {
@@ -143,7 +136,7 @@ pub struct UniquePreviewRequest {
     changes: Vec<UniqueRollChange>,
 }
 impl UniquePreviewRequest {
-    pub fn new(dispatcher: crate::protocol::DispatcherSpec, manager: u64, expected: crate::forge::ForgeSnapshot, changes: Vec<UniqueRollChange>) -> Result<Self, ProtocolError> {
+    pub fn new(dispatcher: DispatcherSpec, manager: u64, expected: crate::forge::ForgeSnapshot, changes: Vec<UniqueRollChange>) -> Result<Self, ProtocolError> {
         Self::from_target(ForgeDescriptionRequest::new(dispatcher, manager, expected)?, changes)
     }
     pub(crate) fn from_target(target: ForgeDescriptionRequest, changes: Vec<UniqueRollChange>) -> Result<Self, ProtocolError> {
@@ -158,7 +151,7 @@ impl UniquePreviewRequest {
         }
         Ok(Self { target, changes })
     }
-    pub fn dispatcher(&self) -> crate::protocol::DispatcherSpec {
+    pub fn dispatcher(&self) -> DispatcherSpec {
         self.target.dispatcher()
     }
     pub fn expected(&self) -> &crate::forge::ForgeSnapshot {
@@ -192,7 +185,7 @@ pub struct AffixMappingQuery {
 }
 impl AffixMappingQuery {
     pub fn new(
-        dispatcher: crate::protocol::DispatcherSpec,
+        dispatcher: DispatcherSpec,
         manager: u64,
         expected: crate::forge::ForgeSnapshot,
         slot: u8,
@@ -208,7 +201,7 @@ impl AffixMappingQuery {
         }
         Ok(Self { target, slot, start, draft })
     }
-    pub fn dispatcher(&self) -> crate::protocol::DispatcherSpec {
+    pub fn dispatcher(&self) -> DispatcherSpec {
         self.target.dispatcher
     }
     pub fn slot(&self) -> u8 {
@@ -240,7 +233,7 @@ pub struct ModifierMappingQuery {
 }
 impl ModifierMappingQuery {
     pub fn new(
-        dispatcher: crate::protocol::DispatcherSpec,
+        dispatcher: DispatcherSpec,
         manager: u64,
         expected: crate::forge::ForgeSnapshot,
         address: MappingAddress,
@@ -265,7 +258,7 @@ impl ModifierMappingQuery {
         }
         Ok(Self { target, address, start, draft })
     }
-    pub fn dispatcher(&self) -> crate::protocol::DispatcherSpec {
+    pub fn dispatcher(&self) -> DispatcherSpec {
         self.target.dispatcher
     }
     pub fn address(&self) -> MappingAddress {
@@ -285,64 +278,141 @@ impl ModifierMappingQuery {
     }
 }
 
-fn invalid<T>() -> Result<T, ProtocolError> {
-    Err(ProtocolError::InvalidData)
-}
-struct Writer(Vec<u8>);
-impl Writer {
-    fn bytes(&mut self, bytes: &[u8]) -> Result<(), ProtocolError> {
-        if self.0.len().checked_add(bytes.len()).is_none_or(|n| n > MAX_RESPONSE_SIZE) {
-            return invalid();
-        }
-        self.0.extend_from_slice(bytes);
-        Ok(())
+// The queries as requests carry them, after the envelope's dispatcher: the manager, the query's own fields, then the
+// expected item.
+
+impl Wire for UniqueRollChange {
+    fn write(&self, w: &mut Writer) {
+        w.byte(self.index);
+        w.byte(self.value);
     }
-    fn int(&mut self, n: i32) -> Result<(), ProtocolError> {
-        self.bytes(&n.to_le_bytes())
-    }
-    fn text(&mut self, text: &str, cap: usize) -> Result<(), ProtocolError> {
-        if text.len() > cap {
-            return invalid();
-        }
-        self.int(text.len() as i32)?;
-        self.bytes(text.as_bytes())
-    }
-    fn quantity(&mut self, n: f64) -> Result<(), ProtocolError> {
-        if !n.is_finite() {
-            return invalid();
-        }
-        self.bytes(&n.to_le_bytes())
+    fn read(r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
+        Ok(Self {
+            index: r.byte()?,
+            value: r.byte()?,
+        })
     }
 }
-struct Reader<'a>(&'a [u8]);
-impl<'a> Reader<'a> {
-    fn bytes(&mut self, len: usize) -> Result<&'a [u8], ProtocolError> {
-        let (head, tail) = self.0.split_at_checked(len).ok_or(ProtocolError::InvalidData)?;
-        self.0 = tail;
-        Ok(head)
-    }
-    fn int(&mut self) -> Result<i32, ProtocolError> {
-        Ok(i32::from_le_bytes(self.bytes(4)?.try_into().map_err(|_| ProtocolError::InvalidData)?))
-    }
-    fn count(&mut self, cap: usize) -> Result<usize, ProtocolError> {
-        let n = self.int()?;
-        if n < 0 || n as usize > cap {
-            return invalid();
+
+/// Whether it samples, then where it starts when it does.
+impl Wire for MappingStart {
+    fn write(&self, w: &mut Writer) {
+        w.flag(matches!(self, Self::Samples(_)));
+        if let Self::Samples(start) = *self {
+            w.byte(start);
         }
-        Ok(n as usize)
     }
-    fn text(&mut self, cap: usize) -> Result<String, ProtocolError> {
-        let n = self.count(cap)?;
-        std::str::from_utf8(self.bytes(n)?).map(str::to_owned).map_err(|_| ProtocolError::InvalidData)
-    }
-    fn quantity(&mut self) -> Result<f64, ProtocolError> {
-        let n = f64::from_le_bytes(self.bytes(8)?.try_into().map_err(|_| ProtocolError::InvalidData)?);
-        if !n.is_finite() {
-            return invalid();
-        }
-        Ok(n)
+    fn read(r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
+        Ok(if r.flag()? { Self::Samples(r.byte()?) } else { Self::ContextOnly })
     }
 }
+
+impl Wire for AffixMappingDraft {
+    fn write(&self, w: &mut Writer) {
+        w.u16(self.id);
+        w.byte(self.tier);
+        w.byte(self.roll);
+        w.byte(self.seal);
+    }
+    fn read(r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
+        Ok(Self {
+            id: r.u16()?,
+            tier: r.byte()?,
+            roll: r.byte()?,
+            seal: r.byte()?,
+        })
+    }
+}
+
+/// Roll changes behind their count.
+fn write_changes(w: &mut Writer, changes: &[UniqueRollChange]) {
+    w.byte(changes.len() as u8);
+    for change in changes {
+        w.put(change);
+    }
+}
+/// Roll changes behind their count: at most `limit`, and at least one when `some`.
+fn read_changes(r: &mut Reader<'_>, limit: usize, some: bool) -> Result<Vec<UniqueRollChange>, ProtocolError> {
+    let count = r.count(limit)?;
+    if some && count == 0 {
+        return invalid();
+    }
+    (0..count).map(|_| r.get()).collect()
+}
+
+impl Body for ForgeDescriptionRequest {
+    fn write(&self, w: &mut Writer) {
+        w.u64(self.manager);
+        w.put(&self.expected);
+    }
+    fn read(dispatcher: DispatcherSpec, r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
+        let manager = r.u64()?;
+        Self::from_checked(dispatcher, manager, r.get()?)
+    }
+}
+
+impl Body for UniquePreviewRequest {
+    fn write(&self, w: &mut Writer) {
+        w.u64(self.target.manager);
+        write_changes(w, &self.changes);
+        w.put(&self.target.expected);
+    }
+    fn read(dispatcher: DispatcherSpec, r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
+        let manager = r.u64()?;
+        let changes = read_changes(r, 8, true)?;
+        Self::from_target(ForgeDescriptionRequest::from_checked(dispatcher, manager, r.get()?)?, changes)
+    }
+}
+
+impl Body for AffixMappingQuery {
+    fn write(&self, w: &mut Writer) {
+        w.u64(self.target.manager);
+        w.byte(self.slot);
+        w.put(&self.start);
+        w.flag(self.draft.is_some());
+        if let Some(draft) = &self.draft {
+            w.put(draft);
+        }
+        w.put(&self.target.expected);
+    }
+    fn read(dispatcher: DispatcherSpec, r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
+        let manager = r.u64()?;
+        let slot = r.byte()?;
+        let start = r.get()?;
+        let draft = if r.flag()? { Some(r.get()?) } else { None };
+        Self::from_target(ForgeDescriptionRequest::from_checked(dispatcher, manager, r.get()?)?, slot, start, draft)
+    }
+}
+
+impl Body for ModifierMappingQuery {
+    fn write(&self, w: &mut Writer) {
+        w.u64(self.target.manager);
+        w.byte(self.address.target as u8);
+        w.byte(self.address.index);
+        w.flag(self.address.line.is_some());
+        if let Some(line) = self.address.line {
+            w.u32(line);
+        }
+        w.put(&self.start);
+        write_changes(w, &self.draft);
+        w.put(&self.target.expected);
+    }
+    fn read(dispatcher: DispatcherSpec, r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
+        let manager = r.u64()?;
+        let target = MappingTarget::try_from(i32::from(r.byte()?))?;
+        let index = r.byte()?;
+        let line = if r.flag()? { Some(r.u32()?) } else { None };
+        let start = r.get()?;
+        let draft = read_changes(r, 7, false)?;
+        Self::from_target(
+            ForgeDescriptionRequest::from_checked(dispatcher, manager, r.get()?)?,
+            MappingAddress { target, index, line },
+            start,
+            draft,
+        )
+    }
+}
+
 fn valid_page(page: &RawMappingPage) -> Result<(), ProtocolError> {
     page.address.validate()?;
     if page.language.trim().is_empty() || page.language.len() > MAX_LANGUAGE_BYTES || page.context.len() > MAX_CONTEXT_BYTES || page.samples.len() != page.start.count() {
@@ -357,44 +427,39 @@ fn valid_page(page: &RawMappingPage) -> Result<(), ProtocolError> {
 }
 pub fn encode_mapping(page: &RawMappingPage) -> Result<Vec<u8>, ProtocolError> {
     valid_page(page)?;
-    let mut w = Writer(Vec::new());
-    w.text(&page.language, MAX_LANGUAGE_BYTES)?;
-    w.int(page.context.len() as i32)?;
-    w.bytes(&page.context)?;
-    w.int(page.address.target as i32)?;
-    w.int(i32::from(page.address.index))?;
-    w.int(page.address.line.map_or(-1, |line| line as i32))?;
+    let mut w = Writer::default();
+    w.text(&page.language);
+    w.blob(&page.context);
+    w.i32(page.address.target as i32);
+    w.i32(i32::from(page.address.index));
+    w.i32(page.address.line.map_or(-1, |line| line as i32));
     if matches!(page.start, MappingStart::Samples(_)) {
-        w.int(page.samples.len() as i32)?;
+        w.u32(page.samples.len() as u32);
         for sample in &page.samples {
-            w.quantity(sample.raw_quantity)?;
-            w.text(&sample.display, MAX_TEXT_BYTES)?;
-            w.text(&sample.unit, MAX_TEXT_BYTES)?;
-            if sample.effects.len() > MAX_EFFECTS {
+            if !sample.raw_quantity.is_finite() || sample.effects.len() > MAX_EFFECTS {
                 return invalid();
             }
-            w.int(sample.effects.len() as i32)?;
+            w.f64(sample.raw_quantity);
+            w.text_within(&sample.display, MAX_TEXT_BYTES)?;
+            w.text_within(&sample.unit, MAX_TEXT_BYTES)?;
+            w.u32(sample.effects.len() as u32);
             for effect in &sample.effects {
-                w.text(effect, MAX_TEXT_BYTES)?;
+                w.text_within(effect, MAX_TEXT_BYTES)?;
             }
         }
     }
-    Ok(w.0)
+    w.finish()
 }
 /// `start` and expected address come from the submitted request: the response
 /// does not echo its start position. This function cannot establish delivery.
 pub fn decode_mapping(payload: &[u8], expected: MappingAddress, start: MappingStart) -> Result<RawMappingPage, ProtocolError> {
-    if payload.len() > MAX_RESPONSE_SIZE {
-        return invalid();
-    }
+    let mut r = Reader::reply(payload)?;
     expected.validate()?;
-    let mut r = Reader(payload);
-    let language = r.text(MAX_LANGUAGE_BYTES)?;
-    let length = r.count(MAX_CONTEXT_BYTES)?;
-    let context = r.bytes(length)?.to_vec();
-    let target = MappingTarget::try_from(r.int()?)?;
-    let index = u8::try_from(r.int()?).map_err(|_| ProtocolError::InvalidData)?;
-    let line = match r.int()? {
+    let language = r.text(MAX_LANGUAGE_BYTES)?.to_owned();
+    let context = r.blob(MAX_CONTEXT_BYTES)?.to_vec();
+    let target = MappingTarget::try_from(r.i32()?)?;
+    let index = u8::try_from(r.i32()?).map_err(|_| ProtocolError::InvalidData)?;
+    let line = match r.i32()? {
         -1 => None,
         n if n >= 0 => Some(n as u32),
         _ => return invalid(),
@@ -405,15 +470,18 @@ pub fn decode_mapping(payload: &[u8], expected: MappingAddress, start: MappingSt
     }
     let mut samples = Vec::new();
     if matches!(start, MappingStart::Samples(_)) {
-        let count = r.count(PAGE_SIZE)?;
+        let count = r.count32(PAGE_SIZE)?;
         if count != start.count() {
             return invalid();
         }
         for _ in 0..count {
-            let raw_quantity = r.quantity()?;
-            let display = r.text(MAX_TEXT_BYTES)?;
-            let unit = r.text(MAX_TEXT_BYTES)?;
-            let effects = (0..r.count(MAX_EFFECTS)?).map(|_| r.text(MAX_TEXT_BYTES)).collect::<Result<_, _>>()?;
+            let raw_quantity = r.f64()?;
+            if !raw_quantity.is_finite() {
+                return invalid();
+            }
+            let display = r.text(MAX_TEXT_BYTES)?.to_owned();
+            let unit = r.text(MAX_TEXT_BYTES)?.to_owned();
+            let effects = (0..r.count32(MAX_EFFECTS)?).map(|_| r.text(MAX_TEXT_BYTES).map(str::to_owned)).collect::<Result<_, _>>()?;
             samples.push(RawValueSample {
                 raw_quantity,
                 display,
@@ -422,9 +490,7 @@ pub fn decode_mapping(payload: &[u8], expected: MappingAddress, start: MappingSt
             });
         }
     }
-    if !r.0.is_empty() {
-        return invalid();
-    }
+    r.finish()?;
     let page = RawMappingPage {
         language,
         context,
@@ -452,35 +518,32 @@ fn valid_modifiers(modifiers: &[ModifierSnapshot]) -> Result<(), ProtocolError> 
 }
 pub fn encode_modifiers(modifiers: &[ModifierSnapshot]) -> Result<Vec<u8>, ProtocolError> {
     valid_modifiers(modifiers)?;
-    let mut w = Writer(Vec::new());
-    w.int(modifiers.len() as i32)?;
+    let mut w = Writer::default();
+    w.u32(modifiers.len() as u32);
     for m in modifiers {
-        w.int(m.index as i32)?;
-        w.text(&m.text, MAX_TEXT_BYTES)?;
-        w.text(&m.range, MAX_TEXT_BYTES)?;
-        w.int(m.roll_ids.len() as i32)?;
+        w.i32(m.index as i32);
+        w.text_within(&m.text, MAX_TEXT_BYTES)?;
+        w.text_within(&m.range, MAX_TEXT_BYTES)?;
+        w.u32(m.roll_ids.len() as u32);
         for id in &m.roll_ids {
-            w.int(i32::from(*id))?;
+            w.i32(i32::from(*id));
         }
-        w.int(i32::from(m.editable))?;
+        w.i32(i32::from(m.editable));
     }
-    Ok(w.0)
+    w.finish()
 }
 pub fn decode_modifiers(payload: &[u8]) -> Result<Vec<ModifierSnapshot>, ProtocolError> {
-    if payload.len() > MAX_RESPONSE_SIZE {
-        return invalid();
-    }
-    let mut r = Reader(payload);
-    let count = r.count(MAX_MODIFIERS)?;
+    let mut r = Reader::reply(payload)?;
+    let count = r.count32(MAX_MODIFIERS)?;
     let mut modifiers = Vec::with_capacity(count);
     for _ in 0..count {
-        let index = u32::try_from(r.int()?).map_err(|_| ProtocolError::InvalidData)?;
-        let text = r.text(MAX_TEXT_BYTES)?;
-        let range = r.text(MAX_TEXT_BYTES)?;
-        let roll_ids = (0..r.count(MAX_ROLL_IDS)?)
-            .map(|_| u8::try_from(r.int()?).map_err(|_| ProtocolError::InvalidData))
+        let index = u32::try_from(r.i32()?).map_err(|_| ProtocolError::InvalidData)?;
+        let text = r.text(MAX_TEXT_BYTES)?.to_owned();
+        let range = r.text(MAX_TEXT_BYTES)?.to_owned();
+        let roll_ids = (0..r.count32(MAX_ROLL_IDS)?)
+            .map(|_| u8::try_from(r.i32()?).map_err(|_| ProtocolError::InvalidData))
             .collect::<Result<_, _>>()?;
-        let editable = match r.int()? {
+        let editable = match r.i32()? {
             0 => false,
             1 => true,
             _ => return invalid(),
@@ -493,9 +556,7 @@ pub fn decode_modifiers(payload: &[u8]) -> Result<Vec<ModifierSnapshot>, Protoco
             editable,
         });
     }
-    if !r.0.is_empty() {
-        return invalid();
-    }
+    r.finish()?;
     valid_modifiers(&modifiers)?;
     Ok(modifiers)
 }

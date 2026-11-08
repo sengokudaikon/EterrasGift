@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod bootstrap;
+mod codec;
 pub mod definitions;
 pub mod field_edits;
 pub mod fields;

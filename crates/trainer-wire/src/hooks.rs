@@ -1,5 +1,8 @@
 //! Concrete supported gameplay effects; arbitrary signatures never cross the pipe.
-use crate::protocol::ProtocolError;
+use crate::{
+    codec::{Reader, Writer, wire_enum},
+    protocol::ProtocolError,
+};
 
 /// A bounded settings snapshot: existing scalar/pair encodings use the low word; up to four game floats use both.
 pub type HookValue = u128;
@@ -351,13 +354,15 @@ impl GameplayHook {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PatchState {
-    Original,
-    Patched,
-    Unknown,
-    /// Entry bytes are patched and another feature still owns the patch group.
-    Shared,
+wire_enum! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum PatchState: u8 {
+        Original = 0,
+        Patched = 1,
+        Unknown = 2,
+        /// Entry bytes are patched and another feature still owns the patch group.
+        Shared = 3,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -375,41 +380,27 @@ impl HookObservation {
                 matches!(self.patch, PatchState::Original | PatchState::Shared)
             }
     }
+    /// Its state, whether it is on, then its value: eight bytes, or sixteen for a value that needs them.
     pub fn encode(self) -> Vec<u8> {
-        let mut bytes = vec![
-            match self.patch {
-                PatchState::Original => 0,
-                PatchState::Patched => 1,
-                PatchState::Unknown => 2,
-                PatchState::Shared => 3,
-            },
-            u8::from(self.enabled),
-        ];
-        bytes.extend((self.value as u64).to_le_bytes());
+        let mut w = Writer::default();
+        w.byte(self.patch as u8);
+        w.flag(self.enabled);
+        w.u64(self.value as u64);
         if self.value > u64::MAX as HookValue {
-            bytes.extend(((self.value >> 64) as u64).to_le_bytes());
+            w.u64((self.value >> 64) as u64);
         }
-        bytes
+        w.0
     }
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
-        let [patch, enabled @ 0..=1, ref value @ ..] = *bytes else {
-            return Err(ProtocolError::InvalidData);
-        };
-        Ok(Self {
-            patch: match patch {
-                0 => PatchState::Original,
-                1 => PatchState::Patched,
-                2 => PatchState::Unknown,
-                3 => PatchState::Shared,
-                _ => return Err(ProtocolError::InvalidData),
-            },
-            enabled: enabled != 0,
-            value: match value.len() {
-                8 => u64::from_le_bytes(value.try_into().unwrap()).into(),
-                16 => HookValue::from_le_bytes(value.try_into().unwrap()),
-                _ => return Err(ProtocolError::InvalidData),
-            },
-        })
+        let mut r = Reader::new(bytes);
+        let patch = PatchState::try_from(r.byte()?)?;
+        let enabled = r.flag()?;
+        let mut value = HookValue::from(r.u64()?);
+        if !r.is_empty() {
+            value |= HookValue::from(r.u64()?) << 64;
+        }
+        r.finish()?;
+        Ok(Self { patch, enabled, value })
     }
     /// The reply to `ReadGameplayHooks`: each observation behind its length, in the order asked.
     pub fn encode_all(observations: &[Self]) -> Vec<u8> {
@@ -422,19 +413,14 @@ impl HookObservation {
         bytes
     }
     /// Exactly `count` observations and nothing after them.
-    pub fn decode_all(mut bytes: &[u8], count: usize) -> Result<Vec<Self>, ProtocolError> {
+    pub fn decode_all(bytes: &[u8], count: usize) -> Result<Vec<Self>, ProtocolError> {
+        let mut r = Reader::new(bytes);
         let mut observations = Vec::with_capacity(count);
         for _ in 0..count {
-            let [length, ref rest @ ..] = *bytes else {
-                return Err(ProtocolError::InvalidData);
-            };
-            let (encoded, rest) = rest.split_at_checked(usize::from(length)).ok_or(ProtocolError::InvalidData)?;
-            observations.push(Self::decode(encoded)?);
-            bytes = rest;
+            let length = usize::from(r.byte()?);
+            observations.push(Self::decode(r.take(length)?)?);
         }
-        if !bytes.is_empty() {
-            return Err(ProtocolError::InvalidData);
-        }
+        r.finish()?;
         Ok(observations)
     }
 }

@@ -1,5 +1,5 @@
 //! Scalar observations and player identity tokens shared by game accessors.
-use crate::protocol::ProtocolError;
+use crate::{codec::wire_enum, protocol::ProtocolError};
 
 /// Ephemeral equality tokens only. Both may be reused after object death;
 /// the trainer must additionally bind its process, connection and observation.
@@ -28,35 +28,19 @@ impl ObservedObjectIdentity {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u32)]
-pub enum PlayerUnavailable {
-    OfflineRequired = 1,
-    /// No manager wrapper or its native object has been destroyed; global gate loss.
-    ManagerAbsent = 2,
-    /// Expected wrapper/native manager identity no longer matches; global gate loss.
-    ManagerChanged = 3,
-    ActorCacheAbsent = 4,
-    StatsAbsent = 5,
-    /// The actor/stats native object is gone; the manager gate may still hold.
-    NativeObjectDestroyed = 6,
-    GraphChanged = 7,
-    UnsupportedStatsClass = 8,
-}
-
-impl TryFrom<u32> for PlayerUnavailable {
-    type Error = ProtocolError;
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            1 => Ok(Self::OfflineRequired),
-            2 => Ok(Self::ManagerAbsent),
-            3 => Ok(Self::ManagerChanged),
-            4 => Ok(Self::ActorCacheAbsent),
-            5 => Ok(Self::StatsAbsent),
-            6 => Ok(Self::NativeObjectDestroyed),
-            7 => Ok(Self::GraphChanged),
-            8 => Ok(Self::UnsupportedStatsClass),
-            _ => Err(ProtocolError::InvalidData),
-        }
+wire_enum! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum PlayerUnavailable: u32 {
+        OfflineRequired = 1,
+        /// No manager wrapper or its native object has been destroyed; global gate loss.
+        ManagerAbsent = 2,
+        /// Expected wrapper/native manager identity no longer matches; global gate loss.
+        ManagerChanged = 3,
+        ActorCacheAbsent = 4,
+        StatsAbsent = 5,
+        /// The actor/stats native object is gone; the manager gate may still hold.
+        NativeObjectDestroyed = 6,
+        GraphChanged = 7,
+        UnsupportedStatsClass = 8,
     }
 }

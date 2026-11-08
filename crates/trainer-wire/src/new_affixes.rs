@@ -7,7 +7,10 @@
 
 #![forbid(unsafe_code)]
 
-use crate::protocol::ProtocolError;
+use crate::{
+    codec::{Reader, Wire, Writer, invalid},
+    protocol::ProtocolError,
+};
 
 pub const ID_RANGES: [std::ops::RangeInclusive<u16>; 2] = [1500..=2999, 3200..=4095];
 /// How every added definition's internal name starts.
@@ -64,5 +67,56 @@ impl NewAffix {
             && self.standard_effect > -1.0
             && self.properties.iter().all(|line| line.minimum.is_finite() && line.maximum.is_finite());
         if valid { Ok(()) } else { Err(ProtocolError::InvalidData) }
+    }
+}
+
+/// An affix as a request carries it: its ID, two texts, the modifier's bits, then its lines behind their count.
+impl Wire for NewAffix {
+    fn write(&self, w: &mut Writer) {
+        w.u16(self.id);
+        w.text(&self.name);
+        w.text(&self.display_name);
+        w.f32(self.standard_effect);
+        w.byte(self.properties.len() as u8);
+        for line in &self.properties {
+            w.byte(line.property);
+            w.byte(line.special_tag);
+            w.i32(line.tags);
+            w.i32(line.extra_tag);
+            w.i32(line.modifier_type);
+            w.f32(line.minimum);
+            w.f32(line.maximum);
+        }
+    }
+    fn read(r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
+        let id = r.u16()?;
+        let name = r.text(MAX_TEXT)?.to_owned();
+        let display_name = r.text(MAX_TEXT)?.to_owned();
+        let standard_effect = r.f32()?;
+        let count = r.count(MAX_PROPERTIES)?;
+        if count == 0 {
+            return invalid();
+        }
+        let mut properties = Vec::with_capacity(count);
+        for _ in 0..count {
+            properties.push(StatLine {
+                property: r.byte()?,
+                special_tag: r.byte()?,
+                tags: r.i32()?,
+                extra_tag: r.i32()?,
+                modifier_type: r.i32()?,
+                minimum: r.f32()?,
+                maximum: r.f32()?,
+            });
+        }
+        let affix = Self {
+            id,
+            name,
+            display_name,
+            standard_effect,
+            properties,
+        };
+        affix.validate()?;
+        Ok(affix)
     }
 }

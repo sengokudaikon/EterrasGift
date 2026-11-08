@@ -554,5 +554,5 @@ fn unique_and_implicit_rolls_round_trip_project_and_stay_inside_their_arrays() {
         };
         assert!(ForgeWrite::edit(spec(), 1, item.clone(), mutation).is_err());
     }
-    assert!(RollArray::from_wire(0).is_err() && RollArray::from_wire(3).is_err());
+    assert!(RollArray::try_from(0).is_err() && RollArray::try_from(3).is_err());
 }

@@ -1,8 +1,12 @@
 //! Bounded read/apply snapshots for numeric editors. Tokens are equality evidence only, never dereference authority.
-use crate::protocol::{ProtocolError, Reader};
+use crate::{
+    codec::{Reader, Wire, Writer, invalid},
+    protocol::ProtocolError,
+};
 
 pub const MAX_FIELDS: usize = 4096;
 pub const MAX_BYTES: usize = 768 * 1024;
+pub const MAX_LABEL_BYTES: usize = 512;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
@@ -14,45 +18,78 @@ pub enum FieldSet {
     MonolithRun = 4,
     FactionStanding = 5,
 }
+
+/// What a field set is: its ID, whether its entries are held items (a zero removes one), how many fields it has when
+/// that is fixed, and the largest value each field takes. `largest` repeats: field `i` takes `largest[i % len]`.
+pub struct FieldSetSpec {
+    pub set: FieldSet,
+    pub id: &'static str,
+    pub held_items: bool,
+    pub fields: Option<usize>,
+    largest: &'static [i32],
+}
+
+const fn spec(set: FieldSet, id: &'static str, held_items: bool, fields: Option<usize>, largest: &'static [i32]) -> FieldSetSpec {
+    FieldSetSpec {
+        set,
+        id,
+        held_items,
+        fields,
+        largest,
+    }
+}
+
+/// Every field set, in the enum's order.
+pub const SPECS: [FieldSetSpec; FieldSet::COUNT] = {
+    use FieldSet::*;
+    const ANY: &[i32] = &[i32::MAX];
+    [
+        spec(Currency, "currency", false, Some(3), ANY),
+        spec(Keys, "keys", true, None, ANY),
+        spec(WovenEchoes, "woven-echoes", true, None, ANY),
+        spec(PointsEarned, "points-earned", false, Some(2), &[u16::MAX as i32]),
+        // Corruption, the Gaze of Orobyss, and whether the echo options were rerolled.
+        spec(MonolithRun, "monolith-run", false, Some(3), &[i32::MAX, 10_000, 1]),
+        // Rank, favor and reputation for each of the four factions.
+        spec(FactionStanding, "faction-standing", false, Some(12), &[i32::MAX, 999_999, i32::MAX]),
+    ]
+};
+
 impl FieldSet {
     pub const COUNT: usize = 6;
-    pub const ALL: [Self; Self::COUNT] = [Self::Currency, Self::Keys, Self::WovenEchoes, Self::PointsEarned, Self::MonolithRun, Self::FactionStanding];
-    pub const fn id(self) -> &'static str {
-        match self {
-            Self::Currency => "currency",
-            Self::Keys => "keys",
-            Self::WovenEchoes => "woven-echoes",
-            Self::PointsEarned => "points-earned",
-            Self::MonolithRun => "monolith-run",
-            Self::FactionStanding => "faction-standing",
+    /// Every set by its number on the pipe, checked against [`SPECS`] when the crate builds.
+    pub const ALL: [Self; Self::COUNT] = {
+        let mut all = [Self::Currency; Self::COUNT];
+        let mut index = 0;
+        while index < Self::COUNT {
+            assert!(SPECS[index].set as usize == index, "SPECS follows the enum's order");
+            all[index] = SPECS[index].set;
+            index += 1;
         }
+        all
+    };
+    pub const fn spec(self) -> &'static FieldSetSpec {
+        &SPECS[self as usize]
+    }
+    pub const fn id(self) -> &'static str {
+        self.spec().id
     }
     pub fn from_id(id: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|set| set.id() == id)
+        SPECS.iter().find(|spec| spec.id == id).map(|spec| spec.set)
     }
     pub(crate) fn decode(value: u8) -> Result<Self, ProtocolError> {
         Self::ALL.get(value as usize).copied().ok_or(ProtocolError::InvalidData)
     }
     pub const fn held_items(self) -> bool {
-        matches!(self, Self::Keys | Self::WovenEchoes)
+        self.spec().held_items
     }
     pub const fn field_count(self) -> Option<usize> {
-        match self {
-            Self::Currency | Self::MonolithRun => Some(3),
-            Self::PointsEarned => Some(2),
-            Self::FactionStanding => Some(12),
-            _ => None,
-        }
+        self.spec().fields
     }
+    /// Whether field `index` takes `value`: none is negative, and none is past the set's fields or its largest value.
     pub fn takes(self, index: usize, value: i32) -> bool {
-        let maximum = match self {
-            Self::PointsEarned => i32::from(u16::MAX),
-            Self::MonolithRun if index == 1 => 10_000,
-            Self::MonolithRun if index == 2 => 1,
-            Self::FactionStanding if index % 3 == 1 => 999_999,
-            _ => i32::MAX,
-        };
-        value >= 0 && value <= maximum && self.field_count().is_none_or(|count| index < count)
+        let spec = self.spec();
+        value >= 0 && value <= spec.largest[index % spec.largest.len()] && spec.fields.is_none_or(|count| index < count)
     }
 }
 
@@ -92,61 +129,48 @@ impl Snapshot {
     }
     pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
         if self.manager == 0 || self.container == 0 || self.fields.len() > MAX_FIELDS || self.set.field_count().is_some_and(|count| self.fields.len() != count) {
-            return Err(ProtocolError::InvalidData);
+            return invalid();
         }
-        let mut bytes = vec![self.set as u8];
-        bytes.extend(self.manager.to_le_bytes());
-        bytes.extend(self.container.to_le_bytes());
-        bytes.extend((self.fields.len() as u32).to_le_bytes());
+        let mut w = Writer::default();
+        w.byte(self.set as u8);
+        w.u64(self.manager);
+        w.u64(self.container);
+        w.u32(self.fields.len() as u32);
         let mut seen = std::collections::BTreeSet::new();
         for field in &self.fields {
-            if field.value < 0 || field.label.len() > 512 || !seen.insert(field.key) {
-                return Err(ProtocolError::InvalidData);
+            if field.value < 0 || !seen.insert(field.key) {
+                return invalid();
             }
-            bytes.extend(field.key.to_le_bytes());
-            bytes.extend(field.identity.to_le_bytes());
-            bytes.extend(field.item_type.to_le_bytes());
-            bytes.extend(field.sub_type.to_le_bytes());
-            bytes.extend(field.value.to_le_bytes());
-            bytes.extend((field.label.len() as u32).to_le_bytes());
-            bytes.extend(field.label.as_bytes());
+            w.u64(field.key);
+            w.u64(field.identity);
+            w.u16(field.item_type);
+            w.u16(field.sub_type);
+            w.i32(field.value);
+            w.text_within(&field.label, MAX_LABEL_BYTES)?;
         }
-        if bytes.len() > MAX_BYTES {
-            return Err(ProtocolError::InvalidData);
+        if w.0.len() > MAX_BYTES {
+            return invalid();
         }
-        Ok(bytes)
+        Ok(w.0)
     }
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
         if bytes.len() > MAX_BYTES {
-            return Err(ProtocolError::InvalidData);
+            return invalid();
         }
         let mut r = Reader::new(bytes);
         let set = FieldSet::decode(r.byte()?)?;
         let manager = r.u64()?;
         let container = r.u64()?;
-        let count = r.u32()? as usize;
-        if count > MAX_FIELDS {
-            return Err(ProtocolError::InvalidData);
-        }
+        let count = r.count32(MAX_FIELDS)?;
         let mut fields = Vec::with_capacity(count);
         for _ in 0..count {
-            let key = r.u64()?;
-            let identity = r.u64()?;
-            let item_type = u16::from_le_bytes(r.array()?);
-            let sub_type = u16::from_le_bytes(r.array()?);
-            let value = i32::from_le_bytes(r.array()?);
-            let length = r.u32()? as usize;
-            if length > 512 {
-                return Err(ProtocolError::InvalidData);
-            }
-            let label = std::str::from_utf8(r.take(length)?).map_err(|_| ProtocolError::InvalidData)?.to_owned();
             fields.push(Field {
-                key,
-                identity,
-                item_type,
-                sub_type,
-                label,
-                value,
+                key: r.u64()?,
+                identity: r.u64()?,
+                item_type: r.u16()?,
+                sub_type: r.u16()?,
+                value: r.i32()?,
+                label: r.text(MAX_LABEL_BYTES)?.to_owned(),
             });
         }
         r.finish()?;
@@ -187,6 +211,33 @@ impl Edit {
             return Err(ProtocolError::InvalidData);
         }
         Ok(())
+    }
+}
+
+/// An edit as a request carries it: the expected snapshot's encoding behind its length, then each field's value behind
+/// a flag that says whether it changes.
+impl Wire for Edit {
+    fn write(&self, w: &mut Writer) {
+        w.blob(&self.expected.encode().expect("validated field edit"));
+        w.u32(self.values.len() as u32);
+        for value in &self.values {
+            w.flag(value.is_some());
+            if let Some(value) = value {
+                w.i32(*value);
+            }
+        }
+    }
+    fn read(r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
+        let expected = Snapshot::decode(r.blob(MAX_BYTES)?)?;
+        if r.u32()? as usize != expected.fields.len() {
+            return invalid();
+        }
+        let values = (0..expected.fields.len())
+            .map(|_| if r.flag()? { r.i32().map(Some) } else { Ok(None) })
+            .collect::<Result<_, _>>()?;
+        let edit = Self { expected, values };
+        edit.validate()?;
+        Ok(edit)
     }
 }
 

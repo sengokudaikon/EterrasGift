@@ -7,7 +7,10 @@
 
 #![forbid(unsafe_code)]
 
-use crate::protocol::ProtocolError;
+use crate::{
+    codec::{Reader, Writer, invalid},
+    protocol::ProtocolError,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ValueRange {
@@ -31,38 +34,31 @@ pub struct ItemLimits {
 }
 
 pub fn encode(limits: &ItemLimits) -> Result<Vec<u8>, ProtocolError> {
-    let mut out = Vec::with_capacity(40);
-    for range in [
-        limits.forging_potential,
-        limits.legendary_potential,
-        limits.weavers_will,
-        limits.weavers_touch,
-        limits.level_requirement,
-    ] {
+    let mut w = Writer::default();
+    for range in limits.ranges() {
         if range.minimum > range.maximum {
-            return Err(ProtocolError::InvalidData);
+            return invalid();
         }
-        out.extend_from_slice(&i32::from(range.minimum).to_le_bytes());
-        out.extend_from_slice(&i32::from(range.maximum).to_le_bytes());
+        w.i32(i32::from(range.minimum));
+        w.i32(i32::from(range.maximum));
     }
-    Ok(out)
+    Ok(w.0)
 }
 
 pub fn decode(payload: &[u8]) -> Result<ItemLimits, ProtocolError> {
-    let pairs: &[u8; 40] = payload.try_into().map_err(|_| ProtocolError::InvalidData)?;
+    let mut r = Reader::new(payload);
     let mut ranges = [ValueRange { minimum: 0, maximum: 0 }; 5];
-    for (range, pair) in ranges.iter_mut().zip(pairs.as_chunks::<8>().0) {
-        let (minimum, maximum) = pair.split_at(4);
-        let minimum = i32::from_le_bytes(minimum.try_into().map_err(|_| ProtocolError::InvalidData)?);
-        let maximum = i32::from_le_bytes(maximum.try_into().map_err(|_| ProtocolError::InvalidData)?);
+    for range in &mut ranges {
+        let mut value = || u8::try_from(r.i32()?).map_err(|_| ProtocolError::InvalidData);
         *range = ValueRange {
-            minimum: minimum.try_into().map_err(|_| ProtocolError::InvalidData)?,
-            maximum: maximum.try_into().map_err(|_| ProtocolError::InvalidData)?,
+            minimum: value()?,
+            maximum: value()?,
         };
         if range.minimum > range.maximum {
-            return Err(ProtocolError::InvalidData);
+            return invalid();
         }
     }
+    r.finish()?;
     let [forging_potential, legendary_potential, weavers_will, weavers_touch, level_requirement] = ranges;
     Ok(ItemLimits {
         forging_potential,
@@ -71,4 +67,17 @@ pub fn decode(payload: &[u8]) -> Result<ItemLimits, ProtocolError> {
         weavers_touch,
         level_requirement,
     })
+}
+
+impl ItemLimits {
+    /// Its five ranges, in the order they are written.
+    fn ranges(&self) -> [ValueRange; 5] {
+        [
+            self.forging_potential,
+            self.legendary_potential,
+            self.weavers_will,
+            self.weavers_touch,
+            self.level_requirement,
+        ]
+    }
 }

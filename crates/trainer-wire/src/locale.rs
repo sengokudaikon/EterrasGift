@@ -7,7 +7,10 @@
 
 #![forbid(unsafe_code)]
 
-use crate::protocol::{MAX_RESPONSE_SIZE, ProtocolError};
+use crate::{
+    codec::{Reader, Writer, invalid},
+    protocol::ProtocolError,
+};
 
 pub const MAX_TEXT_BYTES: usize = 4096;
 
@@ -18,39 +21,22 @@ pub struct GameLocale {
 }
 
 pub fn encode(locale: &GameLocale) -> Result<Vec<u8>, ProtocolError> {
-    if locale.language.trim().is_empty() || locale.language.len() > MAX_TEXT_BYTES || locale.game_version.len() > MAX_TEXT_BYTES {
-        return Err(ProtocolError::InvalidData);
+    if locale.language.trim().is_empty() {
+        return invalid();
     }
-    let mut out = Vec::with_capacity(8 + locale.language.len() + locale.game_version.len());
-    for text in [&locale.language, &locale.game_version] {
-        out.extend_from_slice(&(text.len() as u32).to_le_bytes());
-        out.extend_from_slice(text.as_bytes());
-    }
-    if out.len() > MAX_RESPONSE_SIZE {
-        return Err(ProtocolError::InvalidData);
-    }
-    Ok(out)
+    let mut w = Writer::default();
+    w.text_within(&locale.language, MAX_TEXT_BYTES)?;
+    w.text_within(&locale.game_version, MAX_TEXT_BYTES)?;
+    w.finish()
 }
 
 pub fn decode(payload: &[u8]) -> Result<GameLocale, ProtocolError> {
-    if payload.len() > MAX_RESPONSE_SIZE {
-        return Err(ProtocolError::InvalidData);
-    }
-    let mut rest = payload;
-    let mut text = || -> Result<String, ProtocolError> {
-        let (length, tail) = rest.split_at_checked(4).ok_or(ProtocolError::InvalidData)?;
-        let length = u32::from_le_bytes(length.try_into().map_err(|_| ProtocolError::InvalidData)?) as usize;
-        if length > MAX_TEXT_BYTES {
-            return Err(ProtocolError::InvalidData);
-        }
-        let (bytes, tail) = tail.split_at_checked(length).ok_or(ProtocolError::InvalidData)?;
-        rest = tail;
-        std::str::from_utf8(bytes).map(str::to_owned).map_err(|_| ProtocolError::InvalidData)
-    };
-    let language = text()?;
-    let game_version = text()?;
-    if !rest.is_empty() || language.trim().is_empty() {
-        return Err(ProtocolError::InvalidData);
+    let mut r = Reader::reply(payload)?;
+    let language = r.text(MAX_TEXT_BYTES)?.to_owned();
+    let game_version = r.text(MAX_TEXT_BYTES)?.to_owned();
+    r.finish()?;
+    if language.trim().is_empty() {
+        return invalid();
     }
     Ok(GameLocale { language, game_version })
 }
