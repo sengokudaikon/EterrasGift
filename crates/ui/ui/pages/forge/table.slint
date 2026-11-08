@@ -3,7 +3,7 @@
 import { Tokens } from "../../tokens.slint";
 import { KeyboardFocus } from "../../globals.slint";
 import { FocusRing, TipTrigger } from "../../widgets/focus.slint";
-import { FlyoutSurface, PopupMenu } from "../../widgets/menu.slint";
+import { MenuMetrics, OptionMenu, PopupMenu } from "../../widgets/menu.slint";
 import { AffixRowView, CellKind, CellRef, ForgeReveal, ModifierRowView, PickerRowView, TierOption } from "state.slint";
 import { ValueScrubber } from "scrubber.slint";
 import { ForgeText } from "../../strings/forge.slint";
@@ -119,59 +119,6 @@ export component TierLadder inherits Rectangle {
     }
 }
 
-// A menu flyout's frame: the flyout surface, the app's padding, keyboard Up/Down/Enter/Escape.
-export component MenuFrame inherits FlyoutSurface {
-    in property <int> count;
-    in-out property <int> highlighted;
-    callback chosen(int);
-    callback dismissed();
-
-    FocusScope {
-        init => {
-            self.focus();
-        }
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.dismissed();
-                return accept;
-            }
-            if (event.text == Key.UpArrow) {
-                KeyboardFocus.visible = true;
-                root.highlighted = Math.max(0, root.highlighted - 1);
-                return accept;
-            }
-            if (event.text == Key.DownArrow) {
-                KeyboardFocus.visible = true;
-                root.highlighted = Math.min(root.count - 1, root.highlighted + 1);
-                return accept;
-            }
-            if (event.text == Key.Return || event.text == " ") {
-                root.chosen(root.highlighted);
-                return accept;
-            }
-            reject
-        }
-
-        VerticalLayout {
-            padding-left: Tokens.flyout-padding.left;
-            padding-right: Tokens.flyout-padding.right;
-            padding-top: Tokens.flyout-padding.top;
-            padding-bottom: Tokens.flyout-padding.bottom;
-
-            @children
-        }
-    }
-}
-
-// The height of a flyout of `rows` menu rows: 30px rows 2px apart inside the flyout padding.
-export global MenuMetrics {
-    out property <length> row: Tokens.font-size-value * 4 / 3 + Tokens.cell-padding.top + Tokens.cell-padding.bottom + 2px;
-
-    public pure function height(rows: int) -> length {
-        return rows * self.row + Math.max(0, rows - 1) * Tokens.space-2 + Tokens.flyout-padding.top + Tokens.flyout-padding.bottom + 2px;
-    }
-}
-
 // One affix: [value | name over type | range at wide | tier | seal | status]. Touching any cell selects the row.
 export component AffixRowItem inherits Rectangle {
     // From the page: what this shows and what it asks of it.
@@ -263,8 +210,6 @@ export component AffixRowItem inherits Rectangle {
     in property <length> range-width;
 
     property <int> serial: root.focus-serial;
-    property <int> tier-highlight;
-    property <int> seal-highlight;
     property <length> content-height: Math.max(Tokens.row-min-height, name-cell.height);
     // The replace picker's flyout: closing it any way but Use or Cancel (a click outside) cancels the replacement, and Rust
     // dropping the picker closes it.
@@ -305,13 +250,11 @@ export component AffixRowItem inherits Rectangle {
 
     function open-tiers() {
         root.select-affix(root.index);
-        root.tier-highlight = root.affix.tier-index;
         tier-popup.show();
     }
 
     function open-seals() {
         root.select-affix(root.index);
-        root.seal-highlight = root.affix.seal-index;
         seal-popup.show();
     }
 
@@ -682,26 +625,31 @@ export component AffixRowItem inherits Rectangle {
                         height: MenuMetrics.height(root.affix.tiers.length);
                         close-policy: PopupClosePolicy.close-on-click-outside;
 
-                        MenuFrame {
+                        tier-menu := OptionMenu {
                             count: root.affix.tiers.length;
-                            highlighted <=> root.tier-highlight;
-                            chosen(index) => {
+                            label: ForgeText.tiers;
+                            initial => {
+                                return root.affix.tier-index;
+                            }
+                            step(from, direction) => {
+                                return Math.clamp(from + direction, 0, self.count - 1);
+                            }
+                            picked(index) => {
                                 root.pick-tier(root.index, index);
-                                tier-popup.close();
+                            }
+                            returned => {
                                 tier-cell.focus-cell();
                             }
-                            dismissed => {
+                            close => {
                                 tier-popup.close();
-                                tier-cell.focus-cell();
                             }
 
                             TierList {
                                 tiers: root.affix.tiers;
                                 held: root.affix.tier-index;
-                                highlighted: root.tier-highlight;
+                                highlighted: tier-menu.highlighted;
                                 picked(index) => {
-                                    root.pick-tier(root.index, index);
-                                    tier-popup.close();
+                                    tier-menu.choose(index);
                                 }
                             }
                         }
@@ -751,35 +699,36 @@ export component AffixRowItem inherits Rectangle {
                         height: MenuMetrics.height(4);
                         close-policy: PopupClosePolicy.close-on-click-outside;
 
-                        MenuFrame {
+                        seal-menu := OptionMenu {
                             count: 4;
-                            highlighted <=> root.seal-highlight;
-                            chosen(index) => {
+                            label: ForgeText.seal;
+                            initial => {
+                                return root.affix.seal-index;
+                            }
+                            step(from, direction) => {
+                                return Math.clamp(from + direction, 0, self.count - 1);
+                            }
+                            picked(index) => {
                                 root.pick-seal(root.index, index);
-                                seal-popup.close();
+                            }
+                            returned => {
                                 seal-cell.focus-cell();
                             }
-                            dismissed => {
+                            close => {
                                 seal-popup.close();
-                                seal-cell.focus-cell();
                             }
 
-                            VerticalLayout {
-                                spacing: Tokens.space-2;
+                            for seal[index] in [ForgeText.seal-normal, ForgeText.seal-sealed, ForgeText.seal-primordial, ForgeText.seal-corrupted]: MenuRow {
+                                held: root.affix.seal-index == index;
+                                highlighted: seal-menu.highlighted == index;
+                                picked => {
+                                    seal-menu.choose(index);
+                                }
 
-                                for seal[index] in [ForgeText.seal-normal, ForgeText.seal-sealed, ForgeText.seal-primordial, ForgeText.seal-corrupted]: MenuRow {
-                                    held: root.affix.seal-index == index;
-                                    highlighted: root.seal-highlight == index;
-                                    picked => {
-                                        root.pick-seal(root.index, index);
-                                        seal-popup.close();
-                                    }
-
-                                    Text {
-                                        text: seal;
-                                        color: Tokens.text-brush;
-                                        vertical-alignment: center;
-                                    }
+                                Text {
+                                    text: seal;
+                                    color: Tokens.text-brush;
+                                    vertical-alignment: center;
                                 }
                             }
                         }

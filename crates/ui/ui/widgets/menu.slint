@@ -1,9 +1,13 @@
-// A context menu in Fluent's compact density on the retinted palette: Dusk Brown in a Weathered Taupe frame over a soft shadow, 28px rows of [icon | title | key] in Noto Sans, separators between
-// groups. Slint's own ContextMenuArea is a native menu on Windows that can't take the app's look, so menus are this.
+// Menus on the app's own surface. Slint's own ContextMenuArea is a native menu on Windows that can't take the app's look,
+// so menus are these:
 //
-// Declare it as a child of the element whose coordinates you'll give, and open it with `open-at`: at the pointer for a
-// right-click, under the row for the menu key or Shift+F10. Up and Down move (wrapping, skipping separators and disabled
-// rows), Home and End go to the ends, Enter or Space picks, Escape closes; closing gives focus back to whatever had it.
+// - `OptionMenu`, the list of choices a cell opens under itself (a rarity, a base, a tier), its rows given as children.
+// - `PopupMenu`, a context menu on an `OptionMenu`, in Fluent's compact density on the retinted palette: Dusk Brown in a
+//   Weathered Taupe frame over a soft shadow, 28px rows of [icon | title | key] in Noto Sans, separators between groups.
+//   Declare it as a child of the element whose coordinates you'll give, and open it with `open-at`: at the pointer for a
+//   right-click, under the row for the menu key or Shift+F10. Up and Down move (wrapping, skipping separators and disabled
+//   rows), Home and End go to the ends, Enter or Space picks, and Escape, Tab or Shift+Tab closes it; closing gives focus
+//   back to whatever had it.
 
 import { Tokens } from "../tokens.slint";
 import { KeyboardFocus } from "../globals.slint";
@@ -19,6 +23,134 @@ export component FlyoutSurface inherits Rectangle {
     drop-shadow-color: Tokens.flyout-shadow-color;
     drop-shadow-blur: Tokens.flyout-shadow-blur;
     drop-shadow-offset-y: Tokens.flyout-shadow-offset-y;
+}
+
+// The height of an option menu of `rows` one-line rows: 30px rows 2px apart inside the flyout padding.
+export global MenuMetrics {
+    out property <length> row: Tokens.font-size-value * 4 / 3 + Tokens.cell-padding.top + Tokens.cell-padding.bottom + 2px;
+
+    public pure function height(rows: int) -> length {
+        return rows * self.row + Math.max(0, rows - 1) * Tokens.space-2 + Tokens.flyout-padding.top + Tokens.flyout-padding.bottom + 2px;
+    }
+}
+
+// A list of choices under the cell that opens it, on the flyout surface. It fills a PopupWindow of the caller's (popups
+// need an explicit size), whose `close()` its `close` calls: a component inheriting PopupWindow can't sit under an `if`.
+// Its children are its rows: each reads `highlighted` (and `keys-focused`, where the highlight shows only while the list
+// has the keys) and calls `choose(index)` when clicked.
+//
+// It opens with the keys on the list, at `initial()`. Up and Down move by `step`, Home and End go to the ends, Enter or Space
+// picks, and Escape closes from anywhere in it. A key pressed in another control inside it, such as a search box, stays with
+// that control. A close from the keyboard says `returned`, for the caller to give focus back to the cell.
+export component OptionMenu inherits FlyoutSurface {
+    // How many entries it lists.
+    in property <int> count;
+    // What the list is, for assistive technology.
+    in property <string> label;
+    // The space between its children, and round them inside the frame.
+    in property <length> spacing: Tokens.space-2;
+    in property <length> inset-left: Tokens.flyout-padding.left;
+    in property <length> inset-right: Tokens.flyout-padding.right;
+    in property <length> inset-top: Tokens.flyout-padding.top;
+    in property <length> inset-bottom: Tokens.flyout-padding.bottom;
+    // It keeps the keyboard while it is open, as a context menu does: Tab and Shift+Tab close it, and no key reaches past
+    // it.
+    in property <bool> keeps-keyboard;
+    // The entry the keys act on; -1 for none.
+    in-out property <int> highlighted: -1;
+    // The entry the keys start on, and the next entry they can reach from `from` in `direction` (`from` when there is
+    // none). An entry can be picked when the step from just before it lands on it.
+    pure callback initial() -> int;
+    pure callback step(int, int) -> int;
+    // An entry was picked, by a click or a key. The menu has closed.
+    callback picked(int);
+    // It closed from the keyboard: Escape, or a pick with Enter or Space.
+    callback returned();
+    // Closes the popup it fills.
+    callback close();
+    // The keys are on the list, so its highlight shows.
+    out property <bool> keys-focused: keys.has-focus;
+
+    // Picks `index`, if it can be picked: a row's click.
+    public function choose(index: int) {
+        if (root.usable(index)) {
+            root.close();
+            root.picked(index);
+        }
+    }
+
+    // Hands the keys to the list, at `initial()`: a search box's Down.
+    public function focus-keys() {
+        root.highlighted = root.initial();
+        KeyboardFocus.visible = true;
+        keys.focus();
+    }
+
+    pure function usable(index: int) -> bool {
+        return index >= 0 && index < root.count && root.step(index - 1, 1) == index;
+    }
+
+    keys := FocusScope {
+        accessible-role: list;
+        accessible-label: root.label;
+        init => {
+            root.highlighted = root.initial();
+            self.focus();
+        }
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        capture-key-pressed(event) => {
+            if (event.text == Key.Escape || (root.keeps-keyboard && (event.text == Key.Tab || event.text == Key.Backtab))) {
+                root.close();
+                root.returned();
+                return accept;
+            }
+            reject
+        }
+        key-pressed(event) => {
+            // Passed on by another control inside it.
+            if (!self.has-focus) {
+                return reject;
+            }
+            if (event.text == Key.UpArrow || event.text == Key.DownArrow) {
+                KeyboardFocus.visible = true;
+                root.highlighted = root.step(root.highlighted, event.text == Key.UpArrow ? -1 : 1);
+                return accept;
+            }
+            if (event.text == Key.Home) {
+                KeyboardFocus.visible = true;
+                root.highlighted = root.step(-1, 1);
+                return accept;
+            }
+            if (event.text == Key.End) {
+                KeyboardFocus.visible = true;
+                root.highlighted = root.step(root.count, -1);
+                return accept;
+            }
+            if (event.text == Key.Return || event.text == " ") {
+                if (root.usable(root.highlighted)) {
+                    root.choose(root.highlighted);
+                    root.returned();
+                }
+                return accept;
+            }
+            root.keeps-keyboard ? accept : reject
+        }
+
+        VerticalLayout {
+            padding-left: root.inset-left;
+            padding-right: root.inset-right;
+            padding-top: root.inset-top;
+            padding-bottom: root.inset-bottom;
+            spacing: root.spacing;
+            alignment: start;
+
+            @children
+        }
+    }
 }
 
 export struct MenuEntry {
@@ -40,8 +172,9 @@ export component PopupMenu inherits Rectangle {
     // A row picked, by its index in `entries`. The menu has closed by then.
     callback activated(int);
 
-    // The row Up, Down and Enter act on; -1 when opened by the pointer, until a key is pressed.
-    property <int> highlighted: -1;
+    // Opened from the keyboard: the first row it can pick starts highlighted. From the pointer none does, until a key is
+    // pressed.
+    property <bool> keyboard-open;
     property <length> icon-column: root.has-icons ? Tokens.icon-size + Tokens.space-12 : 0px;
 
     // Opens with its top-left corner at (at-x, at-y) in the coordinates of the element it's declared in. From the
@@ -49,7 +182,7 @@ export component PopupMenu inherits Rectangle {
     public function open-at(at-x: length, at-y: length, keyboard: bool) {
         root.at-x = at-x;
         root.at-y = at-y;
-        root.highlighted = keyboard ? root.step(-1, 1) : -1;
+        root.keyboard-open = keyboard;
         if (keyboard) {
             KeyboardFocus.visible = true;
         }
@@ -87,12 +220,6 @@ export component PopupMenu inherits Rectangle {
         if (root.usable(root.wrap(start + 8 * direction))) { return root.wrap(start + 8 * direction); }
         return from;
     }
-    function pick(index: int) {
-        if (root.usable(index)) {
-            popup.close();
-            root.activated(index);
-        }
-    }
 
     // Hidden copies of the titles, keys and row heights, for the menu's size.
     titles := VerticalLayout {
@@ -117,133 +244,106 @@ export component PopupMenu inherits Rectangle {
         height: root.menu-height;
         close-policy: PopupClosePolicy.close-on-click-outside;
 
-        FlyoutSurface {
+        menu := OptionMenu {
             border-radius: Tokens.overlay-radius;
-            accessible-role: list;
+            inset-left: 1px;
+            inset-right: 1px;
+            inset-top: 1px + Tokens.menu-flyout-scroller-margin.top;
+            inset-bottom: 1px + Tokens.menu-flyout-scroller-margin.bottom;
+            spacing: 0px;
+            keeps-keyboard: true;
+            count: root.entries.length;
+            initial => {
+                return root.keyboard-open ? root.step(-1, 1) : -1;
+            }
+            step(from, direction) => {
+                return root.step(from, direction);
+            }
+            picked(index) => {
+                root.activated(index);
+            }
+            close => {
+                popup.close();
+            }
 
-            FocusScope {
-                init => {
-                    self.focus();
-                }
-                key-pressed(event) => {
-                    if (event.text == Key.Escape || event.text == Key.Tab || event.text == Key.Backtab) {
-                        popup.close();
-                        return accept;
-                    }
-                    if (event.text == Key.DownArrow) {
-                        KeyboardFocus.visible = true;
-                        root.highlighted = root.step(root.highlighted, 1);
-                        return accept;
-                    }
-                    if (event.text == Key.UpArrow) {
-                        KeyboardFocus.visible = true;
-                        root.highlighted = root.step(root.highlighted, -1);
-                        return accept;
-                    }
-                    if (event.text == Key.Home) {
-                        KeyboardFocus.visible = true;
-                        root.highlighted = root.step(-1, 1);
-                        return accept;
-                    }
-                    if (event.text == Key.End) {
-                        KeyboardFocus.visible = true;
-                        root.highlighted = root.step(root.entries.length, -1);
-                        return accept;
-                    }
-                    if (event.text == Key.Return || event.text == " ") {
-                        root.pick(root.highlighted);
-                        return accept;
-                    }
-                    // The menu keeps the keyboard while it is open.
-                    accept
+            for entry[index] in root.entries: Rectangle {
+                height: entry.separator ? Tokens.menu-separator-margin.top + 1px + Tokens.menu-separator-margin.bottom : Tokens.menu-item-height;
+
+                if entry.separator: Rectangle {
+                    x: Tokens.menu-separator-margin.left;
+                    y: Tokens.menu-separator-margin.top;
+                    width: parent.width - Tokens.menu-separator-margin.left - Tokens.menu-separator-margin.right;
+                    height: 1px;
+                    background: Tokens.fluent-base-medium-low-color;
                 }
 
-                VerticalLayout {
-                    padding-left: 1px;
-                    padding-right: 1px;
-                    padding-top: 1px + Tokens.menu-flyout-scroller-margin.top;
-                    padding-bottom: 1px + Tokens.menu-flyout-scroller-margin.bottom;
+                if !entry.separator: row := Rectangle {
+                    property <bool> enabled: !entry.disabled;
+                    property <brush> ink: !self.enabled ? Tokens.fluent-base-medium-low-color : Tokens.text-brush;
+                    accessible-role: list-item;
+                    accessible-label: entry.title;
+                    accessible-description: entry.gesture;
+                    accessible-enabled: self.enabled;
+                    accessible-item-selectable: true;
+                    accessible-item-selected: menu.highlighted == index;
+                    accessible-action-default => { menu.choose(index); }
+                    // Fluent hovers on ListLow, which the retinted palette makes the menu's own ground, so the row under
+                    // the pointer takes Wine-Stained Brown (Fluent's pressed ListMedium), as the rail's flyout does. The
+                    // keyboard's row is framed while focus shows.
+                    background: touch.has-hover ? Tokens.selected-brush : transparent;
+                    border-width: 1px;
+                    border-color: menu.highlighted == index && KeyboardFocus.visible ? Tokens.focus-brush : transparent;
+                    border-radius: Tokens.control-radius;
 
-                    for entry[index] in root.entries: Rectangle {
-                        height: entry.separator ? Tokens.menu-separator-margin.top + 1px + Tokens.menu-separator-margin.bottom : Tokens.menu-item-height;
+                    HorizontalLayout {
+                        padding-left: Tokens.menu-item-padding.left;
+                        padding-right: Tokens.menu-item-padding.right;
+                        padding-top: Tokens.menu-item-padding.top;
+                        padding-bottom: Tokens.menu-item-padding.bottom;
+                        spacing: 0px;
 
-                        if entry.separator: Rectangle {
-                            x: Tokens.menu-separator-margin.left;
-                            y: Tokens.menu-separator-margin.top;
-                            width: parent.width - Tokens.menu-separator-margin.left - Tokens.menu-separator-margin.right;
-                            height: 1px;
-                            background: Tokens.fluent-base-medium-low-color;
+                        if root.has-icons: Rectangle {
+                            width: root.icon-column;
+                            Image {
+                                x: 0;
+                                width: Tokens.icon-size;
+                                height: Tokens.icon-size;
+                                image-fit: contain;
+                                source: entry.icon;
+                                colorize: row.ink;
+                            }
                         }
+                        Text {
+                            text: entry.title;
+                            font-size: Tokens.font-size-value;
+                            color: row.ink;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        Rectangle {
+                            width: Tokens.menu-gesture-margin.left;
+                            horizontal-stretch: 0;
+                        }
+                        Text {
+                            text: entry.gesture;
+                            font-size: Tokens.font-size-caption;
+                            color: row.enabled ? Tokens.fluent-base-medium-color : Tokens.fluent-base-medium-low-color;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                            horizontal-stretch: 0;
+                            width: gestures.preferred-width;
+                        }
+                    }
 
-                        if !entry.separator: row := Rectangle {
-                            property <bool> enabled: !entry.disabled;
-                            property <brush> ink: !self.enabled ? Tokens.fluent-base-medium-low-color : Tokens.text-brush;
-                            accessible-role: list-item;
-                            accessible-label: entry.title;
-                            accessible-description: entry.gesture;
-                            accessible-enabled: self.enabled;
-                            accessible-item-selectable: true;
-                            accessible-item-selected: root.highlighted == index;
-                            accessible-action-default => { root.pick(index); }
-                            // Fluent hovers on ListLow, which the retinted palette makes the menu's own ground, so the row under
-                            // the pointer takes Wine-Stained Brown (Fluent's pressed ListMedium), as the rail's flyout does. The
-                            // keyboard's row is framed while focus shows.
-                            background: touch.has-hover ? Tokens.selected-brush : transparent;
-                            border-width: 1px;
-                            border-color: root.highlighted == index && KeyboardFocus.visible ? Tokens.focus-brush : transparent;
-                            border-radius: Tokens.control-radius;
-
-                            HorizontalLayout {
-                                padding-left: Tokens.menu-item-padding.left;
-                                padding-right: Tokens.menu-item-padding.right;
-                                padding-top: Tokens.menu-item-padding.top;
-                                padding-bottom: Tokens.menu-item-padding.bottom;
-                                spacing: 0px;
-
-                                if root.has-icons: Rectangle {
-                                    width: root.icon-column;
-                                    Image {
-                                        x: 0;
-                                        width: Tokens.icon-size;
-                                        height: Tokens.icon-size;
-                                        image-fit: contain;
-                                        source: entry.icon;
-                                        colorize: row.ink;
-                                    }
-                                }
-                                Text {
-                                    text: entry.title;
-                                    font-size: Tokens.font-size-value;
-                                    color: row.ink;
-                                    vertical-alignment: center;
-                                    horizontal-stretch: 1;
-                                }
-                                Rectangle {
-                                    width: Tokens.menu-gesture-margin.left;
-                                    horizontal-stretch: 0;
-                                }
-                                Text {
-                                    text: entry.gesture;
-                                    font-size: Tokens.font-size-caption;
-                                    color: row.enabled ? Tokens.fluent-base-medium-color : Tokens.fluent-base-medium-low-color;
-                                    horizontal-alignment: right;
-                                    vertical-alignment: center;
-                                    horizontal-stretch: 0;
-                                    width: gestures.preferred-width;
-                                }
+                    touch := TouchArea {
+                        enabled: row.enabled;
+                        pointer-event(event) => {
+                            if (event.kind == PointerEventKind.down) {
+                                KeyboardFocus.visible = false;
                             }
-
-                            touch := TouchArea {
-                                enabled: row.enabled;
-                                pointer-event(event) => {
-                                    if (event.kind == PointerEventKind.down) {
-                                        KeyboardFocus.visible = false;
-                                    }
-                                }
-                                clicked => {
-                                    root.pick(index);
-                                }
-                            }
+                        }
+                        clicked => {
+                            menu.choose(index);
                         }
                     }
                 }
