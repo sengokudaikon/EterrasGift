@@ -7,14 +7,14 @@ use crate::{
     AffixRowView, AppliedEntryView, CellKind, CellRef, DraftEntryView, FieldView, ForgeState, ItemRarity, MenuOptionView, MessageTone, ModifierRowView, TemplateRowView,
     TierOption, ValueCell,
 };
-use eg_trainer::screens::forge::editor::{Cell, ForgeEditor, MessageKind, Picker, tr};
+use eg_trainer::screens::forge::editor::{AppliedEntry, Cell, ForgeEditor, MessageKind, Picker, tr};
 use eg_trainer::screens::forge::feature::State;
 use eg_trainer::screens::forge::game::{self, Lookup};
 use eg_trainer::screens::forge::item::{ForgeItem, Seal};
 use eg_trainer::screens::forge::picker::{self, KindFilter, SourceChoice};
 use eg_trainer::screens::forge::rows::{AffixRow, FieldKind, ValueEditor};
 use slint::{ModelRc, SharedString};
-use spiderland::{CheckedSlice, Slice, Version};
+use spiderland::{CheckedSlice, Slice, Tracked, Version};
 use spiderland_slint::{InnerRows, Rows};
 use std::rc::Rc;
 
@@ -69,7 +69,7 @@ struct Regions {
     uniques: CheckedSlice<(Version, Version, Gates), Lines>,
     affixes: CheckedSlice<(RowVersions, Gates), WithLists<AffixRowView, TierOption>>,
     drafts: CheckedSlice<(RowVersions, u64), Vec<DraftEntryView>>,
-    history: CheckedSlice<Version, Vec<AppliedEntryView>>,
+    history: Slice<Version>,
     identity_options: CheckedSlice<(u64, i64, String), Options>,
     base_options: CheckedSlice<(u64, i64), Options>,
     /// What they say of each template comes from the catalog.
@@ -217,9 +217,7 @@ impl View {
 
         regions.drafts.update("drafts", (rows, game), || draft_rows(editor), |rows| models.drafts.sync(rows));
         forge.set_draft_count_text(editor.draft_count_text().into());
-        regions
-            .history
-            .update("history", editor.history.version(), || history_rows(editor), |rows| models.history.sync(rows));
+        regions.history.show(&editor.history, history_rows, |rows| models.history.sync(rows));
 
         let (message, kind) = editor.message();
         forge.set_message(message.into());
@@ -561,9 +559,8 @@ fn draft_rows(editor: &ForgeEditor) -> Vec<DraftEntryView> {
         .collect()
 }
 
-fn history_rows(editor: &ForgeEditor) -> Vec<AppliedEntryView> {
-    editor
-        .history
+fn history_rows(history: &Tracked<Vec<AppliedEntry>>) -> Vec<AppliedEntryView> {
+    history
         .iter()
         .map(|entry| AppliedEntryView {
             name: entry.name.clone().into(),

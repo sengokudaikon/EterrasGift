@@ -13,7 +13,7 @@ use eg_core::settings_page::{
 };
 use eg_core::settings_service::SettingsService;
 use slint::{ComponentHandle, Timer};
-use spiderland::{Intents, Slice, Store, Version, callbacks};
+use spiderland::{CheckedSlice, Intents, Store, Version, callbacks};
 use spiderland_slint::{Rows, WindowHost, Windowed, on_wake};
 use std::any::Any;
 use std::cell::Cell;
@@ -71,6 +71,9 @@ impl Settings {
     }
 }
 
+/// The modules' rows, and the sections of those that started.
+type ModulesView = (Vec<ModuleRowView>, Vec<SectionView>);
+
 struct Window {
     service: SettingsService,
     links: BTreeMap<usize, Rc<dyn ModuleLink>>,
@@ -78,8 +81,9 @@ struct Window {
     modules: Rows<ModuleRow>,
     sections: Rows<SettingsSectionRow>,
     locations: Rows<LocationSetting>,
-    shown_rows: Slice<(Version, Version, Version, Version)>,
-    shown_locations: Slice<Version>,
+    /// A test build makes these regions anyway, and fails if a key misses an input.
+    shown_rows: CheckedSlice<(Version, Version, Version, Version), ModulesView>,
+    shown_locations: CheckedSlice<Version, Vec<LocationView>>,
 }
 
 /// Puts the page and module-supplied sections behind the window's `SettingsState`, and takes the window's close: the
@@ -100,8 +104,8 @@ pub(crate) fn bind(window: &MainWindow, settings: Settings, close_first: usize, 
         modules: Rows::default(),
         sections: Rows::default(),
         locations: Rows::default(),
-        shown_rows: Slice::default(),
-        shown_locations: Slice::default(),
+        shown_rows: CheckedSlice::default(),
+        shown_locations: CheckedSlice::default(),
     };
     let view = window.global::<SettingsState>();
     view.set_version(env!("CARGO_PKG_VERSION").into());
@@ -212,12 +216,21 @@ impl WindowHost<SettingsPage> for Window {
 
     fn render(&mut self, window: &MainWindow, state: &State, _: &Intents<Intent>) {
         let (modules, sections, locations) = (&self.modules, &self.sections, &self.locations);
-        self.shown_rows.update(state.rows_version(), || {
-            modules.sync(state.rows().into_iter().map(module_row));
-            sections.sync(state.sections().into_iter().map(section_row));
-        });
-        self.shown_locations
-            .update(state.boxes_version(), || locations.sync(state.locations().into_iter().map(location_row)));
+        self.shown_rows.update(
+            "rows",
+            state.rows_version(),
+            || (state.rows(), state.sections()),
+            |(rows, shown)| {
+                modules.sync(rows.into_iter().map(module_row));
+                sections.sync(shown.into_iter().map(section_row));
+            },
+        );
+        self.shown_locations.update(
+            "locations",
+            state.boxes_version(),
+            || state.locations(),
+            |shown| locations.sync(shown.into_iter().map(location_row)),
+        );
         let view = window.global::<SettingsState>();
         view.set_saving(state.saving());
         view.set_saving_locations(state.saving_locations());

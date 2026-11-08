@@ -11,7 +11,7 @@ use eg_trainer::screens::registry::{Area, Feature};
 use eg_trainer::screens::session::{FieldRequest, TrainerSession};
 use eg_trainer::screens::trainer_pages::{Effect, FieldRowView, Intent, PlaceView, REVEAL, RowKind, RowView, State, Subscription, TrainerPages, ValueView, read_facts};
 use slint::{ComponentHandle, ModelRc, SharedString, Timer, VecModel};
-use spiderland::{Intents, Slice, Store, Version, callbacks};
+use spiderland::{CheckedSlice, Intents, Slice, Store, Version, callbacks};
 use spiderland_slint::{Background, InnerRows, Rows, WindowHost, Windowed, after, on_watch};
 use std::any::Any;
 use std::rc::Rc;
@@ -161,10 +161,22 @@ struct Window {
     sections: Rows<SharedString>,
     profiles: Rows<SharedString>,
     serial: i32,
-    shown_rows: Slice<(Version, Version, i32)>,
-    shown_profiles: Slice<Version>,
+    /// A test build makes these regions anyway, and fails if a key misses an input.
+    shown_rows: CheckedSlice<(Version, Version, i32), Vec<RowView>>,
+    shown_profiles: CheckedSlice<Version, ProfilesView>,
     shown_layout: Slice<Version>,
     reveal: Timer,
+}
+
+/// The profile bar as the facts give it.
+#[derive(Clone, PartialEq)]
+struct ProfilesView {
+    labels: Vec<String>,
+    index: i32,
+    name: String,
+    label: String,
+    kept: bool,
+    caption: String,
 }
 
 /// Shows the trainer's pages on `session`. `features` is the registry; `planned` lists features that are not ported yet (a
@@ -183,8 +195,8 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
         sections: Rows::default(),
         profiles: Rows::default(),
         serial: 0,
-        shown_rows: Slice::default(),
-        shown_profiles: Slice::default(),
+        shown_rows: CheckedSlice::default(),
+        shown_profiles: CheckedSlice::default(),
         shown_layout: Slice::default(),
         reveal: Timer::default(),
     };
@@ -238,23 +250,37 @@ impl WindowHost<TrainerPages> for Window {
         let view = window.global::<TrainerState>();
         self.show_rows(state, &view);
         let profiles = &self.profiles;
-        self.shown_profiles.update(state.facts_version(), || {
-            profiles.sync(state.profile_labels().into_iter().map(SharedString::from));
-            view.set_profile_index(state.profile_index());
-            view.set_profile_name(state.profile_name().into());
-            view.set_profile_label(state.profile_label().into());
-            view.set_profile_kept(state.profile_kept());
-            view.set_profile_caption(state.profile_caption().into());
-        });
+        self.shown_profiles.update(
+            "profiles",
+            state.facts_version(),
+            || ProfilesView {
+                labels: state.profile_labels(),
+                index: state.profile_index(),
+                name: state.profile_name().to_owned(),
+                label: state.profile_label(),
+                kept: state.profile_kept(),
+                caption: state.profile_caption(),
+            },
+            |shown| {
+                profiles.sync(shown.labels.into_iter().map(SharedString::from));
+                view.set_profile_index(shown.index);
+                view.set_profile_name(shown.name.into());
+                view.set_profile_label(shown.label.into());
+                view.set_profile_kept(shown.kept);
+                view.set_profile_caption(shown.caption.into());
+            },
+        );
         let places = &self.places;
-        self.shown_layout.update(state.layout().version(), || {
-            let layout = state.layout();
-            let (rows, tallest) = layout.places();
-            places.sync(rows.into_iter().map(place_view));
-            view.set_column_count(layout.column_count() as i32);
-            view.set_rows_height(tallest);
-            view.set_rows_ready(layout.rows_ready());
-        });
+        self.shown_layout.show(
+            state.layout(),
+            |layout| (layout.places(), layout.column_count() as i32, layout.rows_ready()),
+            |((rows, tallest), columns, ready)| {
+                places.sync(rows.into_iter().map(place_view));
+                view.set_column_count(columns);
+                view.set_rows_height(tallest);
+                view.set_rows_ready(ready);
+            },
+        );
     }
 
     /// A session with no worker under it (tests) has nothing to follow.
@@ -312,10 +338,10 @@ impl Window {
             self.serial = state.serial();
             self.shown = Shown::default();
             self.shown.attach(view);
-            self.shown_rows = Slice::default();
+            self.shown_rows = CheckedSlice::default();
         }
         let shown = &mut self.shown;
-        self.shown_rows.update(state.rows_version(), || shown.show(&state.row_views()));
+        self.shown_rows.update("rows", state.rows_version(), || state.row_views(), |rows| shown.show(&rows));
         if opened {
             self.sections.sync(state.sections().into_iter().map(SharedString::from));
             view.set_section(state.selected_section() as i32);

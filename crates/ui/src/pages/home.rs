@@ -94,7 +94,7 @@ impl WindowHost<Home> for Window {
     type Window = MainWindow;
 
     fn render(&mut self, window: &MainWindow, state: &State, _: &Intents<Intent>) {
-        self.view.update(state.model().version(), || show(&window.global::<HomeState>(), present(state.model())));
+        self.view.show(state.model(), |model| present(model), |view| show(&window.global::<HomeState>(), view));
     }
 
     fn subscribe(&mut self, subscription: &Subscription, intents: &Intents<Intent>) -> Box<dyn Any> {

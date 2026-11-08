@@ -6,7 +6,7 @@ use crate::{LogsState, MainWindow};
 use eg_core::logs::{Effect, Intent, LogFiles, Logs, Source, State, Subscription, WATCH_INTERVAL, read};
 use eg_trainer::backend::BackendHandle;
 use phrases::phrases;
-use slint::ComponentHandle;
+use slint::{ComponentHandle, SharedString};
 use spiderland::{Intents, Slice, Store, Version, callbacks};
 use spiderland_slint::{Background, WindowHost, Windowed, every};
 use std::any::Any;
@@ -88,12 +88,15 @@ impl WindowHost<Logs> for Window {
         });
         view.set_loading(state.is_loading());
         // The text can be a quarter of a megabyte, and a two-second tick usually finds it unchanged.
-        self.contents.update(state.contents().version(), || {
-            let contents = state.contents();
-            view.set_text(contents.text.as_str().into());
-            view.set_location(contents.location.as_str().into());
-            view.set_notice(contents.notice.as_str().into());
-        });
+        self.contents.show(
+            state.contents(),
+            |contents| [&contents.text, &contents.location, &contents.notice].map(|text| SharedString::from(text.as_str())),
+            |[text, location, notice]| {
+                view.set_text(text);
+                view.set_location(location);
+                view.set_notice(notice);
+            },
+        );
     }
 
     fn subscribe(&mut self, Subscription::Tick: &Subscription, intents: &Intents<Intent>) -> Box<dyn Any> {
