@@ -6,7 +6,7 @@ mod picker_rows;
 mod show;
 
 use crate::shell::{Page, ShellHandle};
-use crate::{CellKind, CellRef, ForgeState, MainWindow, TrainerState};
+use crate::{CellKind, CellRef, ForgeState, MainWindow};
 use eg_core::fault::{FaultDetails, FaultLog};
 use eg_trainer::backend::{BackendHandle, Command, ForgeSnapshot, forge_record};
 use eg_trainer::item::template::TemplateStore;
@@ -91,7 +91,7 @@ impl WindowHost<Forge> for ForgeHost {
         self.batch_refused = false;
         let forge = window.global::<ForgeState>();
         self.view.show(&forge, state);
-        window.global::<TrainerState>().set_item_unavailable(state.item_unavailable().as_str().into());
+        forge.set_item_unavailable(state.item_unavailable().as_str().into());
         // After the rows, which the focus lands in; a pulse's value goes first, so the view acts on it when its serial moves.
         let focus = state.focus();
         self.focused.update(focus.serial(), || {

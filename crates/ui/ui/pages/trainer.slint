@@ -6,7 +6,7 @@
 
 import { ScrollView } from "../widgets/scroll-view.slint";
 import { Tokens } from "../tokens.slint";
-import { Connection, KeyboardFocus, Tip } from "../globals.slint";
+import { Connection, KeyboardFocus, Tip, TrainerAccess } from "../globals.slint";
 import { Button, ButtonKind } from "../widgets/button.slint";
 import { ToggleSwitch } from "../widgets/toggle.slint";
 import { FocusRing } from "../widgets/focus.slint";
@@ -93,12 +93,7 @@ export struct FeatureRowModels {
 // section spacing Rust leaves above it), and whether it ends that column.
 export struct FeatureRowPlace { column: int, y: length, ends: bool }
 
-// What the trainer pages can do: set up a profile while no game runs, wait behind the connection's notice from the moment
-// a game is seen until an offline character is in play (or after a stop), and act on the game once one is.
-export enum TrainerAccess { setup, locked, live }
-
 export global TrainerState {
-    in property <TrainerAccess> access: TrainerAccess.locked;
     // Every kept profile (its character's name, class and cycle), the last played first; the character whose hooks the
     // rows are, by its index among them (-1 for one in play without a profile), its name and its full label (empty while
     // none is), whether its hooks are kept as its profile or last this session only; and what the rows do with them.
@@ -113,18 +108,6 @@ export global TrainerState {
     callback select-profile(int);
     callback delete-profile();
     callback keep-profile();
-
-    // What every trainer page shows in place of its body while it waits (`access` locked), and what the Item Forge shows
-    // without the game: waiting for the game or a character, connecting, online mode, a stop.
-    // Rust's texts, set before the window shows.
-    in property <string> connection-title;
-    in property <string> connection-detail;
-    // The connection stopped for a reason the user has to fix: the warning mark beside the title.
-    in property <bool> connection-stopped;
-    // A real wait (for the game, a character, the connection): ash drifts under it.
-    in property <bool> connection-waiting;
-    // Connected, but the forge's item could not be shown: why (empty when it can, or the forge is empty).
-    in property <string> item-unavailable;
 
     // The open page: its sections (none when it has one), the chosen one, and what that section holds.
     in property <[string]> sections;
@@ -1106,17 +1089,17 @@ export component TrainerPage inherits Rectangle {
 
         // While the trainer waits on a game, every section of every trainer page shows the connection instead of its body;
         // the Item Forge needs the game itself, so it shows it in a setup too.
-        if TrainerState.access == TrainerAccess.locked || (TrainerState.item-forge && TrainerState.access != TrainerAccess.live): TrainerNotice {
+        if Connection.access == TrainerAccess.locked || (TrainerState.item-forge && Connection.access != TrainerAccess.live): TrainerNotice {
             vertical-stretch: 1;
-            title: TrainerState.connection-title;
-            detail: TrainerState.connection-detail;
-            stopped: TrainerState.connection-stopped;
-            ash-shown: TrainerState.connection-waiting;
+            title: Connection.title;
+            detail: Connection.detail;
+            stopped: Connection.stopped;
+            ash-shown: Connection.waiting;
             action-shown: true;
         }
 
         // The owned item observation, while the current session can display it.
-        if TrainerState.access == TrainerAccess.live && TrainerState.item-forge && ForgeState.has-item: ItemForge {
+        if Connection.access == TrainerAccess.live && TrainerState.item-forge && ForgeState.has-item: ItemForge {
             vertical-stretch: 1;
             compact: root.compact;
             narrow: root.narrow;
@@ -1125,20 +1108,20 @@ export component TrainerPage inherits Rectangle {
 
         // Connected with nothing to show: the forge is empty, or its item could not be shown (a write's readback, or an
         // item the catalog cannot describe).
-        if TrainerState.access == TrainerAccess.live && TrainerState.item-forge && !ForgeState.has-item: TrainerNotice {
+        if Connection.access == TrainerAccess.live && TrainerState.item-forge && !ForgeState.has-item: TrainerNotice {
             vertical-stretch: 1;
             title: ForgeState.write-recovery-required ? TrainerText.readback-unavailable
-                : TrainerState.item-unavailable != "" ? TrainerText.item-unavailable : TrainerText.forge-empty;
+                : ForgeState.item-unavailable != "" ? TrainerText.item-unavailable : TrainerText.forge-empty;
             detail: ForgeState.write-recovery-required ? ForgeState.message
-                : TrainerState.item-unavailable != "" ? TrainerState.item-unavailable : TrainerText.forge-empty-detail;
+                : ForgeState.item-unavailable != "" ? ForgeState.item-unavailable : TrainerText.forge-empty-detail;
             stopped: ForgeState.write-recovery-required;
             ash-shown: !ForgeState.write-recovery-required;
             ash-still: true;
         }
 
         // No game: the hooks are the profile being set up, applied when its character enters play.
-        if TrainerState.access != TrainerAccess.locked && !TrainerState.item-forge: ProfileBand {
-            access: TrainerState.access;
+        if Connection.access != TrainerAccess.locked && !TrainerState.item-forge: ProfileBand {
+            access: Connection.access;
             delete-profile() => { TrainerState.delete-profile(); }
             keep-profile() => { TrainerState.keep-profile(); }
             profile-caption: TrainerState.profile-caption;
@@ -1151,7 +1134,7 @@ export component TrainerPage inherits Rectangle {
             compact: root.compact;
         }
 
-        if TrainerState.access != TrainerAccess.locked && !TrainerState.item-forge: FeatureList {
+        if Connection.access != TrainerAccess.locked && !TrainerState.item-forge: FeatureList {
             apply(a0) => { TrainerState.apply(a0); }
             column-count: TrainerState.column-count;
             columns-changed(a0) => { TrainerState.columns-changed(a0); }

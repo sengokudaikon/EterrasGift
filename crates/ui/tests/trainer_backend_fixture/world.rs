@@ -782,7 +782,7 @@ impl Forge {
                 std::time::Instant::now() < until,
                 "the forge did not settle: has item {}, unavailable {:?}, message {:?}",
                 self.ui.global::<ForgeState>().get_has_item(),
-                self.ui.global::<eg_ui::TrainerState>().get_item_unavailable(),
+                self.ui.global::<eg_ui::ForgeState>().get_item_unavailable(),
                 self.ui.global::<ForgeState>().get_message()
             );
             std::thread::sleep(Duration::from_millis(5));

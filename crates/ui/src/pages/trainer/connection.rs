@@ -3,7 +3,7 @@
 //! says to. Nothing here waits on the game.
 
 use crate::{
-    Connection, MainWindow, TrainerAccess, TrainerState,
+    Connection, MainWindow, TrainerAccess,
     decorations::{Ash, Decorations},
     shell::ShellHandle,
 };
@@ -22,16 +22,15 @@ fn show(window: &MainWindow, view: &ConnectionView) {
     connection.set_text(view.nav_text.as_str().into());
     connection.set_show_action(view.show_action);
     connection.set_action_text(view.action_text.into());
-    let state = window.global::<TrainerState>();
-    state.set_access(match view.access {
+    connection.set_access(match view.access {
         Access::Setup => TrainerAccess::Setup,
         Access::Locked => TrainerAccess::Locked,
         Access::Live => TrainerAccess::Live,
     });
-    state.set_connection_title(view.title.into());
-    state.set_connection_detail(view.detail.as_str().into());
-    state.set_connection_stopped(view.stopped);
-    state.set_connection_waiting(view.waiting);
+    connection.set_title(view.title.into());
+    connection.set_detail(view.detail.as_str().into());
+    connection.set_stopped(view.stopped);
+    connection.set_waiting(view.waiting);
 }
 
 /// The connection as a run without the trainer's worker shows it: not connected, in the navigation's foot (only when the

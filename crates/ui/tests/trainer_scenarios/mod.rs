@@ -188,7 +188,7 @@ pub(super) fn trainer_captures(session: &Session) {
         let ui = session.open_trainer(width, height);
         if let Some(fake) = fake {
             eg_ui::pages::trainer::bind(&ui, Rc::new(fake), FEATURES.to_vec(), false, None, session.background.clone());
-            ui.global::<TrainerState>().set_access(TrainerAccess::Live);
+            ui.global::<Connection>().set_access(TrainerAccess::Live);
             let connection = ui.global::<Connection>();
             connection.set_connected(true);
             connection.set_text("Connected".into());
@@ -228,7 +228,7 @@ pub(super) fn trainer_captures(session: &Session) {
     let setup = |page: &str, section: i32, width: u32, height: u32, profiles: &[Profile]| -> MainWindow {
         let ui = session.open_trainer(width, height);
         eg_ui::pages::trainer::bind(&ui, Rc::new(FakeSetup::of(profiles)), FEATURES.to_vec(), false, None, session.background.clone());
-        ui.global::<TrainerState>().set_access(TrainerAccess::Setup);
+        ui.global::<Connection>().set_access(TrainerAccess::Setup);
         ui.global::<Nav>().invoke_navigate(page.into());
         show(&ui);
         state(&ui).set_section(section);
@@ -509,7 +509,7 @@ pub(super) fn trainer_captures(session: &Session) {
         .filter(|feature| feature.area == Area::Loot)
         .for_each(|feature| feature.presented = false);
     eg_ui::pages::trainer::bind(&ui, Rc::new(FakeTrainer::default()), features, true, None, session.background.clone());
-    ui.global::<TrainerState>().set_access(TrainerAccess::Live);
+    ui.global::<Connection>().set_access(TrainerAccess::Live);
     ui.global::<Connection>().set_connected(true);
     ui.global::<Nav>().invoke_navigate("loot".into());
     show(&ui);

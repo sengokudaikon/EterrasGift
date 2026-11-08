@@ -567,11 +567,11 @@ pub(super) fn capture(session: &Session) {
     // Two games running: the trainer pages wait, ash drifting, and the status says what to do.
     data.games.store(2, Ordering::SeqCst);
     ui.global::<eg_ui::Connection>().invoke_connect();
-    wait(|| handle.snapshot().phase == Phase::WaitingForGame && ui.global::<eg_ui::TrainerState>().get_connection_waiting());
+    wait(|| handle.snapshot().phase == Phase::WaitingForGame && ui.global::<eg_ui::Connection>().get_waiting());
     // Connected by hand (automatic connection off), so it asks for a Connect again rather than saying it waits.
     let multiple = "Close all but one copy of Last Epoch, then connect.";
     assert_eq!(ui.global::<eg_ui::Connection>().get_text(), multiple);
-    assert_eq!(ui.global::<eg_ui::TrainerState>().get_connection_detail(), multiple);
+    assert_eq!(ui.global::<eg_ui::Connection>().get_detail(), multiple);
     session.capture(&ui, "backend-forge-multiple-games");
     data.games.store(1, Ordering::SeqCst);
     ui.global::<eg_ui::Connection>().invoke_connect();
@@ -584,7 +584,7 @@ pub(super) fn capture(session: &Session) {
     assert!(handle.snapshot().monitoring);
     assert!(!ui.global::<eg_ui::ForgeState>().get_has_item());
     // Connected and empty: the forge says so itself, with nothing about the connection.
-    assert_eq!(ui.global::<eg_ui::TrainerState>().get_item_unavailable(), "");
+    assert_eq!(ui.global::<eg_ui::ForgeState>().get_item_unavailable(), "");
     session.capture(&ui, "backend-forge-empty");
     gameplay_hooks(session, &ui, &handle, &data);
     *data.item.lock().unwrap() = Some(item("Owned Hatchet Ω", 17));
@@ -695,8 +695,8 @@ pub(super) fn capture(session: &Session) {
     assert!(!forge.get_can_undo());
     assert_eq!(handle.snapshot().phase, Phase::Blocked);
     // The stop is the connection's: every trainer page says it, in words, with Retry.
-    assert_eq!(ui.global::<eg_ui::TrainerState>().get_connection_title(), "Edit not confirmed");
-    assert!(ui.global::<eg_ui::TrainerState>().get_connection_detail().contains("then Retry"));
+    assert_eq!(ui.global::<eg_ui::Connection>().get_title(), "Edit not confirmed");
+    assert!(ui.global::<eg_ui::Connection>().get_detail().contains("then Retry"));
     session.capture(&ui, "backend-forge-uncertain");
     session.resize(680, 580);
     session.capture(&ui, "backend-forge-uncertain-narrow");
@@ -1104,7 +1104,7 @@ pub(super) fn capture(session: &Session) {
     let row = forge.get_affixes().row_data(0).unwrap();
     assert_eq!(row.detail, "Unknown seal 7");
     assert!(!row.can_edit);
-    assert_eq!(ui.global::<eg_ui::TrainerState>().get_item_unavailable(), "");
+    assert_eq!(ui.global::<eg_ui::ForgeState>().get_item_unavailable(), "");
     // An item the forge cannot show at all is recorded once, as the game reported it.
     let refused = || {
         std::fs::read_dir(folder.join("logs"))
@@ -1127,7 +1127,7 @@ pub(super) fn capture(session: &Session) {
     unreadable.fingerprint = unreadable.legacy_fingerprint();
     *data.item.lock().unwrap() = Some(unreadable);
     command(&handle, Command::ReadForge, || true);
-    wait(|| ui.global::<eg_ui::TrainerState>().get_item_unavailable().contains("fault log"));
+    wait(|| ui.global::<eg_ui::ForgeState>().get_item_unavailable().contains("fault log"));
     assert!(!ui.global::<eg_ui::ForgeState>().get_has_item());
     assert_eq!(handle.snapshot().phase, Phase::Ready);
     session.idle();
@@ -1152,7 +1152,7 @@ pub(super) fn capture(session: &Session) {
     wait(|| ui.global::<eg_ui::ForgeState>().get_has_item());
     data.loading.store(true, Ordering::SeqCst);
     command(&handle, Command::ReadForge, || handle.snapshot().phase == Phase::WaitingForCharacter);
-    wait(|| ui.global::<eg_ui::TrainerState>().get_connection_title() == "Changing area");
+    wait(|| ui.global::<eg_ui::Connection>().get_title() == "Changing area");
     assert!(handle.snapshot().attached.is_some());
     session.capture(&ui, "backend-forge-changing-area");
     data.loading.store(false, Ordering::SeqCst);
@@ -1165,10 +1165,10 @@ pub(super) fn capture(session: &Session) {
     assert!(!ui.global::<eg_ui::Connection>().get_connected());
     assert_eq!(data.reads.load(Ordering::SeqCst), before);
     let advice = "Load an offline character to use the trainer.";
-    assert_eq!(ui.global::<eg_ui::TrainerState>().get_connection_title(), "Online mode");
-    assert_eq!(ui.global::<eg_ui::TrainerState>().get_connection_detail(), advice);
+    assert_eq!(ui.global::<eg_ui::Connection>().get_title(), "Online mode");
+    assert_eq!(ui.global::<eg_ui::Connection>().get_detail(), advice);
     assert_eq!(ui.global::<eg_ui::Connection>().get_text(), "Online mode");
-    assert!(ui.global::<eg_ui::TrainerState>().get_connection_stopped() && !ui.global::<eg_ui::TrainerState>().get_connection_waiting());
+    assert!(ui.global::<eg_ui::Connection>().get_stopped() && !ui.global::<eg_ui::Connection>().get_waiting());
     assert!(ui.global::<eg_ui::Connection>().get_show_action());
     session.capture(&ui, "backend-forge-online-refused");
     session.resize(680, 580);
@@ -1339,8 +1339,8 @@ pub(super) fn capture_waiting(session: &Session) {
 
     // Monitoring with no game running: the trainer pages wait for Last Epoch, ash drifting, with nothing to press.
     command(&handle, Command::StartMonitoring, || handle.snapshot().phase == Phase::WaitingForGame);
-    wait(|| ui.global::<eg_ui::TrainerState>().get_connection_waiting());
-    assert_eq!(ui.global::<eg_ui::TrainerState>().get_connection_title(), "Waiting for Last Epoch");
+    wait(|| ui.global::<eg_ui::Connection>().get_waiting());
+    assert_eq!(ui.global::<eg_ui::Connection>().get_title(), "Waiting for Last Epoch");
     assert!(!ui.global::<eg_ui::Connection>().get_show_action());
     for (width, height, size) in [(1100, 700, ""), (940, 580, "-compact"), (1920, 1080, "-maximized")] {
         session.resize(width, height);
@@ -1351,7 +1351,7 @@ pub(super) fn capture_waiting(session: &Session) {
     // A game whose log has no character loaded: the gate waits for an offline character.
     games.store(1, Ordering::SeqCst);
     command(&handle, Command::Connect, || handle.snapshot().phase == Phase::WaitingForCharacter);
-    assert_eq!(ui.global::<eg_ui::TrainerState>().get_connection_title(), "Waiting for an offline character");
+    assert_eq!(ui.global::<eg_ui::Connection>().get_title(), "Waiting for an offline character");
     session.capture(&ui, "forge-waiting-character");
 
     command(&handle, Command::Shutdown, || handle.snapshot().phase == Phase::Stopped);
@@ -1597,7 +1597,7 @@ pub(super) fn capture_profiles(session: &Session) {
     settle();
     state.set_section(0);
     // No game: the last played profile shows, and its hooks take changes.
-    wait(|| state.get_access() == eg_ui::TrainerAccess::Setup && state.get_profile_name() == "Mira");
+    wait(|| ui.global::<eg_ui::Connection>().get_access() == eg_ui::TrainerAccess::Setup && state.get_profile_name() == "Mira");
     assert_eq!(state.get_profiles().row_count(), 2);
     let damage = || state.get_rows().row_data(3).expect("Damage enemies take");
     assert_eq!(damage().title, "Damage enemies take");
@@ -1623,11 +1623,11 @@ pub(super) fn capture_profiles(session: &Session) {
     assert!(handle.snapshot().profiles.profiles().iter().all(|profile| profile.key.name != "Mira"));
     // A game is seen: the profiles lock until an offline character is in play, and the pages show the connection.
     games.store(1, Ordering::SeqCst);
-    wait(|| state.get_access() == eg_ui::TrainerAccess::Locked);
+    wait(|| ui.global::<eg_ui::Connection>().get_access() == eg_ui::TrainerAccess::Locked);
     assert_eq!(handle.snapshot().profile_lock, backend::ProfileLock::Locked);
     // A game gone again: they can be set up once more.
     games.store(0, Ordering::SeqCst);
-    wait(|| state.get_access() == eg_ui::TrainerAccess::Setup);
+    wait(|| ui.global::<eg_ui::Connection>().get_access() == eg_ui::TrainerAccess::Setup);
 
     command(&handle, Command::Shutdown, || handle.snapshot().phase == Phase::Stopped);
     worker.join().unwrap();

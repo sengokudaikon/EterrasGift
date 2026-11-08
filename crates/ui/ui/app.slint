@@ -1,14 +1,14 @@
 // The main window: navigation beside the page host.
 
 import { Tokens } from "tokens.slint";
-import { Nav, NavRow, NavOutcome, Connection, KeyboardFocus, Tip, WindowSize } from "globals.slint";
+import { Nav, NavRow, NavOutcome, Connection, KeyboardFocus, Tip, TrainerAccess, WindowSize } from "globals.slint";
 import { TipBubble } from "widgets/focus.slint";
 import { NavPane } from "shell/nav.slint";
 import { HomePage, HomeState, LaunchMode, BloomPhase } from "pages/home.slint";
 import { LogsPage, LogsState } from "pages/logs.slint";
 import { ModsPage, ModsState, ModRow, SourceRow, ModSettingRow, SettingChoiceRow, ModLogRow } from "pages/mods.slint";
 import { SettingsPage, SettingsState, LocationSetting, ModuleRow, SettingsSectionRow } from "pages/settings.slint";
-import { TrainerPage, TrainerState, TrainerAccess, FeatureRowKind, FeatureTone, FeatureValueView, FeatureFieldView, FeatureRowView, FeatureRowModels, FeatureRowPlace } from "pages/trainer.slint";
+import { TrainerPage, TrainerState, FeatureRowKind, FeatureTone, FeatureValueView, FeatureFieldView, FeatureRowView, FeatureRowModels, FeatureRowPlace } from "pages/trainer.slint";
 import { ForgeState, CellKind, CellRef, ItemRarity, ValueCell, TierOption, AffixRowView, ModifierRowView, FieldView, DraftEntryView, AppliedEntryView, MenuOptionView,
     PickerRowView, TemplateRowView } from "pages/forge/state.slint";
 import { PillTone, PillView } from "widgets/pill.slint";

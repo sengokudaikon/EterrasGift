@@ -48,7 +48,11 @@ export global Nav {
     callback wide-changed(bool);
 }
 
-// The trainer's connection, shown at the foot of the navigation.
+// What the trainer pages can do: set up a profile while no game runs, wait behind the connection's notice from the moment
+// a game is seen until an offline character is in play (or after a stop), and act on the game once one is.
+export enum TrainerAccess { setup, locked, live }
+
+// The trainer's connection, shown at the foot of the navigation, and what it lets the trainer pages do.
 export global Connection {
     in property <bool> present;
     in property <bool> connected;
@@ -56,6 +60,17 @@ export global Connection {
     in property <string> text;
     in property <bool> show-action;
     in property <string> action-text;
+
+    in property <TrainerAccess> access: TrainerAccess.locked;
+    // What every trainer page shows in place of its body while it waits (`access` locked), and what the Item Forge shows
+    // without the game: waiting for the game or a character, connecting, online mode, a stop.
+    // Rust's texts, set before the window shows.
+    in property <string> title;
+    in property <string> detail;
+    // The connection stopped for a reason the user has to fix: the warning mark beside the title.
+    in property <bool> stopped;
+    // A real wait (for the game, a character, the connection): ash drifts under it.
+    in property <bool> waiting;
 
     callback connect();
 }

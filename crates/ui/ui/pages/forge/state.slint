@@ -153,6 +153,8 @@ export global ForgeCover {
 
 export global ForgeState {
     in property <bool> has-item;
+    // Connected, but the item could not be shown: why (empty when it can, or the forge is empty).
+    in property <string> item-unavailable;
     in property <bool> write-recovery-required;
 
     // The header.
