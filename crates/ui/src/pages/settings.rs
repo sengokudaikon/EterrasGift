@@ -1,12 +1,12 @@
-//! Settings in the window: the `eg_core::settings_page` feature's impure half. It shows the feature's state in the
+//! Settings in the window: the `eg_companion::settings` feature's impure half. It shows the feature's state in the
 //! `SettingsState` global, and saves, picks files, tells linked modules and closes the window when the feature says to.
 use phrases::phrases;
 
-pub use eg_core::settings_page::{LiveStatus, ModuleChoice, ModuleLink, ModuleSection};
+pub use eg_core::module::{LiveStatus, ModuleChoice, ModuleLink, ModuleSection};
 
 use crate::shell::{Intent as ShellIntent, Page, ShellHandle};
 use crate::{LocationSetting, MainWindow, MessageTone, ModuleRow, SettingsSectionRow, SettingsState};
-use eg_core::settings_page::{
+use eg_companion::settings::{
     Effect, Intent, Location, LocationView, MessageKind, ModuleRowView, Output, SectionBody, SectionView, SettingsPage, State, Subscription, submit, try_pause,
 };
 use eg_core::settings_service::SettingsService;

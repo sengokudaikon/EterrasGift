@@ -1,6 +1,6 @@
 [package]
 name = "eg-companion"
-description = "The companion tier: finds, watches and starts Last Epoch from its files and Steam's. It asks the game's process only when it started, and never reads it."
+description = "The companion tier: finds, watches and starts Last Epoch from its files and Steam's, keeps the mods, and holds the Settings and Logs pages. It asks the game's process only when it started, and never reads it."
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -22,6 +22,8 @@ serde_json.workspace = true
 tokio = { workspace = true, features = ["macros"] }
 
 [dev-dependencies]
+# The settings page's tests set up states no intent reaches, through Store::with_state.
+spiderland = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
 
 [lints]

@@ -1351,8 +1351,6 @@ dependencies = [
  "phrases",
  "regex",
  "serde_json",
- "spiderland",
- "strum",
  "task-runtime",
  "tempfile",
  "tokio",

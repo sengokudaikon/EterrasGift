@@ -1,9 +1,9 @@
-//! The log viewer in the window: the `eg_core::logs` feature's impure half. It shows the feature's state in the `LogsState`
+//! The log viewer in the window: the `eg_companion::logs` feature's impure half. It shows the feature's state in the `LogsState`
 //! global and reads the files when the feature says to.
 
 use crate::shell::{Page, ShellHandle};
 use crate::{LogsState, MainWindow};
-use eg_core::logs::{Effect, Intent, LogFiles, Logs, Source, State, Subscription, WATCH_INTERVAL, read};
+use eg_companion::logs::{Effect, Intent, LogFiles, Logs, Source, State, Subscription, WATCH_INTERVAL, read};
 use eg_trainer::backend::BackendHandle;
 use phrases::phrases;
 use slint::{ComponentHandle, SharedString};

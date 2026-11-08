@@ -21,7 +21,7 @@ mod translations {
 use eg_companion::game::watch::GameWatch;
 use eg_companion::launch::launcher::GameLauncher;
 use eg_companion::mods::feature::{Intent as ModsIntent, Mods, Output as ModsOutput};
-use eg_core::settings_page::{Intent as SettingsIntent, Output as SettingsOutput};
+use eg_companion::settings::{Intent as SettingsIntent, Output as SettingsOutput};
 use eg_trainer::screens::connection::WorkerChanged;
 use eg_trainer::screens::settings as trainer_settings;
 use pages::{forge, home, logs, mods, settings, trainer};
@@ -40,7 +40,7 @@ pub struct App {
     /// Where pages run work that must not hold the UI thread.
     pub background: Background,
     /// Explicit file sources; tests supply their own or leave the viewer unconfigured.
-    pub logs: Option<eg_core::logs::LogFiles>,
+    pub logs: Option<eg_companion::logs::LogFiles>,
     pub mods: Option<mods::ModsPage>,
     /// This run has the trainer: its pages, its connection block and its Settings groups.
     pub trainer: bool,

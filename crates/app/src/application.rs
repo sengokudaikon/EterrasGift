@@ -7,8 +7,8 @@ use crate::{
 };
 use eg_companion::game::folders;
 use eg_companion::game::watch::GameWatch;
+use eg_companion::logs::LogFiles;
 use eg_core::fault::FaultLog;
-use eg_core::logs::LogFiles;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::{SaveOutcome, SettingsService, Snapshot};
 use eg_trainer::screens::settings as trainer_settings;

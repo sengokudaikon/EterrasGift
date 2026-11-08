@@ -3,8 +3,8 @@
 //! moment they flip, and Game definitions follows the session's catalog.
 
 use crate::backend::{Activity, BackendHandle, BackendSnapshot, CatalogState, Command, GameFiles};
+use eg_core::module::{LiveStatus, ModuleChoice, ModuleLink, ModuleSection};
 use eg_core::settings::LegacyModuleSettings;
-use eg_core::settings_page::{LiveStatus, ModuleChoice, ModuleLink, ModuleSection};
 use phrases::phrases;
 use std::rc::Rc;
 

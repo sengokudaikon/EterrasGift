@@ -8,8 +8,6 @@ license.workspace = true
 
 [dependencies]
 file-ops.workspace = true
-spiderland.workspace = true
-strum.workspace = true
 phrases.workspace = true
 task-runtime.workspace = true
 jiff.workspace = true
@@ -19,8 +17,6 @@ tokio.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-# The settings page's tests set up states no intent reaches, through Store::with_state.
-spiderland = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
 
 [lints]

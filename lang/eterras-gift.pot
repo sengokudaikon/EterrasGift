@@ -119,6 +119,38 @@ msgstr ""
 msgid "The game folder has both version.dll and version.dll.disabled. Delete the older one, then try again."
 msgstr ""
 
+#: crates/companion/src/logs.rs
+msgid "Could not read the logs. Details are in the fault log."
+msgstr ""
+
+#: crates/companion/src/logs.rs
+msgid "Could not read {path}: {error}"
+msgstr ""
+
+#: crates/companion/src/logs.rs
+msgid "No fault reports have been written."
+msgstr ""
+
+#: crates/companion/src/logs.rs
+msgid "No log files are configured for this run."
+msgstr ""
+
+#: crates/companion/src/logs.rs
+msgid "Refreshes every two seconds while open."
+msgstr ""
+
+#: crates/companion/src/logs.rs
+msgid "Showing the latest part of the log. Refreshes every two seconds while open."
+msgstr ""
+
+#: crates/companion/src/logs.rs
+msgid "Showing up to eight recent fault reports. Refreshes every two seconds while open."
+msgstr ""
+
+#: crates/companion/src/logs.rs
+msgid "This log is empty."
+msgstr ""
+
 #: crates/companion/src/mods/assembly.rs
 msgid "It is made for Mono games; {game} is an Il2Cpp game."
 msgstr ""
@@ -547,6 +579,158 @@ msgstr ""
 msgid "The mod library is closing."
 msgstr ""
 
+#: crates/companion/src/settings.rs crates/core/src/settings.rs
+msgid ".NET SDK folder"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Browse for the .NET SDK folder"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Browse for the MelonLoader folder"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Browse for the game executable"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Browse for the mod library folder"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Browse for the mod sources folder"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Browse for the user-data folder"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Changes last for this run only. Save locations replaces the unreadable file."
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Every mod version you install, and which mods are on. A new folder takes effect after a restart."
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Fault reports, trainer labels, game definitions and, unless it has its own folder, the mod library. A new folder takes effect after a restart."
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Game executable"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Leave empty to find the game automatically."
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Locations saved."
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Locations were not saved: {error}"
+msgstr ""
+
+#: crates/companion/src/settings.rs crates/core/src/settings.rs
+msgid "MelonLoader folder"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Mod library"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Mod library folder"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Mod sources folder"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "None"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Not found"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Saved. Restart Eterra's Gift to turn {turns}."
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Saved. Restart Eterra's Gift to use the new locations and turn {turns}."
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Saved. Restart Eterra's Gift to use the new locations."
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Select the Last Epoch executable"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Select the folder MelonLoader runs from"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Select the folder with dotnet.exe"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Select the mod library folder"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Select the mod sources folder"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Select user-data folder"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Settings were not saved: {reason}"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "The folder with dotnet.exe, which builds mod projects. Leave empty to find it automatically."
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "The game folder"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "User-data folder"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Where games with mods run MelonLoader from. Leave empty for the game folder. Another folder needs a copy of MelonLoader 0.6.6 or later. Takes effect after a restart."
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "Your own mod projects, for the Mods page to build and install. The .NET SDK reads every project here, so keep only projects you trust."
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "{list} and {next}"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "{module} off"
+msgstr ""
+
+#: crates/companion/src/settings.rs
+msgid "{module} on"
+msgstr ""
+
 #: crates/core/src/lists.rs
 msgctxt "a list of two"
 msgid "{first} and {second}"
@@ -572,40 +756,12 @@ msgctxt "a longer list, its last item"
 msgid "{list} or {last}"
 msgstr ""
 
-#: crates/core/src/logs.rs
-msgid "Could not read the logs. Details are in the fault log."
+#: crates/core/src/module.rs
+msgid "The settings for {module} must be an object."
 msgstr ""
 
-#: crates/core/src/logs.rs
-msgid "Could not read {path}: {error}"
-msgstr ""
-
-#: crates/core/src/logs.rs
-msgid "No fault reports have been written."
-msgstr ""
-
-#: crates/core/src/logs.rs
-msgid "No log files are configured for this run."
-msgstr ""
-
-#: crates/core/src/logs.rs
-msgid "Refreshes every two seconds while open."
-msgstr ""
-
-#: crates/core/src/logs.rs
-msgid "Showing the latest part of the log. Refreshes every two seconds while open."
-msgstr ""
-
-#: crates/core/src/logs.rs
-msgid "Showing up to eight recent fault reports. Refreshes every two seconds while open."
-msgstr ""
-
-#: crates/core/src/logs.rs
-msgid "This log is empty."
-msgstr ""
-
-#: crates/core/src/settings.rs crates/core/src/settings_page.rs
-msgid ".NET SDK folder"
+#: crates/core/src/module.rs
+msgid "{key} must be true or false in the settings for {module}, which were left unchanged."
 msgstr ""
 
 #: crates/core/src/settings.rs
@@ -646,10 +802,6 @@ msgstr ""
 
 #: crates/core/src/settings.rs
 msgid "Enter the full path of the {what}, starting with its drive (such as C:\\), or use Browse."
-msgstr ""
-
-#: crates/core/src/settings.rs crates/core/src/settings_page.rs
-msgid "MelonLoader folder"
 msgstr ""
 
 #: crates/core/src/settings.rs
@@ -734,158 +886,6 @@ msgstr ""
 
 #: crates/core/src/settings.rs
 msgid "{name} must be text."
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Browse for the .NET SDK folder"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Browse for the MelonLoader folder"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Browse for the game executable"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Browse for the mod library folder"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Browse for the mod sources folder"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Browse for the user-data folder"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Changes last for this run only. Save locations replaces the unreadable file."
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Every mod version you install, and which mods are on. A new folder takes effect after a restart."
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Fault reports, trainer labels, game definitions and, unless it has its own folder, the mod library. A new folder takes effect after a restart."
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Game executable"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Leave empty to find the game automatically."
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Locations saved."
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Locations were not saved: {error}"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Mod library"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Mod library folder"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Mod sources folder"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "None"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Not found"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Saved. Restart Eterra's Gift to turn {turns}."
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Saved. Restart Eterra's Gift to use the new locations and turn {turns}."
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Saved. Restart Eterra's Gift to use the new locations."
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Select the Last Epoch executable"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Select the folder MelonLoader runs from"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Select the folder with dotnet.exe"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Select the mod library folder"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Select the mod sources folder"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Select user-data folder"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Settings were not saved: {reason}"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "The folder with dotnet.exe, which builds mod projects. Leave empty to find it automatically."
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "The game folder"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "The settings for {module} must be an object."
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "User-data folder"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Where games with mods run MelonLoader from. Leave empty for the game folder. Another folder needs a copy of MelonLoader 0.6.6 or later. Takes effect after a restart."
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "Your own mod projects, for the Mods page to build and install. The .NET SDK reads every project here, so keep only projects you trust."
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "{key} must be true or false in the settings for {module}, which were left unchanged."
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "{list} and {next}"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "{module} off"
-msgstr ""
-
-#: crates/core/src/settings_page.rs
-msgid "{module} on"
 msgstr ""
 
 #: crates/trainer/src/backend/connection.rs
