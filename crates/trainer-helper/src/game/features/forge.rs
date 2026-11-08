@@ -102,7 +102,7 @@ impl RuntimeAccess {
             let owner = self.class(&graph.images, c"", c"ItemList")?;
             let context = InvocationContext::new(attached, api);
             let method = context
-                .bind(self.zero_arg_method(owner, c"get", owner, false, &api)?)
+                .bind(self.zero_arg_method(owner, c"get", owner, false)?)
                 .map_err(|e| WriteError::Refused(e.to_string()))?;
             let registry = match method.invoke(None, &mut []).map_err(|e| WriteError::Refused(e.to_string()))? {
                 InvocationOutcome::Returned(ReturnValue::Reference(Some(root))) => root,

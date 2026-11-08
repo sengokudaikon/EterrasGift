@@ -2,7 +2,7 @@
 //! field's offset, a destination's exact type, and the bounded window of code to read. Nothing here calls a managed
 //! method or writes.
 
-use super::{Class, MAX_FIELD_OFFSET, MetadataApi, MetadataError, Method, Ptr, instance_offset, metadata_text, read_value, unsupported};
+use super::{Class, MAX_FIELD_OFFSET, MetadataApi, MetadataError, Method, MethodError, MethodQuery, Others, Params, Ptr, Returns, instance_offset, read_value, unsupported};
 use crate::raw;
 use std::{
     ffi::{CStr, c_void},
@@ -34,49 +34,27 @@ impl MetadataApi {
     /// # Safety
     /// Immutable attached metadata and a class descriptor retained by the caller.
     pub unsafe fn hook_method_contract(&self, owner: Class, spec: &MethodSpec) -> Result<Method, MetadataError> {
+        let query = MethodQuery {
+            params: Params::Named(spec.params),
+            others: Others::Overloads,
+            instance: Some(spec.instance),
+            returns: Returns::Named(spec.returns),
+            refused: raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT,
+            refuse_generic: true,
+            refuse_inflated: true,
+            ..MethodQuery::named(spec.method, spec.params.len())
+        };
         // SAFETY: immutable attached metadata and class descriptor retained by the caller.
-        unsafe {
-            let mut found = None;
-            for method in self.methods(owner) {
-                let method = method?;
-                let actual = (self.method_name)(method);
-                if actual.is_null() {
-                    return Err(unsupported("null hook method name"));
-                }
-                if metadata_text(actual) != spec.method || (self.method_params)(method) as usize != spec.params.len() {
-                    continue;
-                }
-                let mut params_match = true;
-                for (index, expected) in spec.params.iter().enumerate() {
-                    let param = (self.method_param)(method, index as u32);
-                    if param.is_null() {
-                        return Err(unsupported("null hook parameter type"));
-                    }
-                    if (self.type_byref)(param) != expected.ends_with('&') || self.type_name(param)? != *expected {
-                        params_match = false;
-                        break;
-                    }
-                }
-                if !params_match {
-                    continue;
-                }
-                let returns = (self.method_return)(method);
-                let mut implementation = 0;
-                if found.is_some()
-                    || (self.method_instance)(method) != spec.instance
-                    || (self.method_generic)(method)
-                    || (self.method_inflated)(method)
-                    || (self.method_flags)(method, &mut implementation) & (raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT) != 0
-                    || returns.is_null()
-                    || (self.type_byref)(returns)
-                    || self.type_name(returns)? != spec.returns
-                {
-                    return Err(unsupported(format!("hook contract: {}", spec.method.to_string_lossy())));
-                }
-                found = Some(method);
+        unsafe { self.find_method(owner, &query) }.map_err(|error| {
+            let name = spec.method.to_string_lossy();
+            match error {
+                MethodError::Metadata(error) => error,
+                MethodError::Unnamed => unsupported("null hook method name"),
+                MethodError::Untyped => unsupported("null hook parameter type"),
+                MethodError::Missing => unsupported(format!("missing hook: {name}")),
+                MethodError::Twice | MethodError::Signature | MethodError::Parameters => unsupported(format!("hook contract: {name}")),
             }
-            found.ok_or_else(|| unsupported(format!("missing hook: {}", spec.method.to_string_lossy())))
-        }
+        })
     }
     /// The offset of `owner`'s instance field `name`, whose type's class is exactly `expected`, aligned to `alignment`
     /// in a reference object's instance storage.

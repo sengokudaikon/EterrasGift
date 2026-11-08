@@ -1,7 +1,7 @@
 //! What a Unity player adds to the runtime, through its managed classes: whether a wrapper's native object still exists,
 //! and whether this is Unity's main thread.
 
-use crate::metadata::{Class, MetadataApi, MetadataError, metadata_text, target, unsupported};
+use crate::metadata::{Class, MetadataApi, MetadataError, MethodError, MethodQuery, Others, Returns, target, unsupported};
 use crate::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, StrongRoot, raw};
 use std::ptr::NonNull;
 
@@ -33,32 +33,21 @@ impl MetadataApi {
     pub unsafe fn current_thread_is_main(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, owner: Class, label: &str) -> Result<bool, MetadataError> {
         // SAFETY: The checked, thread-safe engine predicate observes only caller identity.
         unsafe {
-            let boolean = self.system_class(c"Boolean")?;
-            let mut found = None;
-            for method in self.methods(owner) {
-                let method = method?;
-                let name = (self.method_name)(method);
-                if name.is_null() {
-                    return Err(unsupported(format!("{label} predicate name")));
-                }
-                if metadata_text(name) != c"CurrentThreadIsMainThread" {
-                    continue;
-                }
-                let ty = (api.method_get_return_type)(method);
-                if found.is_some()
-                    || (api.method_get_class)(method) != owner
-                    || (api.method_is_instance)(method)
-                    || (api.method_get_param_count)(method) != 0
-                    || ty.is_null()
-                    || (api.type_is_byref)(ty)
-                    || (api.class_from_type)(ty) != boolean
-                {
-                    return Err(unsupported(format!("{label} predicate signature")));
-                }
-                found = NonNull::new(method.cast_mut());
-            }
+            let query = MethodQuery {
+                others: Others::Fail,
+                instance: Some(false),
+                returns: Returns::Class(self.system_class(c"Boolean")?),
+                declared: true,
+                ..MethodQuery::named(c"CurrentThreadIsMainThread", 0)
+            };
+            let method = self.find_method(owner, &query).map_err(|error| match error {
+                MethodError::Metadata(error) => error,
+                MethodError::Unnamed => unsupported(format!("{label} predicate name")),
+                MethodError::Missing => unsupported(format!("{label} predicate missing")),
+                MethodError::Untyped | MethodError::Twice | MethodError::Signature | MethodError::Parameters => unsupported(format!("{label} predicate signature")),
+            })?;
+            let method = NonNull::new(method.cast_mut()).ok_or_else(|| unsupported(format!("{label} predicate missing")))?;
             let calls = InvocationContext::new(attached, api);
-            let method = found.ok_or_else(|| unsupported(format!("{label} predicate missing")))?;
             let predicate = calls.bind(method).map_err(|e| unsupported(e.to_string()))?;
             match predicate.invoke(None, &mut []).map_err(|e| unsupported(e.to_string()))? {
                 InvocationOutcome::Returned(ReturnValue::Scalar { value: Scalar::Boolean(main), .. }) => Ok(main),

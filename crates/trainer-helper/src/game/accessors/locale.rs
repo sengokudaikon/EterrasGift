@@ -125,10 +125,10 @@ impl RuntimeAccess {
             // These are the only managed bodies authorized by this narrowly scoped operation.
             self.check_no_class_initializer(identifier_class, "locale")?;
             let string_class = self.system_class(c"String")?;
-            let identifier_method = self.zero_arg_method(locale_class, c"get_Identifier", identifier_class, true, &api)?;
-            let code_method = self.zero_arg_method(identifier_class, c"get_Code", string_class, true, &api)?;
+            let identifier_method = self.zero_arg_method(locale_class, c"get_Identifier", identifier_class, true)?;
+            let code_method = self.zero_arg_method(identifier_class, c"get_Code", string_class, true)?;
             let application = self.class(&images, c"UnityEngine", c"Application")?;
-            let version_method = self.zero_arg_method(application, c"get_version", string_class, false, &api)?;
+            let version_method = self.zero_arg_method(application, c"get_version", string_class, false)?;
             let context = InvocationContext::new(attached, api);
             let contract = ValueTypeContract::BoxedReturn {
                 class: NonNull::new(identifier_class).ok_or_else(|| unsupported("locale identifier class"))?,

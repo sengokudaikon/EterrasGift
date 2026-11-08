@@ -18,9 +18,11 @@ use std::{
 
 mod collections;
 mod contract;
+mod methods;
 mod read;
 
 pub use contract::MethodSpec;
+pub use methods::{MAX_CLASS_DEPTH, MethodError, MethodQuery, Others, Params, Returns};
 
 pub type Ptr = *mut c_void;
 pub type Class = *mut raw::Class;
@@ -244,6 +246,7 @@ exports! {
     method_generic: "il2cpp_method_is_generic" => raw::MethodIsGeneric,
     method_inflated: "il2cpp_method_is_inflated" => raw::MethodIsInflated,
     method_flags: "il2cpp_method_get_flags" => raw::MethodGetFlags,
+    method_class: "il2cpp_method_get_class" => raw::MethodGetClass,
     corlib: "il2cpp_get_corlib" => raw::GetCorlib,
     object_new: "il2cpp_object_new" => unsafe extern "C-unwind" fn(Class) -> *mut raw::Object,
     array_new: "il2cpp_array_new" => unsafe extern "C-unwind" fn(Class, usize) -> *mut raw::Object,
@@ -276,7 +279,6 @@ impl MetadataApi {
         }
         Ok(raw::InvocationApi {
             runtime_invoke: load!(c"il2cpp_runtime_invoke", raw::RuntimeInvoke),
-            method_get_class: load!(c"il2cpp_method_get_class", raw::MethodGetClass),
             class_is_generic: load!(c"il2cpp_class_is_generic", raw::ClassIsGeneric),
             class_is_inflated: load!(c"il2cpp_class_is_inflated", raw::ClassIsInflated),
             object_unbox: load!(c"il2cpp_object_unbox", raw::ObjectUnbox),
@@ -289,6 +291,7 @@ impl MetadataApi {
             method_get_param_count: self.method_params,
             method_get_param: self.method_param,
             method_get_flags: self.method_flags,
+            method_get_class: self.method_class,
             type_get_type: self.type_code,
             type_is_byref: self.type_byref,
             class_from_type: self.type_class,
@@ -671,84 +674,6 @@ impl MetadataApi {
         }
     }
 
-    /// The one nonvirtual, nonabstract method `name` declared by `owner` that takes no argument, is or is not an
-    /// instance method as `instance` says, and returns exactly `returns`.
-    ///
-    /// # Safety
-    /// The lookup contract (module docs); `api` belongs to the same runtime.
-    pub unsafe fn zero_arg_method(&self, owner: Class, name: &CStr, returns: Class, instance: bool, api: &raw::InvocationApi) -> Result<NonNull<raw::MethodInfo>, MetadataError> {
-        // SAFETY: The owner and return class are retained metadata; exact arity and storage are checked before binding.
-        unsafe {
-            let mut found = None;
-            for method in self.methods(owner) {
-                let method = method?;
-                let actual = (self.method_name)(method);
-                if actual.is_null() {
-                    return Err(unsupported("zero-argument getter name"));
-                }
-                if metadata_text(actual) != name {
-                    continue;
-                }
-                let ty = (api.method_get_return_type)(method);
-                let mut implementation_flags = 0;
-                if found.is_some()
-                    || (api.method_get_param_count)(method) != 0
-                    || (api.method_is_instance)(method) != instance
-                    || (api.method_get_class)(method) != owner
-                    || ty.is_null()
-                    || (api.type_is_byref)(ty)
-                    || (api.class_from_type)(ty) != returns
-                    || (api.method_get_flags)(method, &mut implementation_flags) & (raw::METHOD_ATTRIBUTE_ABSTRACT | raw::METHOD_ATTRIBUTE_VIRTUAL) != 0
-                {
-                    return Err(unsupported(format!("zero-argument getter contract: {}", name.to_string_lossy())));
-                }
-                found = NonNull::new(method.cast_mut());
-            }
-            found.ok_or_else(|| unsupported(format!("zero-argument getter missing: {}", name.to_string_lossy())))
-        }
-    }
-
-    /// The one direct (nonvirtual, nonabstract, non-P/Invoke, nongeneric) `System.Void` method `name` of `class` whose
-    /// parameter types are named `parameters`.
-    ///
-    /// # Safety
-    /// The lookup contract (module docs).
-    pub unsafe fn method(&self, class: Class, name: &CStr, parameters: &[&str], instance: bool) -> Result<Method, MetadataError> {
-        // SAFETY: The class is retained metadata; exact parameter names, instance flags and nonvirtual Void return are checked before its code is selected.
-        unsafe {
-            let mut found = None;
-            for method in self.methods(class) {
-                let method = method?;
-                let actual = (self.method_name)(method);
-                if actual.is_null() {
-                    return Err(unsupported("null method name"));
-                }
-                if metadata_text(actual) != name || (self.method_params)(method) as usize != parameters.len() {
-                    continue;
-                }
-                let mut implementation_flags = 0;
-                if found.is_some()
-                    || (self.method_instance)(method) != instance
-                    || (self.method_generic)(method)
-                    || (self.method_inflated)(method)
-                    || (self.method_flags)(method, &mut implementation_flags)
-                        & (raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT | raw::METHOD_ATTRIBUTE_VIRTUAL)
-                        != 0
-                    || self.type_name((self.method_return)(method))? != "System.Void"
-                {
-                    return Err(unsupported(format!("method contract {}", name.to_string_lossy())));
-                }
-                for (index, expected) in parameters.iter().enumerate() {
-                    if self.type_name((self.method_param)(method, index as u32))? != *expected {
-                        return Err(unsupported(format!("method parameter {}", name.to_string_lossy())));
-                    }
-                }
-                found = Some(method);
-            }
-            found.ok_or_else(|| unsupported(format!("missing method {}", name.to_string_lossy())))
-        }
-    }
-
     /// Checks the two layout adapters the queries rely on against freshly allocated, rooted samples: the public header
     /// sizes, and an array's length and a string's length and characters where the modern x64 layout puts them.
     ///
@@ -919,6 +844,9 @@ mod tests {
         unsafe extern "C-unwind" fn type_name(_: Type) -> *mut c_char {
             CString::new("System.Void").unwrap().into_raw()
         }
+        unsafe extern "C-unwind" fn by_value(_: Type) -> bool {
+            false
+        }
         unsafe extern "C-unwind" fn free(value: Ptr) {
             // SAFETY: allocation comes from type_name and is released once.
             unsafe {
@@ -934,6 +862,7 @@ mod tests {
         access.method_inflated = no;
         access.method_flags = flags;
         access.method_return = returns;
+        access.type_byref = by_value;
         access.type_name = type_name;
         access.runtime_free = free;
         for mut flags in [0_u32, 0x40, 0x400, 0x2000] {

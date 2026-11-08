@@ -177,6 +177,25 @@ pub struct InvocationContext<'attachment, 'runtime> {
     api: InvocationApi,
 }
 
+impl InvocationApi {
+    /// The body `object` runs for `method`: its class's override when `method` is virtual, `method` itself when it is
+    /// not, and none when the runtime has no override for it.
+    ///
+    /// # Safety
+    /// An attached thread of this table's runtime, `object` a live object of it, and `method` a method of one of the
+    /// object's classes.
+    pub unsafe fn dispatched(&self, object: NonNull<Object>, method: *const MethodInfo) -> Option<*const MethodInfo> {
+        // SAFETY: as this function's; the flags query reads only the method's descriptor.
+        unsafe {
+            if (self.method_get_flags)(method, null_mut()) & raw::METHOD_ATTRIBUTE_VIRTUAL == 0 {
+                return Some(method);
+            }
+            let body = (self.object_get_virtual_method)(object.as_ptr(), method);
+            (!body.is_null()).then_some(body)
+        }
+    }
+}
+
 impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
     /// Bind this API table to the attachment's live runtime.
     ///
