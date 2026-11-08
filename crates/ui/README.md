@@ -57,6 +57,14 @@ Each of these was hit and worked around in `crates/ui/ui`.
   - A tooltip trigger anchored to the centre of the control.
   - Fix: inherit `Rectangle`, which fills its parent.
 - **A component root cannot refer to `parent`.** Put the geometry in a child element instead.
+- **A component that inherits `PopupWindow` fails anywhere under an `if` or a `for` in the same component**, with
+  "PopupWindow cannot be directly repeated or conditional", though a plain `PopupWindow` is fine there. From outside the
+  popup, nothing can call its functions or read what is inside it (such as a `FocusScope`'s `has-focus`). So
+  `OptionMenu` is the popup's content, and the caller keeps the `PopupWindow`.
+- **`padding-*` are built-in property names on every element**, not only on layouts: `in property <length>
+  padding-left` fails with "Cannot override property". `OptionMenu` names its own `inset-*`.
+- **A callback named `start` hides the `start` enum value inside its component**: `alignment: start` then fails with
+  "Callback must be called". Name it something else (`OptionMenu`'s is `initial`).
 - **`row` is a built-in property name** (grid placement), so `in property <NavRow> row` fails with "Cannot override
   property". Other names that are taken: `col`, `x`, `y`.
 - **Inside a `PopupWindow`, `absolute-position` is measured from the popup**, and the window's own elements draw under
