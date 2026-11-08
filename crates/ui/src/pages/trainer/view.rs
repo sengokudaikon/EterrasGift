@@ -10,9 +10,9 @@ use eg_trainer::screens::pages::Tone;
 use eg_trainer::screens::registry::{Area, Feature};
 use eg_trainer::screens::session::{FieldRequest, TrainerSession};
 use eg_trainer::screens::trainer_pages::{Effect, FieldRowView, Intent, PlaceView, REVEAL, RowKind, RowView, State, Subscription, TrainerPages, ValueView, read_facts};
-use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, VecModel};
+use slint::{ComponentHandle, ModelRc, SharedString, Timer, VecModel};
 use spiderland::{Intents, Slice, Store, Version, callbacks};
-use spiderland_slint::{Background, Rows, WindowHost, Windowed, after, on_watch};
+use spiderland_slint::{Background, InnerRows, Rows, WindowHost, Windowed, after, on_watch};
 use std::any::Any;
 use std::rc::Rc;
 use std::time::Duration;
@@ -31,56 +31,49 @@ fn area(page: Page) -> Option<Area> {
     })
 }
 
-/// A row's own models, kept while it shows so its boxes keep their state.
+/// The models a page's rows show, made new with each page or section, so its rows are new and its boxes start empty, and
+/// updated in place while it shows, so a box being typed in keeps its state.
 #[derive(Default)]
-struct Nested {
-    listed: Rc<VecModel<FeatureValueView>>,
-    fields: Rc<VecModel<FeatureFieldView>>,
-    /// Each value's choices: the same model each time, so an open list isn't rebuilt under the pointer.
-    choices: Vec<ModelRc<SharedString>>,
+struct Shown {
+    rows: Rows<FeatureRowView>,
+    /// Each row's lists, apart from the row.
+    row_models: Rows<FeatureRowModels>,
+    listed: InnerRows<FeatureValueView>,
+    fields: InnerRows<FeatureFieldView>,
+    /// Each row's values' choices, inline first: a feature's choices never change, so each is made once, and an open list
+    /// isn't rebuilt under the pointer.
+    choices: Vec<Vec<ModelRc<SharedString>>>,
 }
 
-impl Nested {
-    fn of(row: &RowView) -> Nested {
-        let values = row.inline_value.iter().chain(&row.listed_values);
-        let mut nested = Nested {
-            choices: values
-                .map(|value| ModelRc::new(VecModel::from(value.choices.iter().map(|choice| SharedString::from(*choice)).collect::<Vec<_>>())))
-                .collect(),
-            ..Nested::default()
-        };
-        nested.update(row);
-        nested
+impl Shown {
+    /// Hands the view this page's models.
+    fn attach(&self, view: &TrainerState<'_>) {
+        view.set_rows(self.rows.model());
+        view.set_row_models(self.row_models.model());
     }
 
-    fn models(&self) -> FeatureRowModels {
-        FeatureRowModels {
-            listed_values: self.listed.clone().into(),
-            fields: self.fields.clone().into(),
+    fn show(&mut self, views: &[RowView]) {
+        for row in &views[self.choices.len().min(views.len())..] {
+            self.choices.push(row.inline_value.iter().chain(&row.listed_values).map(choices_of).collect());
         }
-    }
-
-    /// Brings the row's lists up to date in place; a list that changes length is replaced, and then this is true.
-    fn update(&mut self, row: &RowView) -> bool {
-        let listed: Vec<FeatureValueView> = row.listed_values.iter().enumerate().map(|(i, value)| value_view(value, &self.choices[i])).collect();
-        let fields: Vec<FeatureFieldView> = row.fields.iter().map(field_view).collect();
-        let listed = sync(&mut self.listed, listed);
-        let fields = sync(&mut self.fields, fields);
-        listed || fields
+        let choices = &self.choices;
+        let listed = views.iter().enumerate().map(|(index, row)| {
+            let offset = usize::from(row.inline_value.is_some());
+            let values = row.listed_values.iter().enumerate().map(|(i, value)| value_view(value, choices[index].get(offset + i)));
+            (FeatureRowModels::default(), values.collect::<Vec<_>>())
+        });
+        let models = self.listed.fill(listed, |models, listed| models.listed_values = listed);
+        let fields = models
+            .into_iter()
+            .zip(views)
+            .map(|(models, row)| (models, row.fields.iter().map(field_view).collect::<Vec<_>>()));
+        self.row_models.sync(self.fields.fill(fields, |models, fields| models.fields = fields));
+        self.rows.sync(views.iter().enumerate().map(|(index, row)| row_view(row, choices[index].first())));
     }
 }
 
-fn sync<T: Clone + PartialEq + 'static>(model: &mut Rc<VecModel<T>>, views: Vec<T>) -> bool {
-    if model.row_count() != views.len() {
-        *model = Rc::new(VecModel::from(views));
-        return true;
-    }
-    for (index, view) in views.into_iter().enumerate() {
-        if model.row_data(index).as_ref() != Some(&view) {
-            model.set_row_data(index, view);
-        }
-    }
-    false
+fn choices_of(value: &ValueView) -> ModelRc<SharedString> {
+    ModelRc::new(VecModel::from(value.choices.iter().map(|choice| SharedString::from(*choice)).collect::<Vec<_>>()))
 }
 
 fn tone(tone: Tone) -> FeatureTone {
@@ -91,13 +84,13 @@ fn tone(tone: Tone) -> FeatureTone {
     }
 }
 
-fn value_view(value: &ValueView, choices: &ModelRc<SharedString>) -> FeatureValueView {
+fn value_view(value: &ValueView, choices: Option<&ModelRc<SharedString>>) -> FeatureValueView {
     FeatureValueView {
         label: value.label.into(),
         accessible_name: value.accessible_name.as_str().into(),
         unit: value.unit.into(),
         choice: !value.choices.is_empty(),
-        choices: choices.clone(),
+        choices: choices.cloned().unwrap_or_default(),
         choice_index: value.choice_index,
         text: value.text.as_str().into(),
         step_tip: value.step_tip.as_str().into(),
@@ -120,7 +113,8 @@ fn field_view(field: &FieldRowView) -> FeatureFieldView {
     }
 }
 
-fn row_view(row: &RowView, nested: &Nested) -> FeatureRowView {
+/// `choices` are the inline value's.
+fn row_view(row: &RowView, choices: Option<&ModelRc<SharedString>>) -> FeatureRowView {
     FeatureRowView {
         kind: match row.kind {
             RowKind::Heading => FeatureRowKind::Heading,
@@ -136,7 +130,7 @@ fn row_view(row: &RowView, nested: &Nested) -> FeatureRowView {
         can_use: row.can_use,
         has_inline: row.inline_value.is_some(),
         choice_only: row.choice_only,
-        inline_value: row.inline_value.as_ref().map(|value| value_view(value, &nested.choices[0])).unwrap_or_default(),
+        inline_value: row.inline_value.as_ref().map(|value| value_view(value, choices)).unwrap_or_default(),
         status: row.status.as_str().into(),
         tone: tone(row.tone),
         reason: row.reason.into(),
@@ -162,11 +156,7 @@ struct Window {
     features: Rc<Vec<Feature>>,
     backend: Option<BackendHandle>,
     background: Background,
-    rows: Rc<VecModel<FeatureRowView>>,
-    /// Each row's lists, apart from the row: an item changed in place while its row changed too would not be shown (Slint
-    /// 1.18's repeater drops a row change that arrives while its model binding is dirty).
-    row_models: Rc<VecModel<FeatureRowModels>>,
-    nested: Vec<Nested>,
+    shown: Shown,
     places: Rows<FeatureRowPlace>,
     sections: Rows<SharedString>,
     profiles: Rows<SharedString>,
@@ -188,9 +178,7 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
         features: features.clone(),
         backend,
         background,
-        rows: Rc::new(VecModel::default()),
-        row_models: Rc::new(VecModel::default()),
-        nested: Vec::new(),
+        shown: Shown::default(),
         places: Rows::default(),
         sections: Rows::default(),
         profiles: Rows::default(),
@@ -201,8 +189,7 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
         reveal: Timer::default(),
     };
     let view = window.global::<TrainerState>();
-    view.set_rows(host.rows.clone().into());
-    view.set_row_models(host.row_models.clone().into());
+    host.shown.attach(&view);
     view.set_row_places(host.places.model());
     view.set_sections(host.sections.model());
     view.set_profiles(host.profiles.model());
@@ -318,35 +305,21 @@ impl Window {
     }
 
     fn show_rows(&mut self, state: &State, view: &TrainerState<'_>) {
-        if state.serial() != self.serial {
+        let opened = state.serial() != self.serial;
+        if opened {
             // Another page or section: the rows are new, in their own models, and the list starts at its top.
             self.serial = state.serial();
-            let rows = state.row_views();
-            let nested: Vec<Nested> = rows.iter().map(Nested::of).collect();
-            self.row_models.set_vec(nested.iter().map(Nested::models).collect::<Vec<_>>());
-            self.rows.set_vec(rows.iter().zip(&nested).map(|(row, nested)| row_view(row, nested)).collect::<Vec<_>>());
-            self.nested = nested;
+            self.shown = Shown::default();
+            self.shown.attach(view);
+            self.shown_rows = Slice::default();
+        }
+        let shown = &mut self.shown;
+        self.shown_rows.update(state.rows_version(), || shown.show(&state.row_views()));
+        if opened {
             self.sections.sync(state.sections().into_iter().map(SharedString::from));
             view.set_section(state.selected_section() as i32);
             view.set_item_forge(state.item_forge());
             view.set_serial(self.serial);
-            self.shown_rows.update(state.rows_version(), || {});
-            return;
         }
-        let (rows, row_models, nested) = (&self.rows, &self.row_models, &mut self.nested);
-        self.shown_rows.update(state.rows_version(), || {
-            for (index, row) in state.row_views().iter().enumerate() {
-                let Some(models) = nested.get_mut(index) else {
-                    continue;
-                };
-                if models.update(row) {
-                    row_models.set_row_data(index, models.models());
-                }
-                let fresh = row_view(row, models);
-                if rows.row_data(index).as_ref() != Some(&fresh) {
-                    rows.set_row_data(index, fresh);
-                }
-            }
-        });
     }
 }

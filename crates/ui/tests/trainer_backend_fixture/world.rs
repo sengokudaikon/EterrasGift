@@ -959,7 +959,8 @@ pub(in super::super) fn item_captures(session: &Session) {
             editor.pick_seal(0, Seal::Sealed);
             editor.select_affix(Some(2));
         });
-        settle();
+        // The draft's effect line waits for its value table.
+        forge.settle();
         assert_eq!(forge.ui.global::<ForgeState>().get_item_name(), LONG_NAME);
         session.capture(&forge.ui, &format!("item-long-name-{width}"));
     }
