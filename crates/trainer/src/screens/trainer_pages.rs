@@ -758,6 +758,11 @@ impl SpiderlandFeature for TrainerPages {
         [Subscription::Worker]
     }
 
+    /// Rows take their answers and show where they stand from the first.
+    fn start(_: &mut State, effects: &mut Effects<Effect>) {
+        effects.push(Effect::Refresh);
+    }
+
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
         match intent {
             Intent::Open(area) => {
@@ -925,6 +930,12 @@ mod tests {
             }
         }
         facts
+    }
+
+    #[test]
+    fn the_pages_start_by_reading_the_session() {
+        let effects = spiderland::start::<TrainerPages>(&mut State::new(FEATURES.to_vec(), false, 24.0));
+        assert!(matches!(effects[..], [Effect::Refresh]));
     }
 
     fn open(connected: bool) -> State {

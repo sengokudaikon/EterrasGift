@@ -70,7 +70,6 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, de
             },
         ),
     );
-    store.send(observed(&backend));
     callbacks!(window.global::<Connection>(), store, {
         on_connect: || Intent::Connect,
     });
@@ -95,6 +94,7 @@ impl WindowHost<ConnectionFeature> for Window {
 
     fn perform(&mut self, _: Option<&MainWindow>, effect: Effect, intents: &Intents<Intent>) {
         match effect {
+            Effect::Observe => intents.send(observed(&self.backend)),
             Effect::Connect => {
                 // By the phase the worker is in now, not the last one shown.
                 let Some(command) = connect_command(self.backend.peek(|state| state.phase)) else {

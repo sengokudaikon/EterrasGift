@@ -49,7 +49,6 @@ impl ForgeHandle {
 pub fn bind(window: &MainWindow, backend: BackendHandle, background: Background, shell: &ShellHandle, faults: Option<FaultLog>, templates: Option<TemplateStore>) -> ForgeHandle {
     let mut state = State::new(backend.snapshot(), backend.is_running(), shell.current() == Page::Forge, faults.is_some());
     state.editor_mut().keeps_templates = templates.is_some();
-    let first = observed(&backend);
     let host = ForgeHost {
         backend,
         background,
@@ -64,9 +63,6 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, background: Background,
     let store = Store::new(state, Windowed::new(window, host));
     connect::connect(&window.global::<ForgeState>(), &store);
     shell.forward(&store.intents(), |page| Intent::PageChanged { forge: page == Page::Forge });
-    // The worker may have published everything already: nothing wakes the forge until its next change.
-    store.send(first);
-    store.send(Intent::ReadTemplates);
     ForgeHandle { store }
 }
 
@@ -112,6 +108,7 @@ impl WindowHost<Forge> for ForgeHost {
     fn perform(&mut self, window: Option<&MainWindow>, effect: Effect, intents: &Intents<Intent>) {
         match effect {
             Effect::Worker(request) => self.request(request, intents),
+            Effect::Observe => intents.send(observed(&self.backend)),
             Effect::Focus { target, part } => {
                 let Some(window) = window else {
                     return;

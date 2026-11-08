@@ -109,9 +109,6 @@ pub(crate) fn bind(window: &MainWindow, settings: Settings, close_first: usize, 
     view.set_sections(host.sections.model());
     view.set_locations(host.locations.model());
     let store = Store::<SettingsPage>::new(state, Windowed::new(window, host));
-    // A save that finished before the listener was there, and what linked modules say to begin with.
-    store.send(Intent::Observed(Box::new(service.snapshot())));
-    store.send(Intent::LinkChanged);
 
     // A close always waits here and goes ahead from `Effect::Close`, so it can wait for saves in flight.
     window.window().on_close_requested({
@@ -267,6 +264,7 @@ impl WindowHost<SettingsPage> for Window {
                 }
             }
             Effect::Browse(location) => self.browse(window, location, intents),
+            Effect::Observe => intents.send(Intent::Observed(Box::new(self.service.snapshot()))),
             Effect::TryPause => intents.send(try_pause(&self.service)),
             Effect::Resume => self.service.resume(),
             Effect::Close => {

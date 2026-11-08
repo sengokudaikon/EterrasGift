@@ -17,21 +17,6 @@ use std::any::Any;
 use std::rc::Rc;
 use std::time::Duration;
 
-/// The bound pages, for whoever follows the session's changes: each change refreshes them.
-#[derive(Clone)]
-pub struct Pages {
-    store: Store<TrainerPages>,
-    session: Rc<dyn TrainerSession>,
-    features: Rc<Vec<Feature>>,
-}
-
-impl Pages {
-    /// The session changed: rows take their answers, read on a new connection, and show where they stand.
-    pub fn refresh(&self) {
-        self.store.send(Intent::Facts(Box::new(read_facts(&*self.session, &self.features))));
-    }
-}
-
 fn area(page: Page) -> Option<Area> {
     Some(match page {
         Page::Character => Area::Character,
@@ -195,11 +180,11 @@ struct Window {
 /// Shows the trainer's pages on `session`. `features` is the registry; `planned` lists features that are not ported yet (a
 /// source checkout). `backend` is the worker `session` runs on, whose snapshots the pages follow; `background` waits for what
 /// the session has on its way. Binding again replaces the previous binding.
-pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<Feature>, planned: bool, backend: Option<BackendHandle>, background: Background) -> Pages {
+pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<Feature>, planned: bool, backend: Option<BackendHandle>, background: Background) {
     let features = Rc::new(features);
     let spacing = window.global::<Tokens>().get_feature_section_spacing();
     let host = Window {
-        session: session.clone(),
+        session,
         features: features.clone(),
         backend,
         background,
@@ -223,13 +208,6 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
     view.set_profiles(host.profiles.model());
     view.set_item_forge(false);
     let store = Store::<TrainerPages>::new(State::new((*features).clone(), planned, spacing), Windowed::new(window, host));
-    let pages = Pages {
-        store: store.clone(),
-        session,
-        features,
-    };
-    pages.refresh();
-
     callbacks!(view, store, {
         on_open: |id| Intent::Open(Page::from_id(&id).and_then(area)),
         on_select_profile: |index| Intent::SelectProfile(index),
@@ -263,7 +241,6 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
         on_apply: |row| Intent::Apply(row),
         on_discard: |row| Intent::Discard(row),
     });
-    pages
 }
 
 impl WindowHost<TrainerPages> for Window {

@@ -110,6 +110,9 @@ pub enum Intent {
 pub enum Effect {
     /// Ask the worker to connect, as its phase then allows.
     Connect,
+    /// Look at what the worker says now, answered with [`Intent::Observed`] or word that it has gone: it may have published
+    /// before the connection began following it.
+    Observe,
     /// Move the window's decorations to where the wait has come. `entering` puts them there at once.
     Drift { phase: BloomPhase, entering: bool },
 }
@@ -159,6 +162,10 @@ impl Feature for ConnectionFeature {
 
     fn subscriptions(_: &State) -> impl IntoIterator<Item = Subscription> {
         [Subscription::Worker]
+    }
+
+    fn start(_: &mut State, effects: &mut Effects<Effect>) {
+        effects.push(Effect::Observe);
     }
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect, WorkerChanged>) {
@@ -359,6 +366,11 @@ fn access(snapshot: &BackendSnapshot) -> Access {
 mod tests {
     use super::*;
     use spiderland::step;
+
+    #[test]
+    fn the_connection_starts_by_looking_at_the_worker() {
+        assert!(matches!(spiderland::start::<ConnectionFeature>(&mut State::new(false))[..], [Effect::Observe]));
+    }
 
     #[test]
     fn a_request_to_connect_depends_on_the_phase() {

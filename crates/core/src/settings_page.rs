@@ -288,6 +288,9 @@ pub enum Effect {
         on: bool,
     },
     Submit(Save, Submission),
+    /// Read the saves' snapshot again, answered with [`Intent::Observed`]: a save may have finished before the page began
+    /// hearing of them.
+    Observe,
     /// Read a linked module's status section again.
     ReadStatus {
         module: usize,
@@ -765,6 +768,12 @@ impl Feature for SettingsPage {
         [Subscription::Saves]
     }
 
+    /// A save that finished before the page heard of saves, and what linked modules say to begin with.
+    fn start(state: &mut State, effects: &mut Effects<Effect>) {
+        effects.push(Effect::Observe);
+        read_statuses(state, effects);
+    }
+
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect, Output>) {
         match intent {
             Intent::ToggleModule(index, on) => {
@@ -843,18 +852,7 @@ impl Feature for SettingsPage {
                     effects.push(Effect::Quit);
                 }
             }
-            Intent::LinkChanged => {
-                for (module_index, module) in state.modules.iter().enumerate().filter(|(_, module)| module.enabled_at_start) {
-                    for (section_index, section) in module.choice.sections.iter().enumerate() {
-                        if matches!(section, ModuleSection::Status { .. }) {
-                            effects.push(Effect::ReadStatus {
-                                module: module_index,
-                                section: section_index,
-                            });
-                        }
-                    }
-                }
-            }
+            Intent::LinkChanged => read_statuses(state, effects),
             Intent::Act(module, section) => {
                 effects.push(Effect::Act { module, section });
                 effects.push(Effect::ReadStatus { module, section });
@@ -913,6 +911,20 @@ impl Feature for SettingsPage {
                 } else {
                     effects.push(Effect::Close);
                 }
+            }
+        }
+    }
+}
+
+/// Asks each started module's status sections what they say now.
+fn read_statuses<O>(state: &State, effects: &mut Effects<Effect, O>) {
+    for (module_index, module) in state.modules.iter().enumerate().filter(|(_, module)| module.enabled_at_start) {
+        for (section_index, section) in module.choice.sections.iter().enumerate() {
+            if matches!(section, ModuleSection::Status { .. }) {
+                effects.push(Effect::ReadStatus {
+                    module: module_index,
+                    section: section_index,
+                });
             }
         }
     }
@@ -1043,6 +1055,7 @@ mod tests {
                     match effect {
                         Effect::Switched { key, on, .. } => self.switched.borrow_mut().push((key.into(), on)),
                         Effect::Submit(save, submission) => queue.extend(submit(&self.service, save, submission)),
+                        Effect::Observe => queue.push_back(Intent::Observed(Box::new(self.service.snapshot()))),
                         Effect::TryPause => queue.push_back(try_pause(&self.service)),
                         Effect::Resume => self.service.resume(),
                         Effect::Close => self.closed = true,
@@ -1416,6 +1429,15 @@ mod tests {
                 assert!(page.closed, "the second close goes ahead once the failure was shown");
             }
         }
+    }
+
+    #[test]
+    fn the_page_starts_by_reading_the_saves_and_what_started_modules_say() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SettingsStore::open(&temp.path().join("app"), &temp.path().join("settings.json"), &[]);
+        let mut page = Page::new(SettingsService::inline(store), vec![with_sections("trainer", true), with_sections("off", false)]);
+        let effects = spiderland::start::<SettingsPage>(&mut page.state);
+        assert!(matches!(effects[..], [Effect::Observe, Effect::ReadStatus { module: 0, section: 0 }]), "{effects:?}");
     }
 
     #[test]

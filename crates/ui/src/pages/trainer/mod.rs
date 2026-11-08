@@ -5,7 +5,7 @@
 pub mod connection;
 mod view;
 
-pub use view::{Pages, bind};
+pub use view::bind;
 
 use crate::MainWindow;
 use eg_trainer::backend::BackendHandle;

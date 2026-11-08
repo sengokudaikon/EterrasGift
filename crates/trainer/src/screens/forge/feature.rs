@@ -148,6 +148,9 @@ pub enum Intent {
 
 pub enum Effect {
     Worker(Request),
+    /// Look at what the worker has now, answered with [`Intent::Observed`]: it may have published before the forge began
+    /// following it.
+    Observe,
     /// Give the keyboard's focus to `target`, as its `part`.
     Focus {
         target: FocusTarget,
@@ -346,6 +349,11 @@ impl Feature for Forge {
 
     fn subscriptions(_: &State) -> impl IntoIterator<Item = Subscription> {
         [Subscription::Worker]
+    }
+
+    fn start(state: &mut State, effects: &mut Effects<Effect>) {
+        effects.push(Effect::Observe);
+        read_templates(&state.editor, effects);
     }
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
@@ -663,6 +671,12 @@ mod tests {
         let mut state = state(true);
         state.editor_mut().keeps_templates = true;
         state
+    }
+
+    #[test]
+    fn the_forge_starts_by_looking_at_the_worker_and_reading_its_templates() {
+        assert!(matches!(spiderland::start::<Forge>(&mut state(true))[..], [Effect::Observe]));
+        assert!(matches!(spiderland::start::<Forge>(&mut keeping())[..], [Effect::Observe, Effect::ReadTemplates]));
     }
 
     #[test]
