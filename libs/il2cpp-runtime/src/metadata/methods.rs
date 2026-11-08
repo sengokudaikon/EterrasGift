@@ -312,3 +312,6 @@ impl MetadataApi {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;
