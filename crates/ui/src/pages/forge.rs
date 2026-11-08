@@ -26,13 +26,6 @@ pub struct ForgeHandle {
 }
 
 impl ForgeHandle {
-    /// Runs `change` on the editor and shows the result.
-    pub fn edit<T>(&self, change: impl FnOnce(&mut ForgeEditor) -> T) -> T {
-        let result = self.store.with_state(|state| change(state.editor_mut()));
-        self.store.send(Intent::Settle);
-        result
-    }
-
     /// Sends an intent, as the view's callbacks do.
     pub fn send(&self, intent: Intent) {
         self.store.send(intent);

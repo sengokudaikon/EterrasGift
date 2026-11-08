@@ -13,6 +13,7 @@ use crate::item::template::{ItemTemplate, TemplateAffix, TemplateItem, TemplateS
 use eg_core::lists::{Conjunction, list};
 use phrases::{Phrase, phrases};
 use spiderland::Tracked;
+
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -283,8 +284,6 @@ pub struct ForgeEditor {
     picker_index: Index,
     /// Counts changes to the base and identity options and to the catalog, so the view rebuilds its menus only then.
     menu_generation: u64,
-    /// The local time a confirmed write is listed with.
-    pub clock: fn() -> String,
     /// Whether this run keeps item templates: a run without user data doesn't.
     pub keeps_templates: bool,
     /// The kept templates, as last read from their folder.
@@ -295,8 +294,18 @@ pub struct ForgeEditor {
     pub template_name: String,
 }
 
+thread_local! {
+    static FROZEN_TIME: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+}
+
+/// Holds the time a confirmed write is listed with at `time` (None lets it follow the clock), for captures to show one.
+pub fn freeze_clock(time: Option<&'static str>) {
+    FROZEN_TIME.set(time);
+}
+
+/// The local time a confirmed write is listed with.
 fn local_time() -> String {
-    jiff::Zoned::now().strftime("%H:%M").to_string()
+    FROZEN_TIME.get().map_or_else(|| jiff::Zoned::now().strftime("%H:%M").to_string(), str::to_owned)
 }
 
 /// Puts a table on a value editor. Without the game's values the roll is still edited, by its position; a value no roll
@@ -360,7 +369,6 @@ impl ForgeEditor {
             identity_keys: Vec::new(),
             picker_index: Index::default(),
             menu_generation: 0,
-            clock: local_time,
             keeps_templates: false,
             templates: Tracked::default(),
             template_message: String::new(),

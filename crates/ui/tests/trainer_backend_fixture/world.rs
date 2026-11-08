@@ -748,8 +748,6 @@ impl Forge {
             },
         );
         let handle = installed.forge.expect("the forge on the worker");
-        // Applied entries carry the local time; captures hold one.
-        handle.edit(|editor| editor.clock = || "23:54".into());
         ui.global::<Tokens>().set_motion(false);
         ui.global::<Tokens>().set_high_contrast(false);
         session.window.set_size(PhysicalSize::new(width, height));
@@ -830,22 +828,37 @@ impl Forge {
 
     /// Applies the drafts and waits for the writes to settle.
     fn apply(&self) {
-        self.handle.edit(ForgeEditor::apply);
+        self.send([Intent::Apply]);
         self.wait_writes();
     }
 
     /// Waits until no write is in flight.
     fn wait_writes(&self) {
-        wait(|| !self.handle.edit(|editor| editor.is_writing()));
+        wait(|| self.handle.read(ForgeEditor::is_writing) == Some(false));
         self.settle();
     }
-}
 
-// Types a value into a cell's popover, as Enter commits it.
-fn type_value(editor: &mut ForgeEditor, cell: Cell, text: &str) {
-    assert!(editor.begin_input(cell));
-    editor.set_input(cell, text);
-    assert!(editor.commit_input(cell));
+    /// Sends what the view sends, one intent after another, and waits for what they looked up, as `open` does: a capture
+    /// then never depends on how fast the worker answers.
+    fn send(&self, intents: impl IntoIterator<Item = Intent>) {
+        for intent in intents {
+            self.handle.send(intent);
+        }
+        self.settle();
+    }
+
+    /// Looks at the editor between intents.
+    fn read<T>(&self, read: impl FnOnce(&ForgeEditor) -> T) -> T {
+        self.handle.read(read).expect("the forge is not at work")
+    }
+
+    /// Types a value into a cell's popover, as Enter commits it.
+    fn type_value(&self, cell: Cell, text: &str) {
+        self.send([Intent::BeginInput(cell)]);
+        assert_eq!(self.read(ForgeEditor::typing_cell), Some(cell), "the popover opens on {cell:?}");
+        self.send([Intent::InputEdited(cell, text.into()), Intent::CommitInput(cell)]);
+        assert_eq!(self.read(ForgeEditor::typing_cell), None, "Enter takes {text:?}");
+    }
 }
 
 /// The Item Forge on the fixture world: drafts, Apply and Undo, the cells' menus,
@@ -868,21 +881,14 @@ pub(in super::super) fn item_captures(session: &Session) {
     // Apply, a draft stepped back with Ctrl+Z, Undo apply, then a draft discarded: the ledger keeps both readbacks and the
     // message says what was discarded (`ui-preview`).
     let forge = Forge::open(session, World::boots(), 1100, 700);
-    forge.handle.edit(|editor| {
-        editor.select_affix(Some(0));
-        type_value(editor, Cell::Affix(0), "37");
-    });
+    forge.send([Intent::SelectAffix(Some(0))]);
+    forge.type_value(Cell::Affix(0), "37");
     forge.apply();
-    forge.handle.edit(|editor| {
-        type_value(editor, Cell::Affix(0), "38");
-        editor.undo_draft_only();
-        editor.undo();
-    });
+    forge.type_value(Cell::Affix(0), "38");
+    forge.send([Intent::UndoDraft, Intent::Undo]);
     forge.wait_writes();
-    forge.handle.edit(|editor| {
-        type_value(editor, Cell::Affix(0), "36");
-        editor.discard_entry(0);
-    });
+    forge.type_value(Cell::Affix(0), "36");
+    forge.send([Intent::DiscardEntry(0)]);
     settle();
     assert_eq!(forge.ui.global::<ForgeState>().get_message(), "Draft for Health discarded.");
     assert_eq!(forge.writes(), 2, "the apply and its undo");
@@ -892,12 +898,9 @@ pub(in super::super) fn item_captures(session: &Session) {
     // Two drafts pending at every window class: Movement Speed T1 → T4, Health +34 → +37.
     for (class, width, height) in SIZES {
         let forge = Forge::open(session, World::boots(), width, height);
-        forge.handle.edit(|editor| {
-            editor.pick_tier(2, 4);
-            editor.select_affix(Some(0));
-        });
+        forge.send([Intent::PickTier(2, 4), Intent::SelectAffix(Some(0))]);
         forge.settle();
-        forge.handle.edit(|editor| type_value(editor, Cell::Affix(0), "37"));
+        forge.type_value(Cell::Affix(0), "37");
         settle();
         let state = forge.ui.global::<ForgeState>();
         assert_eq!(state.get_pane_open(), class != "narrow", "the pane starts closed only in a narrow window");
@@ -913,9 +916,9 @@ pub(in super::super) fn item_captures(session: &Session) {
     // A narrow window with the pane open over the table: Tab skips the cells under it and goes on into the pane
     // (`item-narrow-pane-keyboard`); Escape there closes the pane and gives focus back to Changes (`item-narrow-pane-escape`).
     let forge = Forge::open(session, World::boots(), 680, 580);
-    forge.handle.edit(|editor| editor.pick_tier(2, 4));
+    forge.send([Intent::PickTier(2, 4)]);
     forge.settle();
-    forge.handle.edit(|editor| type_value(editor, Cell::Affix(0), "37"));
+    forge.type_value(Cell::Affix(0), "37");
     let state = forge.ui.global::<ForgeState>();
     state.set_pane_open(true);
     settle();
@@ -936,11 +939,8 @@ pub(in super::super) fn item_captures(session: &Session) {
     // A seal-only draft beside a value draft, then Apply: both confirmed by readback, Fire Resistance moved where the game
     // loads a normal affix (`seal-draft`, `confirmed`).
     let forge = Forge::open(session, World::boots(), 1100, 700);
-    forge.handle.edit(|editor| {
-        type_value(editor, Cell::Affix(0), "37");
-        editor.select_affix(Some(3));
-        editor.pick_seal(3, Seal::Normal);
-    });
+    forge.type_value(Cell::Affix(0), "37");
+    forge.send([Intent::SelectAffix(Some(3)), Intent::PickSeal(3, Seal::Normal)]);
     settle();
     session.capture(&forge.ui, "item-seal-draft");
     forge.apply();
@@ -954,11 +954,7 @@ pub(in super::super) fn item_captures(session: &Session) {
     const LONG_NAME: &str = "Wayfarer's Boots of Unwavering Determination and Extraordinary Elemental Resistance";
     for (width, height) in [(940, 580), (1100, 700)] {
         let forge = Forge::open(session, World::boots().change(|item| item.name = LONG_NAME.into()), width, height);
-        forge.handle.edit(|editor| {
-            editor.select_affix(Some(0));
-            editor.pick_seal(0, Seal::Sealed);
-            editor.select_affix(Some(2));
-        });
+        forge.send([Intent::SelectAffix(Some(0)), Intent::PickSeal(0, Seal::Sealed), Intent::SelectAffix(Some(2))]);
         // The draft's effect line waits for its value table.
         forge.settle();
         assert_eq!(forge.ui.global::<ForgeState>().get_item_name(), LONG_NAME);
@@ -968,7 +964,7 @@ pub(in super::super) fn item_captures(session: &Session) {
     // High contrast raises the hairlines, frames and notes in place, a value drafted to its maximum (`item-high-contrast`).
     let forge = Forge::open(session, World::boots(), 1100, 700);
     forge.ui.global::<Tokens>().set_high_contrast(true);
-    forge.handle.edit(|editor| editor.step_to_end(Cell::Affix(0), true));
+    forge.send([Intent::StepToEnd(Cell::Affix(0), true)]);
     settle();
     session.capture(&forge.ui, "item-high-contrast");
     forge.ui.global::<Tokens>().set_high_contrast(false);
@@ -976,9 +972,9 @@ pub(in super::super) fn item_captures(session: &Session) {
 
     // A draft the game changed after it was made: Apply refuses the whole ledger with the reason (`rejected`).
     let forge = Forge::open(session, World::boots(), 1100, 700);
-    forge.handle.edit(|editor| type_value(editor, Cell::Affix(0), "37"));
+    forge.type_value(Cell::Affix(0), "37");
     forge.change(|item| item.affixes[0].roll = 120);
-    forge.handle.edit(ForgeEditor::apply);
+    forge.send([Intent::Apply]);
     settle();
     assert!(forge.ui.global::<ForgeState>().get_message().contains("changed in the game after you drafted it"));
     assert_eq!(forge.writes(), 0);
@@ -991,7 +987,7 @@ pub(in super::super) fn item_captures(session: &Session) {
 
     // Maximized: the selected affix's tier ladder beside the table (`tier-ladder`).
     let forge = Forge::open(session, World::boots(), 1920, 1080);
-    forge.handle.edit(|editor| editor.pick_tier(0, 7));
+    forge.send([Intent::PickTier(0, 7)]);
     forge.settle();
     session.capture(&forge.ui, "item-tier-ladder");
     drop(forge);
@@ -999,10 +995,10 @@ pub(in super::super) fn item_captures(session: &Session) {
     // A unique item: its modifiers as the game formats them, the shared roll on two lines (`unique-standard`,
     // `read-only`, `unique-maximized`).
     let forge = Forge::open(session, World::unique(), 1100, 700);
-    forge.handle.edit(|editor| editor.select_unique(Some(0)));
+    forge.send([Intent::SelectUnique(Some(0))]);
     settle();
     session.capture(&forge.ui, "item-unique-standard");
-    forge.handle.edit(|editor| editor.select_unique(Some(3)));
+    forge.send([Intent::SelectUnique(Some(3))]);
     settle();
     session.capture(&forge.ui, "item-unique-read-only");
     session.resize(1920, 1080);
@@ -1010,9 +1006,9 @@ pub(in super::super) fn item_captures(session: &Session) {
     session.resize(1100, 700);
     // Max rolls drafts every roll that can change to the game's perfect roll, a shared roll once (`item-max-rolls`).
     assert!(forge.ui.global::<ForgeState>().get_can_max_rolls());
-    forge.handle.edit(ForgeEditor::max_rolls);
+    forge.send([Intent::MaxRolls]);
     settle();
-    forge.handle.edit(|editor| {
+    forge.read(|editor| {
         assert!(editor.draft_count() > 0);
         assert!(
             editor
@@ -1032,7 +1028,7 @@ pub(in super::super) fn item_captures(session: &Session) {
         let mut world = World::unique();
         world.unique_lines[1].roll_ids = vec![1, 2];
         let forge = Forge::open(session, world, width, height);
-        forge.handle.edit(|editor| editor.select_unique(Some(1)));
+        forge.send([Intent::SelectUnique(Some(1))]);
         settle();
         let line = forge.ui.global::<ForgeState>().get_unique_modifiers().row_data(1).unwrap();
         assert_eq!(line.rolls.row_count(), 2, "both rolls are value cells in the one row");
@@ -1055,18 +1051,15 @@ pub(in super::super) fn item_captures(session: &Session) {
     // The ring: the status strip, a flag and the base drafted (`item-status-*`), then its implicits (`implicits*`).
     for (class, width, height) in SIZES {
         let forge = Forge::open(session, World::ring(false), width, height);
-        forge.handle.edit(|editor| {
-            type_value(editor, Cell::Field(0), "60");
-            editor.toggle_flag(2, true);
-            editor.pick_base(1);
-        });
+        forge.type_value(Cell::Field(0), "60");
+        forge.send([Intent::ToggleFlag(2, true), Intent::PickBase(1)]);
         forge.settle();
         session.capture(&forge.ui, &format!("item-status-{class}"));
     }
     // The implicits as the game describes them; the app does not write implicit rolls yet, so the base is what changes.
     let forge = Forge::open(session, World::ring(true), 1100, 700);
     session.capture(&forge.ui, "item-implicits");
-    forge.handle.edit(|editor| editor.pick_base(1));
+    forge.send([Intent::PickBase(1)]);
     forge.settle();
     session.capture(&forge.ui, "item-implicits-base-draft");
     drop(forge);
@@ -1078,10 +1071,10 @@ pub(in super::super) fn item_captures(session: &Session) {
     let first_tier = || state.get_affixes().row_data(0).unwrap().tiers.row_data(0).unwrap().range;
     let base = |name: &str| state.get_base_options().iter().position(|option| option.name == name).unwrap();
     let own = first_tier();
-    forge.handle.edit(|editor| editor.pick_base(base("Sapphire Ring")));
+    forge.send([Intent::PickBase(base("Sapphire Ring"))]);
     forge.settle();
     assert_ne!(first_tier(), own, "the Sapphire Ring's tiers are scaled");
-    forge.handle.edit(|editor| editor.pick_base(base("Gold Ring")));
+    forge.send([Intent::PickBase(base("Gold Ring"))]);
     forge.settle();
     assert_eq!(first_tier(), own);
     drop(state);
@@ -1199,7 +1192,7 @@ pub(in super::super) fn item_captures(session: &Session) {
     let first = forge.ui.global::<ForgeState>().get_affixes().row_data(0).unwrap().value.display;
     drag(VALUE_X + 36.0, 3, true);
     assert_ne!(forge.ui.global::<ForgeState>().get_affixes().row_data(0).unwrap().value.display, first);
-    forge.handle.edit(|editor| editor.undo_draft_only());
+    forge.send([Intent::UndoDraft]);
     settle();
     assert_eq!(
         forge.ui.global::<ForgeState>().get_affixes().row_data(0).unwrap().value.display,
@@ -1226,19 +1219,16 @@ pub(in super::super) fn item_captures(session: &Session) {
     for _ in 0..11 {
         session.key(Key::Tab);
     }
-    forge.handle.edit(|editor| type_value(editor, Cell::Affix(1), "7.5"));
+    forge.type_value(Cell::Affix(1), "7.5");
     session.key(Key::Delete);
     assert!(removed(&forge, 0), "Del on the name drafts the removal");
     session.key(Key::Delete);
     assert!(removed(&forge, 0), "Del again leaves the removal drafted");
     // An addition is a row of its own after the game's (`item-affix-list-drafts`); nothing is written until Apply, which
     // removes first and adds last.
-    forge.handle.edit(|editor| {
-        assert!(editor.open_add());
-        editor.picker_search("armour");
-        editor.picker_select(0);
-        editor.use_picker();
-    });
+    forge.send([Intent::OpenAdd]);
+    assert!(forge.read(|editor| editor.picker.is_some()), "the picker opens to add");
+    forge.send([Intent::PickerSearch("armour".into()), Intent::PickerSelect(0), Intent::UsePicker]);
     forge.settle();
     assert_eq!(affixes(&forge), 5);
     assert_eq!(forge.writes(), 0);
@@ -1367,7 +1357,7 @@ pub(in super::super) fn item_captures(session: &Session) {
         item.affixes[0].roll = 3;
     });
     forge.handle.send(Intent::TemplateApply(0));
-    forge.handle.edit(|editor| {
+    forge.read(|editor| {
         assert!(editor.template_message.starts_with("Drafted \"Haste legendary\""), "{}", editor.template_message);
         assert_eq!(editor.affixes[0].roll(), 170);
         assert!(
@@ -1410,13 +1400,13 @@ pub(in super::super) fn item_captures(session: &Session) {
     // A corrupted affix takes the item's one corrupted slot: the affix holding it is drafted back to a normal one first.
     // The game adds corrupted affixes only by corruption, so the forge adds one with "I know what I'm doing".
     command(&forge.backend, Command::SetOverride(true), || forge.backend.snapshot().override_enabled);
-    forge.handle.edit(|editor| {
-        assert!(editor.open_add());
-        editor.picker_allow(true);
-        editor.picker_search("Void");
-        editor.picker_select(0);
-        assert!(editor.picker_status().contains("Fire Resistance becomes a normal affix"), "{}", editor.picker_status());
-        editor.use_picker();
+    forge.send([Intent::OpenAdd]);
+    assert!(forge.read(|editor| editor.picker.is_some()), "the picker opens to add");
+    forge.send([Intent::PickerAllow(true), Intent::PickerSearch("Void".into()), Intent::PickerSelect(0)]);
+    let status = forge.read(ForgeEditor::picker_status);
+    assert!(status.contains("Fire Resistance becomes a normal affix"), "{status}");
+    forge.send([Intent::UsePicker]);
+    forge.read(|editor| {
         assert_eq!(editor.affixes[3].seal(), Seal::Normal);
         assert_eq!(editor.affixes[4].seal(), Seal::Corrupted);
         assert_eq!(editor.draft_count(), 2);
@@ -1429,7 +1419,7 @@ pub(in super::super) fn item_captures(session: &Session) {
     // (`item-base-picker`). Exalted is drafted first, so the menu opens over the rarity in draft colour; Escape closes it and
     // keeps the draft.
     let forge = Forge::open(session, World::ring(false), 1100, 700);
-    forge.handle.edit(|editor| editor.pick_rarity(true));
+    forge.send([Intent::PickRarity(true)]);
     settle();
     assert_eq!(forge.ui.global::<ForgeState>().get_rarity_text(), "Exalted");
     session.click(95.0, 117.0);
@@ -1442,11 +1432,8 @@ pub(in super::super) fn item_captures(session: &Session) {
     session.capture(&forge.ui, "item-implicits-base-picker");
     drop(forge);
     let forge = Forge::open(session, World::ring(false), 1100, 700);
-    forge.handle.edit(|editor| {
-        type_value(editor, Cell::Field(0), "60");
-        editor.toggle_flag(2, true);
-        editor.pick_base(1);
-    });
+    forge.type_value(Cell::Field(0), "60");
+    forge.send([Intent::ToggleFlag(2, true), Intent::PickBase(1)]);
     forge.settle();
     session.click(155.0, 117.0);
     session.capture(&forge.ui, "item-base-picker");
@@ -1464,10 +1451,7 @@ pub(in super::super) fn item_captures(session: &Session) {
     session.click(155.0, 117.0);
     session.capture(&forge.ui, "item-base-picker-incompatible");
     session.key(Key::Escape);
-    forge.handle.edit(|editor| {
-        editor.pick_base(1);
-        editor.apply();
-    });
+    forge.send([Intent::PickBase(1), Intent::Apply]);
     settle();
     assert_eq!(
         forge.ui.global::<ForgeState>().get_message(),
@@ -1480,7 +1464,7 @@ pub(in super::super) fn item_captures(session: &Session) {
     // While a drafted identity holds the item, its flags wait: a checked one keeps its trim-gold frame, an unchecked one has
     // none (`item-status-disabled`).
     let forge = Forge::open(session, World::unique_ring().change(|item| item.status.corrupted = true), 1100, 700);
-    forge.handle.edit(|editor| editor.pick_identity(2));
+    forge.send([Intent::PickIdentity(2)]);
     settle();
     let fields = forge.ui.global::<ForgeState>().get_fields();
     let corruption = (0..fields.row_count())
@@ -1498,7 +1482,7 @@ pub(in super::super) fn item_captures(session: &Session) {
         session.click(200.0, 84.0);
         session.capture(&forge.ui, &format!("item-identity-picker-{width}"));
         session.key(Key::Escape);
-        forge.handle.edit(|editor| editor.pick_identity(2));
+        forge.send([Intent::PickIdentity(2)]);
         settle();
         assert!(forge.ui.global::<ForgeState>().get_identity_drafted());
         session.capture(&forge.ui, &format!("item-identity-draft-{width}"));
@@ -1545,7 +1529,7 @@ pub(in super::super) fn item_captures(session: &Session) {
 
     // A click outside the affix picker cancels the replacement, so Apply comes back.
     let forge = Forge::open(session, World::boots(), 1100, 700);
-    forge.handle.edit(|editor| type_value(editor, Cell::Affix(0), "37"));
+    forge.type_value(Cell::Affix(0), "37");
     session.click(NAME_X, row_y(3));
     assert!(forge.ui.global::<ForgeState>().get_picker_open());
     assert!(!forge.ui.global::<ForgeState>().get_can_apply());
@@ -1919,10 +1903,10 @@ pub(in super::super) fn picker_captures(session: &Session) {
     session.capture(&forge.ui, "item-picker-unique-search");
     hover(&forge, 300.0, 300.0);
     session.capture(&forge.ui, "item-picker-unique-hover");
-    forge.handle.edit(|editor| editor.picker_search("cold resistance"));
+    forge.send([Intent::PickerSearch("cold resistance".into())]);
     settle();
     assert_eq!(picker_names(&state), ["Cold Resistance"], "the shipped one alone: Snowblind's duplicate stays out");
-    forge.handle.edit(|editor| editor.picker_search(""));
+    forge.send([Intent::PickerSearch(String::new())]);
     settle();
     drop(forge);
 
@@ -2009,11 +1993,12 @@ pub(in super::super) fn picker_captures(session: &Session) {
     // A keystroke over the real catalog's size: the filter and a screenful of rows, not a row per definition.
     let forge = open_picker(session, Some((400, 2165)), 1100, 700);
     let state = forge.ui.global::<ForgeState>();
-    let definitions = forge.handle.edit(|editor| editor.catalog().definitions.len());
+    let definitions = forge.read(|editor| editor.catalog().definitions.len());
     assert!(definitions > 3000, "{definitions}");
     for search in ["f", "fi", "fil", "filler", "filler line 2000", ""] {
         let started = std::time::Instant::now();
-        forge.handle.edit(|editor| editor.picker_search(search));
+        // Sent alone: what is timed is the filtering.
+        forge.handle.send(Intent::PickerSearch(search.into()));
         let filtered = started.elapsed();
         forge.ui.window().take_snapshot().expect("render");
         println!(

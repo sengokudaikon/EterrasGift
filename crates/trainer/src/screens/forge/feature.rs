@@ -156,8 +156,6 @@ pub enum Intent {
         generation: u64,
         written: bool,
     },
-    /// Nothing new, but what the editor has asked for since the last intent goes out, and the page shows it.
-    Settle,
 }
 
 pub enum Effect {
@@ -228,7 +226,7 @@ impl State {
         &self.editor
     }
 
-    /// The editor directly, for a test or a capture to set up a state. Follow it with `Intent::Settle`.
+    /// The editor directly, to set up the first state before a store runs it.
     pub fn editor_mut(&mut self) -> &mut ForgeEditor {
         &mut self.editor
     }
@@ -572,7 +570,6 @@ impl Feature for Forge {
                     state.reported = None;
                 }
             }
-            Intent::Settle => {}
         }
         for request in state.editor.game().take_requests() {
             effects.push(Effect::Worker(request));

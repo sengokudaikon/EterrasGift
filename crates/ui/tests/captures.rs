@@ -318,6 +318,8 @@ fn main() {
         tasks: runtime.tasks(),
         live_watch: std::cell::Cell::new(false),
     };
+    // Applied entries carry the local time; captures hold one.
+    eg_trainer::screens::forge::editor::freeze_clock(Some("23:54"));
     let asked = |name: &str| std::env::args().any(|arg| arg == name);
     let all = !["--logs", "--trainer-backend", "--picker", "--forge"].iter().any(|name| asked(name));
     if asked("--logs") {

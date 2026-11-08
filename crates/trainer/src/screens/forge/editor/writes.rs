@@ -481,7 +481,7 @@ impl ForgeEditor {
                             name: waiting.step.name,
                             summary: waiting.summary,
                             outcome: tr::Confirmed.into(),
-                            time: (self.clock)(),
+                            time: local_time(),
                             effect: waiting.effect,
                         },
                     );
@@ -504,7 +504,7 @@ impl ForgeEditor {
                         name: waiting.step.name,
                         summary: waiting.summary,
                         outcome: tr::Confirmed.into(),
-                        time: (self.clock)(),
+                        time: local_time(),
                         effect: waiting.effect,
                     },
                 );
@@ -593,7 +593,7 @@ impl ForgeEditor {
                         name: tr::Undo.into(),
                         summary: EditsRestored.count(batch.completed),
                         outcome: Restored.into(),
-                        time: (self.clock)(),
+                        time: local_time(),
                         effect: String::new(),
                     },
                 );
