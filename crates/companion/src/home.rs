@@ -68,7 +68,6 @@ impl State {
     pub fn model(&self) -> &Tracked<HomeModel> {
         &self.model
     }
-
 }
 
 /// What runs while the state wants it.

@@ -216,7 +216,6 @@ impl State {
     pub fn contents(&self) -> &Tracked<Contents> {
         &self.contents
     }
-
 }
 
 /// What runs while the state wants it.

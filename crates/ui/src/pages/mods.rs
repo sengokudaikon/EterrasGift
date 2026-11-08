@@ -5,7 +5,9 @@ use crate::shell::{Page, ShellHandle};
 use crate::{MainWindow, MessageTone, ModLogRow, ModRow, ModSettingRow, ModsState, SettingChoiceRow, SourceRow};
 use eg_companion::launch::launcher::GameLauncher;
 use eg_companion::mods::{
-    feature::{Answer, Effect, Intent, LogView, ModRowView, Mods, SelectedKey, SelectedView, SettingView, SourceRowView, SourcesKey, State, Subscription, library_stopped_words, run},
+    feature::{
+        Answer, Effect, Intent, LogView, ModRowView, Mods, SelectedKey, SelectedView, SettingView, SourceRowView, SourcesKey, State, Subscription, library_stopped_words, run,
+    },
     page::running_state,
     sources::ModSources,
     worker::ModWorker,
