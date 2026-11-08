@@ -6,7 +6,8 @@ code and its tests, and what is still to build in [the helper's backlog](crates/
 ## 2026-11-09
 
 - Build: an edit to Settings, Logs or a trainer page no longer rebuilds the trainer's worker: they are in eg-companion and the new eg-trainer-screens.
-- Settings: Restart still works after the game data service stopped on a fault, as after the mod library stopped; a fault while reading mod projects now fails the app's exit code.
+- Settings: Restart still works after the game data service stopped on a fault, as after the mod library stopped.
+- Mods: a fault while reading mod projects now fails the app's exit code.
 
 ## 2026-11-08
 
