@@ -7,11 +7,12 @@ pub mod trainer;
 pub use eg_core::settings_page::{LiveStatus, ModuleChoice, ModuleLink, ModuleSection};
 
 use crate::{LocationSetting, MainWindow, MessageTone, ModuleRow, Nav, SettingsSectionRow, SettingsState};
-use eg_core::settings_page::{Effect, Intent, Location, LocationView, MessageKind, ModuleRowView, SectionBody, SectionView, SettingsPage, State, submit, try_pause};
+use eg_core::settings_page::{Effect, Intent, Location, LocationView, MessageKind, ModuleRowView, SectionBody, SectionView, SettingsPage, State, Subscription, submit, try_pause};
 use eg_core::settings_service::SettingsService;
 use slint::{ComponentHandle, Timer, Weak};
-use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version, callbacks};
+use spiderland::{Host, Intents, Slice, Store, Version, callbacks};
 use spiderland_slint::{Rows, on_wake};
+use std::any::Any;
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -79,7 +80,6 @@ struct Window {
     locations: Rows<LocationSetting>,
     shown_rows: Slice<(Version, Version, Version, Version)>,
     shown_locations: Slice<Version>,
-    saves: Subscriptions<()>,
 }
 
 /// Puts the page and module-supplied sections behind the window's `SettingsState`. Returns where to tell the page how what
@@ -98,7 +98,6 @@ pub(crate) fn bind(window: &MainWindow, settings: Settings, close_first: Option<
         locations: Rows::default(),
         shown_rows: Slice::default(),
         shown_locations: Slice::default(),
-        saves: Subscriptions::default(),
     };
     let view = window.global::<SettingsState>();
     view.set_version(env!("CARGO_PKG_VERSION").into());
@@ -211,7 +210,7 @@ fn location_row(view: LocationView) -> LocationSetting {
 }
 
 impl Host<SettingsPage> for Window {
-    fn render(&mut self, state: &State, intents: &Intents<Intent>) {
+    fn render(&mut self, state: &State, _: &Intents<Intent>) {
         let Some(window) = self.window.upgrade() else {
             return;
         };
@@ -236,15 +235,14 @@ impl Host<SettingsPage> for Window {
             MessageKind::Error => MessageTone::Error,
         });
         view.set_can_restart(state.can_restart());
-        // Each finished save wakes the page, whoever asked for it (the trainer saves values of its own). The listener
-        // stays with the service; it only fires a waker, which does nothing once this page is gone.
-        let service = &self.service;
-        self.saves.sync([()], |()| {
-            let reading = service.clone();
-            let (waker, listening) = on_wake(intents, move || Intent::Observed(Box::new(reading.snapshot())));
-            service.on_completed(move || waker.wake());
-            listening
-        });
+    }
+
+    fn subscribe(&mut self, Subscription::Saves: &Subscription, intents: &Intents<Intent>) -> Box<dyn Any> {
+        // The listener stays with the service; it only fires a waker, which does nothing once this page is gone.
+        let reading = self.service.clone();
+        let (waker, listening) = on_wake(intents, move || Intent::Observed(Box::new(reading.snapshot())));
+        self.service.on_completed(move || waker.wake());
+        Box::new(listening)
     }
 
     fn perform(&mut self, effect: Effect, intents: &Intents<Intent>) {

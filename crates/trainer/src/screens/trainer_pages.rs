@@ -739,11 +739,24 @@ fn with_field(state: &mut State, effects: &mut Effects<Effect>, row: i32, index:
     });
 }
 
+/// What runs while the state wants it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Subscription {
+    /// Following the worker the session runs on: each snapshot reads the session's facts again, as [`Intent::Facts`]. It
+    /// lasts as long as the pages.
+    Worker,
+}
+
 impl SpiderlandFeature for TrainerPages {
     type State = State;
     type Intent = Intent;
     type Effect = Effect;
     type Output = spiderland::Never;
+    type Subscription = Subscription;
+
+    fn subscriptions(_: &State) -> impl IntoIterator<Item = Subscription> {
+        [Subscription::Worker]
+    }
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
         match intent {

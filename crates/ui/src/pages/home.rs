@@ -6,13 +6,14 @@ use crate::decorations::{Ash, Decorations};
 use crate::shell::{Page, ShellHandle};
 use crate::{BloomPhase as ViewPhase, HomeState, LaunchMode as ViewMode, MainWindow};
 use eg_companion::game::watch::GameWatch;
-use eg_companion::home::{Effect, Home, HomeView, Intent, State, present};
+use eg_companion::home::{Effect, Home, HomeView, Intent, State, Subscription, present};
 use eg_companion::launch::host::LaunchMode;
 use eg_companion::launch::launcher::GameLauncher;
 use eg_core::bloom::BloomPhase;
 use slint::{ComponentHandle, Weak};
-use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version, callbacks};
+use spiderland::{Host, Intents, Slice, Store, Version, callbacks};
 use spiderland_slint::{Background, on_watch};
+use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -23,10 +24,6 @@ struct Window {
     window: Weak<MainWindow>,
     decorations: Rc<Decorations<MainWindow>>,
     view: Slice<Version>,
-    /// Hearing the watch costs nothing, so it never stops: a look a start asked for lands while another page shows.
-    hearing: Subscriptions<()>,
-    /// Keeping it looking is what costs, so this lasts only as long as the feature wants.
-    following: Subscriptions<()>,
 }
 
 /// `launcher` is None in a run that has none (tests): Home then shows the companion's own title. With a launcher but no
@@ -53,8 +50,6 @@ pub fn bind(
             window: window.as_weak(),
             decorations,
             view: Slice::default(),
-            hearing: Subscriptions::default(),
-            following: Subscriptions::default(),
         },
     );
     // The window's callback keeps the store alive, for as long as the window lasts.
@@ -94,19 +89,24 @@ fn show(state: &HomeState<'_>, view: HomeView) {
 }
 
 impl Host<Home> for Window {
-    fn render(&mut self, state: &State, intents: &Intents<Intent>) {
+    fn render(&mut self, state: &State, _: &Intents<Intent>) {
         let window = self.window.clone();
         self.view.update(state.model().version(), || {
             if let Some(window) = window.upgrade() {
                 show(&window.global::<HomeState>(), present(state.model()));
             }
         });
+    }
+
+    fn subscribe(&mut self, subscription: &Subscription, intents: &Intents<Intent>) -> Box<dyn Any> {
         let game = &self.game;
-        self.hearing.sync([()], |()| {
-            let seen = game.clone();
-            on_watch(game.subscribe(), intents, move || Intent::Seen(seen.current()))
-        });
-        self.following.sync(state.watching().then_some(()), |()| game.follow());
+        match subscription {
+            Subscription::Hear => {
+                let seen = game.clone();
+                Box::new(on_watch(game.subscribe(), intents, move || Intent::Seen(seen.current())))
+            }
+            Subscription::Follow => Box::new(game.follow()),
+        }
     }
 
     fn perform(&mut self, effect: Effect, intents: &Intents<Intent>) {

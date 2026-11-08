@@ -5,7 +5,7 @@ use crate::shell::{Page, ShellHandle};
 use crate::{MainWindow, MessageTone, ModLogRow, ModRow, ModSettingRow, ModsState, SettingChoiceRow, SourceRow};
 use eg_companion::launch::launcher::GameLauncher;
 use eg_companion::mods::{
-    feature::{Answer, Effect, Intent, LogView, ModRowView, Mods, SelectedKey, SelectedView, SettingView, SourceRowView, SourcesKey, State, library_stopped_words, run},
+    feature::{Answer, Effect, Intent, LogView, ModRowView, Mods, SelectedKey, SelectedView, SettingView, SourceRowView, SourcesKey, State, Subscription, library_stopped_words, run},
     page::running_state,
     sources::ModSources,
     worker::ModWorker,
@@ -13,8 +13,9 @@ use eg_companion::mods::{
 use eg_core::settings_service::SettingsService;
 use phrases::phrases;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
-use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version, callbacks};
+use spiderland::{Host, Intents, Slice, Store, Version, callbacks};
 use spiderland_slint::{Background, Rows, every};
+use std::any::Any;
 use std::cell::RefCell;
 use task_runtime::CancellationToken;
 
@@ -77,7 +78,6 @@ struct Window {
     shown_list: Slice<Version>,
     shown_sources: Slice<SourcesKey>,
     shown_selected: Slice<SelectedKey>,
-    watch: Subscriptions<()>,
 }
 
 pub(crate) fn bind(window: &MainWindow, page: ModsPage, background: Background, shell: &ShellHandle) -> ModsHandle {
@@ -96,7 +96,6 @@ pub(crate) fn bind(window: &MainWindow, page: ModsPage, background: Background, 
         shown_list: Slice::default(),
         shown_sources: Slice::default(),
         shown_selected: Slice::default(),
-        watch: Subscriptions::default(),
     };
     let view = window.global::<ModsState>();
     view.set_mods(host.rows.model());
@@ -228,7 +227,7 @@ fn show_selected(view: &ModsState<'_>, selected: &SelectedView) {
 }
 
 impl Host<Mods> for Window {
-    fn render(&mut self, state: &State, intents: &Intents<Intent>) {
+    fn render(&mut self, state: &State, _: &Intents<Intent>) {
         let Some(window) = self.window.upgrade() else {
             return;
         };
@@ -272,9 +271,10 @@ impl Host<Mods> for Window {
             );
             log_rows.sync(selected.log.into_iter().map(log_row));
         });
-        self.watch.sync(state.watching().then_some(()), |()| {
-            every(GameLauncher::WATCH_INTERVAL, intents, || Intent::Watch(jiff::Timestamp::now()))
-        });
+    }
+
+    fn subscribe(&mut self, Subscription::Tick: &Subscription, intents: &Intents<Intent>) -> Box<dyn Any> {
+        Box::new(every(GameLauncher::WATCH_INTERVAL, intents, || Intent::Watch(jiff::Timestamp::now())))
     }
 
     fn perform(&mut self, effect: Effect, intents: &Intents<Intent>) {

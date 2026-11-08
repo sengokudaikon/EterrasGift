@@ -728,11 +728,24 @@ fn location_text(saved: &AppSettings) -> [String; 6] {
     Location::ALL.map(|location| location.saved(saved).as_ref().map(|path| path.display().to_string()).unwrap_or_default())
 }
 
+/// What runs while the state wants it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Subscription {
+    /// Hearing each finished save, whoever asked for it (the trainer saves values of its own), as [`Intent::Observed`]. It
+    /// lasts as long as the page.
+    Saves,
+}
+
 impl Feature for SettingsPage {
     type State = State;
     type Intent = Intent;
     type Effect = Effect;
     type Output = spiderland::Never;
+    type Subscription = Subscription;
+
+    fn subscriptions(_: &State) -> impl IntoIterator<Item = Subscription> {
+        [Subscription::Saves]
+    }
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
         match intent {

@@ -9,10 +9,11 @@ use eg_trainer::backend::BackendHandle;
 use eg_trainer::screens::pages::Tone;
 use eg_trainer::screens::registry::{Area, Feature};
 use eg_trainer::screens::session::{FieldRequest, TrainerSession};
-use eg_trainer::screens::trainer_pages::{Effect, FieldRowView, Intent, PlaceView, REVEAL, RowKind, RowView, State, TrainerPages, ValueView, read_facts};
+use eg_trainer::screens::trainer_pages::{Effect, FieldRowView, Intent, PlaceView, REVEAL, RowKind, RowView, State, Subscription, TrainerPages, ValueView, read_facts};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, VecModel, Weak};
-use spiderland::{Host, Intents, Listening, Slice, Store, Subscriptions, Version, callbacks};
+use spiderland::{Host, Intents, Slice, Store, Version, callbacks};
 use spiderland_slint::{Background, Rows, after, on_watch};
+use std::any::Any;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -190,7 +191,6 @@ struct Window {
     shown_profiles: Slice<Version>,
     shown_layout: Slice<Version>,
     reveal: Timer,
-    following: Subscriptions<()>,
 }
 
 /// Shows the trainer's pages on `session`. `features` is the registry; `planned` lists features that are not ported yet (a
@@ -216,7 +216,6 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
         shown_profiles: Slice::default(),
         shown_layout: Slice::default(),
         reveal: Timer::default(),
-        following: Subscriptions::default(),
     };
     let view = window.global::<TrainerState>();
     view.set_rows(host.rows.clone().into());
@@ -270,7 +269,7 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
 }
 
 impl Host<TrainerPages> for Window {
-    fn render(&mut self, state: &State, intents: &Intents<Intent>) {
+    fn render(&mut self, state: &State, _: &Intents<Intent>) {
         let Some(window) = self.window.upgrade() else {
             return;
         };
@@ -294,13 +293,15 @@ impl Host<TrainerPages> for Window {
             view.set_rows_height(tallest);
             view.set_rows_ready(layout.rows_ready());
         });
-        if let Some(backend) = &self.backend {
-            let (session, features) = (&self.session, &self.features);
-            self.following.sync([()], |()| -> Listening {
-                let (session, features) = (session.clone(), features.clone());
-                on_watch(backend.subscribe(), intents, move || Intent::Facts(Box::new(read_facts(&*session, &features))))
-            });
-        }
+    }
+
+    /// A session with no worker under it (tests) has nothing to follow.
+    fn subscribe(&mut self, Subscription::Worker: &Subscription, intents: &Intents<Intent>) -> Box<dyn Any> {
+        let Some(backend) = &self.backend else {
+            return Box::new(());
+        };
+        let (session, features) = (self.session.clone(), self.features.clone());
+        Box::new(on_watch(backend.subscribe(), intents, move || Intent::Facts(Box::new(read_facts(&*session, &features)))))
     }
 
     fn perform(&mut self, effect: Effect, intents: &Intents<Intent>) {

@@ -329,11 +329,24 @@ fn report_unshown(state: &mut State, error: String, effects: &mut Effects<Effect
     SeeFaultLog.with(&[("error", &error)])
 }
 
+/// What runs while the state wants it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Subscription {
+    /// Following the worker's snapshots, as [`Intent::Observed`]. It lasts as long as the forge, which judges its drafts and
+    /// receipts on the worker's latest state whether or not it shows.
+    Worker,
+}
+
 impl Feature for Forge {
     type State = State;
     type Intent = Intent;
     type Effect = Effect;
     type Output = spiderland::Never;
+    type Subscription = Subscription;
+
+    fn subscriptions(_: &State) -> impl IntoIterator<Item = Subscription> {
+        [Subscription::Worker]
+    }
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
         let editor = &mut state.editor;

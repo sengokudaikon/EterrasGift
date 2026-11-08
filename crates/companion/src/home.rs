@@ -69,10 +69,17 @@ impl State {
         &self.model
     }
 
-    /// Home follows the game only while it shows, so another page costs nothing.
-    pub fn watching(&self) -> bool {
-        self.visible
-    }
+}
+
+/// What runs while the state wants it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Subscription {
+    /// Hearing what the game's watch sees, as [`Intent::Seen`]. It costs nothing, so it never stops: a look a start asked
+    /// for lands while another page shows.
+    Hear,
+    /// Keeping the watch looking, which is what costs. Home follows the game only while it shows, so another page costs
+    /// nothing.
+    Follow,
 }
 
 impl Feature for Home {
@@ -80,6 +87,11 @@ impl Feature for Home {
     type Intent = Intent;
     type Effect = Effect;
     type Output = spiderland::Never;
+    type Subscription = Subscription;
+
+    fn subscriptions(state: &State) -> impl IntoIterator<Item = Subscription> {
+        [Some(Subscription::Hear), state.visible.then_some(Subscription::Follow)].into_iter().flatten()
+    }
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
         match intent {
@@ -348,8 +360,9 @@ mod tests {
     #[test]
     fn showing_looks_and_the_first_result_places_the_tree_without_blooming() {
         let mut state = State::default();
+        assert_eq!(spiderland::subscriptions::<Home>(&state), [Subscription::Hear]);
         assert_eq!(send(&mut state, Intent::Shown), [Effect::Refresh]);
-        assert!(state.watching());
+        assert_eq!(spiderland::subscriptions::<Home>(&state), [Subscription::Hear, Subscription::Follow]);
         assert_eq!(
             send(&mut state, found(BloomPhase::Bloom)),
             [Effect::Tree {
@@ -381,7 +394,7 @@ mod tests {
         let mut state = State::default();
         send(&mut state, Intent::Shown);
         send(&mut state, Intent::Hidden);
-        assert!(!state.watching());
+        assert_eq!(spiderland::subscriptions::<Home>(&state), [Subscription::Hear], "it still hears, and stops following");
         assert!(send(&mut state, found(BloomPhase::Bloom)).is_empty(), "the result is kept, and the tree left alone");
         assert_eq!(state.model().phase(), BloomPhase::Bloom);
     }

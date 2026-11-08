@@ -8,10 +8,11 @@ use crate::{
     shell::ShellHandle,
 };
 use eg_trainer::backend::{BackendHandle, Command, Phase};
-use eg_trainer::screens::connection::{Access, ConnectionFeature, ConnectionView, Effect, Intent, State, connect_command, unbound as unbound_view};
+use eg_trainer::screens::connection::{Access, ConnectionFeature, ConnectionView, Effect, Intent, State, Subscription, connect_command, unbound as unbound_view};
 use slint::{ComponentHandle, Weak};
-use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version, callbacks};
+use spiderland::{Host, Intents, Slice, Store, Version, callbacks};
 use spiderland_slint::on_watch;
+use std::any::Any;
 use std::rc::Rc;
 
 fn show(window: &MainWindow, view: &ConnectionView) {
@@ -45,7 +46,6 @@ struct Window {
     window: Weak<MainWindow>,
     decorations: Rc<Decorations<MainWindow>>,
     shown: Slice<Version>,
-    following: Subscriptions<()>,
 }
 
 /// What the worker says now, or that it has gone: an unexpected worker failure must not leave apparently live data.
@@ -66,7 +66,6 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, de
             window: window.as_weak(),
             decorations,
             shown: Slice::default(),
-            following: Subscriptions::default(),
         },
     );
     store.send(observed(&backend));
@@ -77,16 +76,16 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, de
 }
 
 impl Host<ConnectionFeature> for Window {
-    fn render(&mut self, state: &State, intents: &Intents<Intent>) {
+    fn render(&mut self, state: &State, _: &Intents<Intent>) {
         let Some(window) = self.window.upgrade() else {
             return;
         };
         self.shown.update(state.view().version(), || show(&window, state.view()));
-        let backend = &self.backend;
-        self.following.sync([()], |()| {
-            let watching = backend.clone();
-            on_watch(backend.subscribe(), intents, move || observed(&watching))
-        });
+    }
+
+    fn subscribe(&mut self, Subscription::Worker: &Subscription, intents: &Intents<Intent>) -> Box<dyn Any> {
+        let backend = self.backend.clone();
+        Box::new(on_watch(self.backend.subscribe(), intents, move || observed(&backend)))
     }
 
     fn perform(&mut self, effect: Effect, intents: &Intents<Intent>) {

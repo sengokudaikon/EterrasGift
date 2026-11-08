@@ -217,10 +217,13 @@ impl State {
         &self.contents
     }
 
-    /// The page reads the files only while it shows.
-    pub fn watching(&self) -> bool {
-        self.visible
-    }
+}
+
+/// What runs while the state wants it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Subscription {
+    /// A tick every [`WATCH_INTERVAL`], sending [`Intent::Watch`]. The page reads the files only while it shows.
+    Tick,
 }
 
 impl Feature for Logs {
@@ -228,6 +231,11 @@ impl Feature for Logs {
     type Intent = Intent;
     type Effect = Effect;
     type Output = spiderland::Never;
+    type Subscription = Subscription;
+
+    fn subscriptions(state: &State) -> impl IntoIterator<Item = Subscription> {
+        state.visible.then_some(Subscription::Tick)
+    }
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
         match intent {
@@ -307,7 +315,8 @@ mod tests {
     fn showing_reads_and_the_result_ends_the_wait() {
         let mut state = State::default();
         let effects = send(&mut state, Intent::Shown);
-        assert!(state.is_loading() && state.watching());
+        assert!(state.is_loading());
+        assert_eq!(spiderland::subscriptions::<Logs>(&state), [Subscription::Tick]);
         send(
             &mut state,
             Intent::Read {
@@ -333,7 +342,7 @@ mod tests {
         );
         assert_eq!(send(&mut state, Intent::Watch).len(), 1);
         send(&mut state, Intent::Hidden);
-        assert!(!state.watching());
+        assert!(spiderland::subscriptions::<Logs>(&state).is_empty());
         state.loading = false;
         assert!(send(&mut state, Intent::Watch).is_empty(), "a tick already on its way is ignored");
     }

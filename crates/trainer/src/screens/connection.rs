@@ -140,11 +140,24 @@ impl State {
     }
 }
 
+/// What runs while the state wants it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Subscription {
+    /// Following the worker's snapshots, as [`Intent::Observed`], or word that it has gone. It lasts as long as the
+    /// connection.
+    Worker,
+}
+
 impl Feature for ConnectionFeature {
     type State = State;
     type Intent = Intent;
     type Effect = Effect;
     type Output = spiderland::Never;
+    type Subscription = Subscription;
+
+    fn subscriptions(_: &State) -> impl IntoIterator<Item = Subscription> {
+        [Subscription::Worker]
+    }
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
         match intent {

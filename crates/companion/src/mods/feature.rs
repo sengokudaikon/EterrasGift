@@ -453,11 +453,6 @@ impl State {
         }
     }
 
-    /// The page looks at the game only while it shows.
-    pub fn watching(&self) -> bool {
-        self.visible
-    }
-
     /// What the mod rows read.
     pub fn list_version(&self) -> Version {
         self.inventory.version()
@@ -757,11 +752,24 @@ fn build(state: &mut State, effects: &mut Effects<Effect>, index: i32, source: b
     });
 }
 
+/// What runs while the state wants it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Subscription {
+    /// A tick every [`GameLauncher::WATCH_INTERVAL`](crate::launch::launcher::GameLauncher::WATCH_INTERVAL), sending
+    /// [`Intent::Watch`]. The page looks at the game only while it shows.
+    Tick,
+}
+
 impl Feature for Mods {
     type State = State;
     type Intent = Intent;
     type Effect = Effect;
     type Output = spiderland::Never;
+    type Subscription = Subscription;
+
+    fn subscriptions(state: &State) -> impl IntoIterator<Item = Subscription> {
+        state.visible.then_some(Subscription::Tick)
+    }
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
         match intent {
@@ -1402,7 +1410,7 @@ mod tests {
     fn showing_reads_and_nothing_is_said_until_the_first_answer() {
         let mut state = state();
         let revision = shown(&mut state);
-        assert!(state.watching());
+        assert_eq!(spiderland::subscriptions::<Mods>(&state), [Subscription::Tick]);
         assert!(!state.status().is_read && !state.status().can_play);
         let effects = send(&mut state, Intent::Answered { revision, answer: observed() });
         assert!(state.status().is_read);
@@ -1653,7 +1661,7 @@ mod tests {
         );
         assert!(state.running);
         send(&mut state, Intent::PageChanged { shown: false, now });
-        assert!(!state.watching());
+        assert!(spiderland::subscriptions::<Mods>(&state).is_empty());
         assert!(send(&mut state, Intent::Watch(now)).is_empty(), "a tick already on its way is ignored");
     }
 

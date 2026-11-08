@@ -3,12 +3,13 @@
 
 use crate::shell::{Page, ShellHandle};
 use crate::{LogsState, MainWindow};
-use eg_core::logs::{Effect, Intent, LogFiles, Logs, Source, State, WATCH_INTERVAL, read};
+use eg_core::logs::{Effect, Intent, LogFiles, Logs, Source, State, Subscription, WATCH_INTERVAL, read};
 use eg_trainer::backend::BackendHandle;
 use phrases::phrases;
 use slint::{ComponentHandle, Weak};
-use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version, callbacks};
+use spiderland::{Host, Intents, Slice, Store, Version, callbacks};
 use spiderland_slint::{Background, every};
+use std::any::Any;
 
 phrases! {
     Connection: "Trainer connection\nState: {phase}\nProcess: {process}\nGame log: {gate}\nError: {error}\n"
@@ -38,7 +39,6 @@ struct Window {
     background: Background,
     window: Weak<MainWindow>,
     contents: Slice<Version>,
-    watch: Subscriptions<()>,
 }
 
 pub(crate) fn bind(window: &MainWindow, files: Option<LogFiles>, backend: Option<BackendHandle>, background: Background, shell: &ShellHandle) {
@@ -50,7 +50,6 @@ pub(crate) fn bind(window: &MainWindow, files: Option<LogFiles>, backend: Option
             background,
             window: window.as_weak(),
             contents: Slice::default(),
-            watch: Subscriptions::default(),
         },
     );
     let state = window.global::<LogsState>();
@@ -77,7 +76,7 @@ fn source_of(index: i32) -> Option<Source> {
 }
 
 impl Host<Logs> for Window {
-    fn render(&mut self, state: &State, intents: &Intents<Intent>) {
+    fn render(&mut self, state: &State, _: &Intents<Intent>) {
         let Some(window) = self.window.upgrade() else {
             return;
         };
@@ -94,7 +93,10 @@ impl Host<Logs> for Window {
             view.set_location(contents.location.as_str().into());
             view.set_notice(contents.notice.as_str().into());
         });
-        self.watch.sync(state.watching().then_some(()), |()| every(WATCH_INTERVAL, intents, || Intent::Watch));
+    }
+
+    fn subscribe(&mut self, Subscription::Tick: &Subscription, intents: &Intents<Intent>) -> Box<dyn Any> {
+        Box::new(every(WATCH_INTERVAL, intents, || Intent::Watch))
     }
 
     fn perform(&mut self, effect: Effect, intents: &Intents<Intent>) {

@@ -11,11 +11,12 @@ use eg_core::fault::{FaultDetails, FaultLog};
 use eg_trainer::backend::{BackendHandle, Command, ForgeSnapshot, forge_record};
 use eg_trainer::item::template::TemplateStore;
 use eg_trainer::screens::forge::editor::ForgeEditor;
-use eg_trainer::screens::forge::feature::{Effect, FocusTarget, Forge, Intent, State};
+use eg_trainer::screens::forge::feature::{Effect, FocusTarget, Forge, Intent, State, Subscription};
 use eg_trainer::screens::forge::game::{PREVIEW_DELAY, Request};
 use slint::{ComponentHandle, Timer, Weak};
-use spiderland::{Dropping, Host, Intents, Store, Subscriptions};
+use spiderland::{Dropping, Host, Intents, Store};
 use spiderland_slint::{Background, after, on_watch};
+use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -56,7 +57,6 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, background: Background,
         faults,
         templates,
         view: show::View::new(&window.global::<ForgeState>()),
-        watching: Subscriptions::default(),
         focus_serial: 0,
         batch_refused: false,
         mappings: HashMap::new(),
@@ -80,7 +80,6 @@ struct ForgeHost {
     /// Where the user's item templates are kept; the reducer asks for this only in a run that has it.
     templates: Option<TemplateStore>,
     view: show::View,
-    watching: Subscriptions<()>,
     focus_serial: i32,
     /// The worker couldn't take the batch that the next write opens, in the effects of this render.
     batch_refused: bool,
@@ -100,18 +99,18 @@ fn observed(backend: &BackendHandle) -> Intent {
 }
 
 impl Host<Forge> for ForgeHost {
-    fn render(&mut self, state: &State, intents: &Intents<Intent>) {
+    fn render(&mut self, state: &State, _: &Intents<Intent>) {
         self.batch_refused = false;
-        let backend = self.backend.clone();
-        self.watching.sync([()], |_| {
-            let watching = backend.clone();
-            on_watch(backend.subscribe(), intents, move || observed(&watching))
-        });
         let Some(window) = self.window.upgrade() else {
             return;
         };
         self.view.show(&window.global::<ForgeState>(), state);
         window.global::<TrainerState>().set_item_unavailable(state.item_unavailable().as_str().into());
+    }
+
+    fn subscribe(&mut self, Subscription::Worker: &Subscription, intents: &Intents<Intent>) -> Box<dyn Any> {
+        let backend = self.backend.clone();
+        Box::new(on_watch(self.backend.subscribe(), intents, move || observed(&backend)))
     }
 
     fn perform(&mut self, effect: Effect, intents: &Intents<Intent>) {
