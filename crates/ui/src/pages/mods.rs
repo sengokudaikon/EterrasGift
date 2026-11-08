@@ -15,9 +15,9 @@ use eg_companion::mods::{
 };
 use eg_core::settings_service::SettingsService;
 use phrases::phrases;
-use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
-use spiderland::{Intents, Slice, Store, Version, callbacks};
-use spiderland_slint::{Background, Rows, WindowHost, Windowed, every};
+use slint::{ComponentHandle, ModelRc, SharedString};
+use spiderland::{CheckedSlice, Intents, Store, Version, callbacks};
+use spiderland_slint::{Background, InnerRows, Rows, WindowHost, Windowed, every};
 use std::any::Any;
 use task_runtime::CancellationToken;
 
@@ -50,11 +50,16 @@ struct Window {
     rows: Rows<ModRow>,
     source_rows: Rows<SourceRow>,
     setting_rows: Rows<ModSettingRow>,
+    /// Each setting's choices, and their labels for the view's menu, kept in models of their own so an open choice list isn't
+    /// rebuilt under the pointer.
+    setting_choices: InnerRows<SettingChoiceRow>,
+    setting_labels: InnerRows<SharedString>,
     log_rows: Rows<ModLogRow>,
     facts: Rows<SharedString>,
-    shown_list: Slice<Version>,
-    shown_sources: Slice<SourcesKey>,
-    shown_selected: Slice<SelectedKey>,
+    /// A test build makes each region's rows anyway, and fails if its key misses an input.
+    shown_list: CheckedSlice<Version, Vec<ModRowView>>,
+    shown_sources: CheckedSlice<SourcesKey, Vec<SourceRowView>>,
+    shown_selected: CheckedSlice<SelectedKey, SelectedView>,
 }
 
 /// Binds the page, and returns its store for the window's close, which it goes first in: it finishes the build, keeps the
@@ -67,11 +72,13 @@ pub(crate) fn bind(window: &MainWindow, page: ModsPage, background: Background, 
         rows: Rows::default(),
         source_rows: Rows::default(),
         setting_rows: Rows::default(),
+        setting_choices: InnerRows::default(),
+        setting_labels: InnerRows::default(),
         log_rows: Rows::default(),
         facts: Rows::default(),
-        shown_list: Slice::default(),
-        shown_sources: Slice::default(),
-        shown_selected: Slice::default(),
+        shown_list: CheckedSlice::default(),
+        shown_sources: CheckedSlice::default(),
+        shown_selected: CheckedSlice::default(),
     };
     let view = window.global::<ModsState>();
     view.set_mods(host.rows.model());
@@ -141,10 +148,9 @@ fn log_row(row: LogView) -> ModLogRow {
     }
 }
 
-/// `old` is the row now in this place: the same choices keep their models, so an open choice list isn't rebuilt under the
-/// pointer.
-fn setting_row(row: SettingView, old: Option<ModSettingRow>) -> ModSettingRow {
-    let choices: Vec<SettingChoiceRow> = row
+/// A setting's row, with its choices apart for the models the view keeps.
+fn setting_row(row: SettingView) -> (ModSettingRow, Vec<SettingChoiceRow>) {
+    let choices = row
         .choices
         .into_iter()
         .map(|(value, label)| SettingChoiceRow {
@@ -152,14 +158,7 @@ fn setting_row(row: SettingView, old: Option<ModSettingRow>) -> ModSettingRow {
             label: label.into(),
         })
         .collect();
-    let (choices, choice_labels) = old
-        .filter(|old| old.category == row.category.as_str() && old.key == row.key.as_str() && old.choices.iter().eq(choices.iter().cloned()))
-        .map(|old| (old.choices, old.choice_labels))
-        .unwrap_or_else(|| {
-            let labels = choices.iter().map(|choice| choice.label.clone()).collect::<Vec<_>>();
-            (ModelRc::new(VecModel::from(choices)), ModelRc::new(VecModel::from(labels)))
-        });
-    ModSettingRow {
+    let row = ModSettingRow {
         category: row.category.into(),
         key: row.key.into(),
         name: row.name.into(),
@@ -174,9 +173,10 @@ fn setting_row(row: SettingView, old: Option<ModSettingRow>) -> ModSettingRow {
         error: row.error.into(),
         choice_label: row.choice_label.into(),
         choice_index: row.choice_index,
-        choices,
-        choice_labels,
-    }
+        choices: ModelRc::default(),
+        choice_labels: ModelRc::default(),
+    };
+    (row, choices)
 }
 
 fn show_selected(view: &ModsState<'_>, selected: &SelectedView) {
@@ -224,24 +224,29 @@ impl WindowHost<Mods> for Window {
         view.set_change_message(status.change_message.into());
         view.set_change_tone(if status.change_is_error { MessageTone::Error } else { MessageTone::Info });
 
-        let (rows, source_rows, setting_rows, log_rows) = (&self.rows, &self.source_rows, &self.setting_rows, &self.log_rows);
-        self.shown_list.update(state.list_version(), || rows.sync(state.mod_rows().into_iter().map(mod_row)));
-        self.shown_sources
-            .update(state.sources_key(), || source_rows.sync(state.source_rows().into_iter().map(source_row)));
-        self.shown_selected.update(state.selected_key(), || {
-            let selected = state.selected_view();
-            show_selected(&view, &selected);
-            let current = setting_rows.model();
-            setting_rows.sync(
-                selected
-                    .settings
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, setting)| setting_row(setting, current.row_data(index)))
-                    .collect::<Vec<_>>(),
-            );
-            log_rows.sync(selected.log.into_iter().map(log_row));
-        });
+        let (rows, source_rows) = (&self.rows, &self.source_rows);
+        self.shown_list
+            .update("mods", state.list_version(), || state.mod_rows(), |mods| rows.sync(mods.into_iter().map(mod_row)));
+        self.shown_sources.update(
+            "sources",
+            state.sources_key(),
+            || state.source_rows(),
+            |sources| source_rows.sync(sources.into_iter().map(source_row)),
+        );
+        let (setting_rows, choices, labels, log_rows) = (&self.setting_rows, &mut self.setting_choices, &mut self.setting_labels, &self.log_rows);
+        self.shown_selected.update(
+            "selected",
+            state.selected_key(),
+            || state.selected_view(),
+            |selected| {
+                show_selected(&view, &selected);
+                let rows: Vec<_> = selected.settings.into_iter().map(setting_row).collect();
+                let label_lists: Vec<Vec<SharedString>> = rows.iter().map(|(_, choices)| choices.iter().map(|choice| choice.label.clone()).collect()).collect();
+                let rows = choices.fill(rows, |row, choices| row.choices = choices);
+                setting_rows.sync(labels.fill(rows.into_iter().zip(label_lists), |row, labels| row.choice_labels = labels));
+                log_rows.sync(selected.log.into_iter().map(log_row));
+            },
+        );
     }
 
     fn subscribe(&mut self, Subscription::Tick: &Subscription, intents: &Intents<Intent>) -> Box<dyn Any> {
