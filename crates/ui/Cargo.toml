@@ -31,6 +31,8 @@ slint-build.workspace = true
 phrases = { workspace = true, features = ["build"] }
 
 [dev-dependencies]
+# The tests and captures check every CheckedSlice key against the value it stands for; the build doesn't.
+spiderland = { workspace = true, features = ["testing"] }
 spiderland-slint = { workspace = true, features = ["testing"] }
 image.workspace = true
 jiff.workspace = true
