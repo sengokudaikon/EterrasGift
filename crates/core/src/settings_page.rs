@@ -2,8 +2,8 @@
 //! locations".
 //!
 //! Saving is an effect, and each finished save comes back as a snapshot (`Intent::Observed`). Closing the window is a small
-//! state machine here too: a close waits for accepted saves, and a save that failed in the meantime is shown instead of
-//! being lost with the window. It names no module: each one describes itself as a [`ModuleChoice`].
+//! state machine here too: the pages that go first (Mods) hear of it as an output and answer, then a close waits for
+//! accepted saves, and a save that failed in the meantime is shown instead of being lost with the window. It names no module: each one describes itself as a [`ModuleChoice`].
 
 use crate::settings::{AppSettings, Locations};
 use crate::settings_service::{Change, SaveOutcome, SettingsService, Snapshot};
