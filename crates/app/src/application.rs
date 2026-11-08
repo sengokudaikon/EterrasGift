@@ -51,7 +51,7 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
     let settings = Settings::new(service.clone(), vec![trainer.choice.clone()], found_game, found_dotnet);
     let restart = settings.restart_request();
 
-    eg_ui::install(
+    let installed = eg_ui::install(
         &window,
         App {
             launcher: Some(companion.launcher.clone()),
@@ -83,7 +83,7 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
     eg_ui::system::follow_dark_title_bar(&window);
     let result = window.run();
     let mods = companion.mods.clone();
-    let Some(settings) = shutdown(&window, trainer_runtime, companion, runtime, background, service) else {
+    let Some(settings) = shutdown(&installed, trainer_runtime, companion, runtime, background, service) else {
         // A shutdown fault outranks every restart request and the window's own result.
         return Ok(ExitCode::FAILURE);
     };
@@ -100,10 +100,17 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
 
 /// Drain accepted trainer work, cancel producers, then close writers and settle the game's mod-loader proxy. The settings
 /// as closed, or None when the trainer, the runtime or a writer faulted: the app then exits with a non-zero code.
-fn shutdown(window: &MainWindow, trainer: Option<trainer::Trainer>, companion: Companion, runtime: Runtime, background: Tasks, settings: SettingsService) -> Option<Snapshot> {
+fn shutdown(
+    installed: &eg_ui::Installed,
+    trainer: Option<trainer::Trainer>,
+    companion: Companion,
+    runtime: Runtime,
+    background: Tasks,
+    settings: SettingsService,
+) -> Option<Snapshot> {
     let trainer_closed = trainer.is_none_or(|runtime| runtime.close());
     companion.launcher.cancel();
-    eg_ui::pages::mods::cancel_work(window);
+    installed.cancel_work();
     companion.mods.cancellation().cancel();
     companion.sources.close();
     // Pages' work first: it may be waiting on the mods worker, and may still save settings.

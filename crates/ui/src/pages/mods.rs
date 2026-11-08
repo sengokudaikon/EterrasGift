@@ -38,11 +38,6 @@ pub struct ModsPage {
     pub sources: Arc<ModSources>,
 }
 
-/// Cancels active compiler work even when the event loop exits due to a fault rather than a close request.
-pub fn cancel_work(window: &MainWindow) {
-    window.global::<ModsState>().invoke_stop_work();
-}
-
 struct Window {
     services: ModsPage,
     background: Background,
@@ -89,7 +84,6 @@ pub(crate) fn bind(window: &MainWindow, page: ModsPage, background: Background, 
     let store = Store::<Mods>::new(State::new(jiff::Timestamp::now(), shell.current() == Page::Mods), Windowed::new(window, host));
     crate::trail::follow(&store, "mods");
     callbacks!(view, store, {
-        on_stop_work: || Intent::StopWork,
         on_refresh: || Intent::Refresh,
         on_commit_settings: || Intent::CommitSettings,
         on_undo_remove: || Intent::UndoRemove,

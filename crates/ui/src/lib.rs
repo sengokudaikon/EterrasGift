@@ -20,13 +20,13 @@ mod translations {
 
 use eg_companion::game::watch::GameWatch;
 use eg_companion::launch::launcher::GameLauncher;
-use eg_companion::mods::feature::{Intent as ModsIntent, Output as ModsOutput};
+use eg_companion::mods::feature::{Intent as ModsIntent, Mods, Output as ModsOutput};
 use eg_core::settings_page::{Intent as SettingsIntent, Output as SettingsOutput};
 use eg_trainer::screens::connection::WorkerChanged;
 use pages::{forge, home, logs, mods, settings, trainer};
 use shell::{Navigation, Page};
 use slint::ComponentHandle;
-use spiderland::Lifecycle;
+use spiderland::{Lifecycle, Store};
 use spiderland_slint::Background;
 use std::sync::Arc;
 
@@ -67,10 +67,21 @@ pub fn select_language() {
     let _ = slint::select_bundled_translation(language.unwrap_or(""));
 }
 
-/// What a window was bound to: captures set up the forge's states through it.
+/// What a window was bound to: captures set up the forge's states through it, and the app's shutdown stops the Mods page's
+/// work.
 pub struct Installed {
     /// The forge on the trainer's worker, in a run that has one.
     pub forge: Option<forge::ForgeHandle>,
+    mods: Option<Store<Mods>>,
+}
+
+impl Installed {
+    /// Cancels the Mods page's compiler work, even when the event loop ended on a fault rather than a close.
+    pub fn cancel_work(&self) {
+        if let Some(mods) = &self.mods {
+            mods.send(ModsIntent::StopWork);
+        }
+    }
 }
 
 /// Wires a new window: navigation, the pages and the Windows settings.
@@ -110,7 +121,7 @@ pub fn install(window: &MainWindow, app: App) -> Installed {
         forge::bind(window, backend, background, &shell, app.faults, app.templates)
     });
     apply_system_settings(window);
-    Installed { forge }
+    Installed { forge, mods }
 }
 
 /// Windows says nothing when "Animation effects" or high contrast changes, and Slint surfaces no window activation to
