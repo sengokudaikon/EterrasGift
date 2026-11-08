@@ -93,6 +93,28 @@ export struct FeatureRowModels {
 // section spacing Rust leaves above it), and whether it ends that column.
 export struct FeatureRowPlace { column: int, y: length, ends: bool }
 
+// What a row asks: its switch turned (`on`); one of its values (`item`) typed (`text`), stepped (`number` steps), dragged
+// (`share`, the drag's distance as a share of its range, sent once, when it ends), its drag ended or called off, sent to
+// either end, or picked from its list (`number`); one of an editor's fields typed (`text`) or stepped (`number`, the
+// direction); Read again, Apply or Discard.
+export enum RowActionKind {
+    toggled,
+    value-committed,
+    value-stepped,
+    value-scrubbed,
+    value-scrub-ended,
+    value-scrub-cancelled,
+    value-to-start,
+    value-to-end,
+    value-chosen,
+    field-edited,
+    field-stepped,
+    read,
+    apply,
+    discard,
+}
+export struct RowAction { kind: RowActionKind, row: int, item: int, number: int, share: float, on: bool, text: string }
+
 export global TrainerState {
     // Every kept profile (its character's name, class and cycle), the last played first; the character whose hooks the
     // rows are, by its index among them (-1 for one in play without a profile), its name and its full label (empty while
@@ -130,22 +152,9 @@ export global TrainerState {
     callback columns-changed(int);
     callback row-measured(int, length);
 
-    callback hook-toggled(int, bool);
-    callback value-committed(int, int, string);
-    callback value-stepped(int, int, int);
-    // A hook value's cell: a drag's distance as a share of its range (sent once, when it ends; true when cancelled), the
-    // ends, and why a typed text is no value (empty when it is one).
-    callback value-scrubbed(int, int, float);
-    callback value-scrub-ended(int, int, bool);
-    callback value-stepped-to-end(int, int, bool);
+    // What a row asks, and why a text typed for row `int`'s value `int` is no value (empty when it is one).
+    callback acted(RowAction);
     pure callback value-checked(int, int, string) -> string;
-    callback value-chosen(int, int, int);
-    callback field-edited(int, int, string);
-    callback field-committed(int, int, string);
-    callback field-stepped(int, int, int);
-    callback read(int);
-    callback apply(int);
-    callback discard(int);
 }
 
 // A page's section tabs in the manner of Windows' selector bar: plain words, the current one over the game's active-tab
@@ -263,13 +272,8 @@ component SectionBar inherits Rectangle {
 // One of a hook's several values: [name | box], the name indented under the title, the box in the value column.
 component ValueLine inherits Rectangle {
     // From the page: what this shows and what it asks of it.
+    callback acted(RowAction);
     pure callback value-checked(int, int, string) -> string;
-    callback value-chosen(int, int, int);
-    callback value-committed(int, int, string);
-    callback value-scrub-ended(int, int, bool);
-    callback value-scrubbed(int, int, float);
-    callback value-stepped(int, int, int);
-    callback value-stepped-to-end(int, int, bool);
 
     in property <FeatureValueView> value;
     in property <int> row-index;
@@ -304,11 +308,11 @@ component ValueLine inherits Rectangle {
         tip: root.value.step-tip;
         enabled: root.enabled;
         vertical-steps: true;
-        scrubbed(delta) => { root.value-scrubbed(root.row-index, root.value-index, delta); }
-        scrub-ended(cancelled) => { root.value-scrub-ended(root.row-index, root.value-index, cancelled); }
-        stepped(steps) => { root.value-stepped(root.row-index, root.value-index, steps); }
-        stepped-to-end(end) => { root.value-stepped-to-end(root.row-index, root.value-index, end); }
-        committed(text) => { root.value-committed(root.row-index, root.value-index, text); }
+        scrubbed(delta) => { root.acted({ kind: RowActionKind.value-scrubbed, row: root.row-index, item: root.value-index, share: delta }); }
+        scrub-ended(cancelled) => { root.acted({ kind: cancelled ? RowActionKind.value-scrub-cancelled : RowActionKind.value-scrub-ended, row: root.row-index, item: root.value-index }); }
+        stepped(steps) => { root.acted({ kind: RowActionKind.value-stepped, row: root.row-index, item: root.value-index, number: steps }); }
+        stepped-to-end(end) => { root.acted({ kind: end ? RowActionKind.value-to-end : RowActionKind.value-to-start, row: root.row-index, item: root.value-index }); }
+        committed(text) => { root.acted({ kind: RowActionKind.value-committed, row: root.row-index, item: root.value-index, text: text }); }
         checked(text) => { return root.value-checked(root.row-index, root.value-index, text); }
     }
 
@@ -321,16 +325,14 @@ component ValueLine inherits Rectangle {
         label: root.value.accessible-name;
         accessible-description: root.help;
         enabled: root.enabled;
-        chosen(choice) => { root.value-chosen(root.row-index, root.value-index, choice); }
+        chosen(choice) => { root.acted({ kind: RowActionKind.value-chosen, row: root.row-index, item: root.value-index, number: choice }); }
     }
 }
 
 // An editor's field: [name over "In game: N" | box], indented under the title, under its group's name when it heads one.
 component FieldLine inherits Rectangle {
     // From the page: what this shows and what it asks of it.
-    callback field-committed(int, int, string);
-    callback field-edited(int, int, string);
-    callback field-stepped(int, int, int);
+    callback acted(RowAction);
 
     in property <FeatureFieldView> field;
     in property <int> row-index;
@@ -385,9 +387,10 @@ component FieldLine inherits Rectangle {
         tip: root.field.step-tip;
         enabled: root.enabled;
         drafted: root.field.drafted;
-        edited(text) => { root.field-edited(root.row-index, root.field-index, text); }
-        committed(text) => { root.field-committed(root.row-index, root.field-index, text); }
-        stepped(direction) => { root.field-stepped(root.row-index, root.field-index, direction); }
+        // Typed and committed alike: the draft is the text.
+        edited(text) => { root.acted({ kind: RowActionKind.field-edited, row: root.row-index, item: root.field-index, text: text }); }
+        committed(text) => { root.acted({ kind: RowActionKind.field-edited, row: root.row-index, item: root.field-index, text: text }); }
+        stepped(direction) => { root.acted({ kind: RowActionKind.field-stepped, row: root.row-index, item: root.field-index, number: direction }); }
     }
 }
 
@@ -396,21 +399,9 @@ component FieldLine inherits Rectangle {
 // right however its words wrap (crates/ui/README.md: wrapped text in `for` and `if`).
 component FeatureRow inherits Rectangle {
     // From the page: what this shows and what it asks of it.
-    callback apply(int);
-    callback discard(int);
-    callback field-committed(int, int, string);
-    callback field-edited(int, int, string);
-    callback field-stepped(int, int, int);
-    callback hook-toggled(int, bool);
-    callback read(int);
-    callback row-measured(int, length);
+    callback acted(RowAction);
     pure callback value-checked(int, int, string) -> string;
-    callback value-chosen(int, int, int);
-    callback value-committed(int, int, string);
-    callback value-scrub-ended(int, int, bool);
-    callback value-scrubbed(int, int, float);
-    callback value-stepped(int, int, int);
-    callback value-stepped-to-end(int, int, bool);
+    callback row-measured(int, length);
 
     in property <FeatureRowView> feature;
     in property <FeatureRowModels> models;
@@ -533,11 +524,11 @@ component FeatureRow inherits Rectangle {
             tip: root.feature.inline-value.step-tip;
             enabled: root.feature.can-use;
             vertical-steps: true;
-            scrubbed(delta) => { root.value-scrubbed(root.row-index, 0, delta); }
-            scrub-ended(cancelled) => { root.value-scrub-ended(root.row-index, 0, cancelled); }
-            stepped(steps) => { root.value-stepped(root.row-index, 0, steps); }
-            stepped-to-end(end) => { root.value-stepped-to-end(root.row-index, 0, end); }
-            committed(text) => { root.value-committed(root.row-index, 0, text); }
+            scrubbed(delta) => { root.acted({ kind: RowActionKind.value-scrubbed, row: root.row-index, item: 0, share: delta }); }
+            scrub-ended(cancelled) => { root.acted({ kind: cancelled ? RowActionKind.value-scrub-cancelled : RowActionKind.value-scrub-ended, row: root.row-index, item: 0 }); }
+            stepped(steps) => { root.acted({ kind: RowActionKind.value-stepped, row: root.row-index, item: 0, number: steps }); }
+            stepped-to-end(end) => { root.acted({ kind: end ? RowActionKind.value-to-end : RowActionKind.value-to-start, row: root.row-index, item: 0 }); }
+            committed(text) => { root.acted({ kind: RowActionKind.value-committed, row: root.row-index, item: 0, text: text }); }
             checked(text) => { return root.value-checked(root.row-index, 0, text); }
         }
 
@@ -550,7 +541,7 @@ component FeatureRow inherits Rectangle {
             label: root.feature.inline-value.accessible-name;
             accessible-description: root.feature.help;
             enabled: root.feature.can-use;
-            chosen(choice) => { root.value-chosen(root.row-index, 0, choice); }
+            chosen(choice) => { root.acted({ kind: RowActionKind.value-chosen, row: root.row-index, item: 0, number: choice }); }
         }
 
         if root.hook && !root.feature.choice-only: ToggleSwitch {
@@ -562,7 +553,7 @@ component FeatureRow inherits Rectangle {
             accessible-description: root.feature.help;
             checked: root.feature.on;
             enabled: root.feature.can-use;
-            toggled(on) => { root.hook-toggled(root.row-index, on); }
+            toggled(on) => { root.acted({ kind: RowActionKind.toggled, row: root.row-index, on: on }); }
         }
 
         // Several values are listed under the title by name.
@@ -574,13 +565,8 @@ component FeatureRow inherits Rectangle {
             spacing: Tokens.space-6;
 
             for value[i] in root.models.listed-values: ValueLine {
+                acted(action) => { root.acted(action); }
                 value-checked(a0, a1, a2) => { return root.value-checked(a0, a1, a2); }
-                value-chosen(a0, a1, a2) => { root.value-chosen(a0, a1, a2); }
-                value-committed(a0, a1, a2) => { root.value-committed(a0, a1, a2); }
-                value-scrub-ended(a0, a1, a2) => { root.value-scrub-ended(a0, a1, a2); }
-                value-scrubbed(a0, a1, a2) => { root.value-scrubbed(a0, a1, a2); }
-                value-stepped(a0, a1, a2) => { root.value-stepped(a0, a1, a2); }
-                value-stepped-to-end(a0, a1, a2) => { root.value-stepped-to-end(a0, a1, a2); }
                 value: value;
                 row-index: root.row-index;
                 value-index: i;
@@ -604,7 +590,7 @@ component FeatureRow inherits Rectangle {
             enabled: root.editor && root.feature.can-use;
             tip: root.held ? TrainerText.read-stash-again : TrainerText.read-game-again;
             accessible-name: TrainerText.read-again;
-            clicked => { root.read(root.row-index); }
+            clicked => { root.acted({ kind: RowActionKind.read, row: root.row-index }); }
         }
 
         offline := CaptionText {
@@ -643,9 +629,7 @@ component FeatureRow inherits Rectangle {
             spacing: Tokens.space-6;
 
             for field[i] in root.models.fields: FieldLine {
-                field-committed(a0, a1, a2) => { root.field-committed(a0, a1, a2); }
-                field-edited(a0, a1, a2) => { root.field-edited(a0, a1, a2); }
-                field-stepped(a0, a1, a2) => { root.field-stepped(a0, a1, a2); }
+                acted(action) => { root.acted(action); }
                 field: field;
                 row-index: root.row-index;
                 field-index: i;
@@ -666,7 +650,7 @@ component FeatureRow inherits Rectangle {
             kind: ButtonKind.subtle;
             enabled: root.feature.can-discard;
             tip: TrainerText.discard-tip;
-            clicked => { root.discard(root.row-index); }
+            clicked => { root.acted({ kind: RowActionKind.discard, row: root.row-index }); }
         }
 
         if root.editor: Button {
@@ -677,7 +661,7 @@ component FeatureRow inherits Rectangle {
             text: root.feature.apply-text;
             enabled: root.feature.can-apply;
             tip: TrainerText.apply-tip;
-            clicked => { root.apply(root.row-index); }
+            clicked => { root.acted({ kind: RowActionKind.apply, row: root.row-index }); }
         }
 
         // A planned feature: "Not ported yet" where its control will go, and what it will have under the title.
@@ -731,15 +715,9 @@ component FeatureRow inherits Rectangle {
 // side takes them in two columns, split by Rust from the heights the rows report.
 component FeatureList inherits Rectangle {
     // From the page: what this shows and what it asks of it.
-    callback apply(int);
+    callback acted(RowAction);
     in property <int> column-count;
     callback columns-changed(int);
-    callback discard(int);
-    callback field-committed(int, int, string);
-    callback field-edited(int, int, string);
-    callback field-stepped(int, int, int);
-    callback hook-toggled(int, bool);
-    callback read(int);
     callback row-measured(int, length);
     in property <[FeatureRowModels]> row-models;
     in property <[FeatureRowPlace]> row-places;
@@ -748,12 +726,6 @@ component FeatureList inherits Rectangle {
     in property <bool> rows-ready;
     in property <int> serial;
     pure callback value-checked(int, int, string) -> string;
-    callback value-chosen(int, int, int);
-    callback value-committed(int, int, string);
-    callback value-scrub-ended(int, int, bool);
-    callback value-scrubbed(int, int, float);
-    callback value-stepped(int, int, int);
-    callback value-stepped-to-end(int, int, bool);
 
     in property <bool> compact;
 
@@ -798,21 +770,9 @@ component FeatureList inherits Rectangle {
                 height: root.rows-height;
 
                 for feature[index] in root.rows: FeatureRow {
-                    apply(a0) => { root.apply(a0); }
-                    discard(a0) => { root.discard(a0); }
-                    field-committed(a0, a1, a2) => { root.field-committed(a0, a1, a2); }
-                    field-edited(a0, a1, a2) => { root.field-edited(a0, a1, a2); }
-                    field-stepped(a0, a1, a2) => { root.field-stepped(a0, a1, a2); }
-                    hook-toggled(a0, a1) => { root.hook-toggled(a0, a1); }
-                    read(a0) => { root.read(a0); }
-                    row-measured(a0, a1) => { root.row-measured(a0, a1); }
+                    acted(action) => { root.acted(action); }
                     value-checked(a0, a1, a2) => { return root.value-checked(a0, a1, a2); }
-                    value-chosen(a0, a1, a2) => { root.value-chosen(a0, a1, a2); }
-                    value-committed(a0, a1, a2) => { root.value-committed(a0, a1, a2); }
-                    value-scrub-ended(a0, a1, a2) => { root.value-scrub-ended(a0, a1, a2); }
-                    value-scrubbed(a0, a1, a2) => { root.value-scrubbed(a0, a1, a2); }
-                    value-stepped(a0, a1, a2) => { root.value-stepped(a0, a1, a2); }
-                    value-stepped-to-end(a0, a1, a2) => { root.value-stepped-to-end(a0, a1, a2); }
+                    row-measured(a0, a1) => { root.row-measured(a0, a1); }
                     property <FeatureRowPlace> place: root.row-places[index];
                     x: self.place.column * (root.column-width + Tokens.feature-column-spacing);
                     y: self.place.y;
@@ -1135,15 +1095,9 @@ export component TrainerPage inherits Rectangle {
         }
 
         if Connection.access != TrainerAccess.locked && !TrainerState.item-forge: FeatureList {
-            apply(a0) => { TrainerState.apply(a0); }
+            acted(action) => { TrainerState.acted(action); }
             column-count: TrainerState.column-count;
             columns-changed(a0) => { TrainerState.columns-changed(a0); }
-            discard(a0) => { TrainerState.discard(a0); }
-            field-committed(a0, a1, a2) => { TrainerState.field-committed(a0, a1, a2); }
-            field-edited(a0, a1, a2) => { TrainerState.field-edited(a0, a1, a2); }
-            field-stepped(a0, a1, a2) => { TrainerState.field-stepped(a0, a1, a2); }
-            hook-toggled(a0, a1) => { TrainerState.hook-toggled(a0, a1); }
-            read(a0) => { TrainerState.read(a0); }
             row-measured(a0, a1) => { TrainerState.row-measured(a0, a1); }
             row-models: TrainerState.row-models;
             row-places: TrainerState.row-places;
@@ -1152,12 +1106,6 @@ export component TrainerPage inherits Rectangle {
             rows-ready: TrainerState.rows-ready;
             serial: TrainerState.serial;
             value-checked(a0, a1, a2) => { return TrainerState.value-checked(a0, a1, a2); }
-            value-chosen(a0, a1, a2) => { TrainerState.value-chosen(a0, a1, a2); }
-            value-committed(a0, a1, a2) => { TrainerState.value-committed(a0, a1, a2); }
-            value-scrub-ended(a0, a1, a2) => { TrainerState.value-scrub-ended(a0, a1, a2); }
-            value-scrubbed(a0, a1, a2) => { TrainerState.value-scrubbed(a0, a1, a2); }
-            value-stepped(a0, a1, a2) => { TrainerState.value-stepped(a0, a1, a2); }
-            value-stepped-to-end(a0, a1, a2) => { TrainerState.value-stepped-to-end(a0, a1, a2); }
             vertical-stretch: 1;
             compact: root.compact;
         }

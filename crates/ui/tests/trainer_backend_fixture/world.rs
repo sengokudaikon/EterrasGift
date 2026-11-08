@@ -18,7 +18,7 @@ use eg_trainer::screens::forge::{
 };
 use eg_trainer::write::{ForgePlan, WriteControl, WriteOutcome, WriteStatus};
 use eg_ui::pages::forge::ForgeHandle;
-use eg_ui::{ForgeState, Nav, Tip};
+use eg_ui::{ForgeState, Nav, PickerFilter, Tip};
 use slint::platform::{PointerEventButton, WindowEvent};
 use slint::{LogicalPosition, Model};
 use std::collections::BTreeMap;
@@ -1142,13 +1142,13 @@ pub(in super::super) fn item_captures(session: &Session) {
     pointer(&forge, VALUE_X + 70.0, row_y(1) - 6.0, "move");
     session.capture(&forge.ui, "item-value-hover");
     session.click(VALUE_X, row_y(1) - 6.0);
-    assert_eq!(forge.ui.global::<ForgeState>().get_input_text(), "7.3");
+    assert_eq!(forge.ui.global::<ForgeState>().get_cell_input().text, "7.3");
     session.capture(&forge.ui, "item-value-popover");
     // A value outside the game's range keeps the popover open with the reason; Escape drops it.
     session.control_key("a");
     session.type_text("12");
     session.key(Key::Return);
-    assert_eq!(forge.ui.global::<ForgeState>().get_input_error(), "Enter a value from 4.5% to 8.1%.");
+    assert_eq!(forge.ui.global::<ForgeState>().get_cell_input().error, "Enter a value from 4.5% to 8.1%.");
     session.capture(&forge.ui, "item-value-invalid");
     session.key(Key::Escape);
     assert_eq!(forge.ui.global::<ForgeState>().get_drafts().row_count(), 0);
@@ -1238,9 +1238,9 @@ pub(in super::super) fn item_captures(session: &Session) {
     // The name opens the affix picker: a search, the incompatible toggle, the first entry (`replace`).
     let forge = Forge::open(session, World::boots(), 1100, 700);
     session.click(NAME_X, row_y(3));
-    assert!(forge.ui.global::<ForgeState>().get_picker_open());
+    assert!(forge.ui.global::<ForgeState>().get_picker().open);
     session.type_text("res");
-    forge.ui.global::<ForgeState>().invoke_picker_allow_changed(true);
+    forge.ui.global::<ForgeState>().invoke_picker_filter_changed(PickerFilter::Allow, 0, true);
     settle();
     session.key(Key::DownArrow);
     session.capture(&forge.ui, "item-replace");
@@ -1249,7 +1249,8 @@ pub(in super::super) fn item_captures(session: &Session) {
         forge
             .ui
             .global::<ForgeState>()
-            .get_picker_status()
+            .get_picker()
+            .status
             .starts_with("Compatible with this slot\nT1\u{a0}+5–\u{2060}14, T2")
     );
     session.key(Key::Return);
@@ -1258,6 +1259,9 @@ pub(in super::super) fn item_captures(session: &Session) {
         "Fire Resistance → Cold Resistance"
     );
     forge.settle();
+    // The picker hands focus back to the row's name, whose tip says what it holds now.
+    let tip = forge.ui.global::<Tip>();
+    assert!(tip.get_open() && tip.get_text().starts_with("Cold Resistance\n"), "{}", tip.get_text());
     session.capture(&forge.ui, "item-replaced");
     drop(forge);
 
@@ -1370,15 +1374,15 @@ pub(in super::super) fn item_captures(session: &Session) {
     // Add affix opens the picker to add, its caption the free slots.
     let forge = Forge::open(session, World::boots(), 1100, 700);
     session.click(145.0, row_y(4) - 2.0);
-    assert_eq!(forge.ui.global::<ForgeState>().get_picker_title(), "Add affix");
+    assert_eq!(forge.ui.global::<ForgeState>().get_picker().title, "Add affix");
     session.capture(&forge.ui, "item-add-affix");
     // The kind and class filters narrow the list; each entry's tip holds its ranges (`item-add-affix-filtered`).
     let state = forge.ui.global::<ForgeState>();
-    let all = state.get_picker_rows().row_count();
-    state.invoke_picker_category_changed(1);
+    let all = state.get_picker().rows.row_count();
+    state.invoke_picker_filter_changed(PickerFilter::Category, 1, false);
     settle();
-    assert!(state.get_picker_rows().row_count() <= all);
-    assert!(state.get_picker_rows().row_data(0).unwrap().detail.contains("T1\u{a0}+5–\u{2060}14"));
+    assert!(state.get_picker().rows.row_count() <= all);
+    assert!(state.get_picker().rows.row_data(0).unwrap().detail.contains("T1\u{a0}+5–\u{2060}14"));
     state.invoke_picker_select(0);
     settle();
     session.capture(&forge.ui, "item-add-affix-filtered");
@@ -1386,11 +1390,11 @@ pub(in super::super) fn item_captures(session: &Session) {
     session.click(300.0, 215.0);
     session.capture(&forge.ui, "item-add-affix-kind-list");
     session.key(Key::Escape);
-    state.invoke_picker_category_changed(0);
-    state.invoke_picker_class_changed(2);
+    state.invoke_picker_filter_changed(PickerFilter::Category, 0, false);
+    state.invoke_picker_filter_changed(PickerFilter::Class, 2, false);
     settle();
-    assert_eq!(state.get_picker_rows().row_count(), 0, "no fixture affix is Primalist-only");
-    state.invoke_picker_class_changed(0);
+    assert_eq!(state.get_picker().rows.row_count(), 0, "no fixture affix is Primalist-only");
+    state.invoke_picker_filter_changed(PickerFilter::Class, 0, false);
     settle();
     session.key(Key::Escape);
     // A corrupted affix takes the item's one corrupted slot: the affix holding it is drafted back to a normal one first.
@@ -1543,10 +1547,10 @@ pub(in super::super) fn item_captures(session: &Session) {
     let forge = Forge::open(session, World::boots(), 1100, 700);
     forge.type_value(Cell::Affix(0), "37");
     session.click(NAME_X, row_y(3));
-    assert!(forge.ui.global::<ForgeState>().get_picker_open());
+    assert!(forge.ui.global::<ForgeState>().get_picker().open);
     assert!(!forge.ui.global::<ForgeState>().get_can_apply());
     session.click(1000.0, 500.0);
-    assert!(!forge.ui.global::<ForgeState>().get_picker_open(), "a click outside cancels the picker");
+    assert!(!forge.ui.global::<ForgeState>().get_picker().open, "a click outside cancels the picker");
     assert!(forge.ui.global::<ForgeState>().get_can_apply());
 }
 
@@ -1811,17 +1815,17 @@ fn open_picker(session: &Session, filler: Option<(u16, usize)>, width: u32, heig
     command(&forge.backend, Command::SetOverride(true), || forge.backend.snapshot().override_enabled);
     forge.settle();
     session.click(145.0, 262.0 + 54.0 * 4.0 - 2.0);
-    assert!(forge.ui.global::<ForgeState>().get_picker_open(), "Add affix opens the picker");
+    assert!(forge.ui.global::<ForgeState>().get_picker().open, "Add affix opens the picker");
     forge
 }
 
 fn picker_names(state: &ForgeState) -> Vec<String> {
-    let rows = state.get_picker_rows();
+    let rows = state.get_picker().rows;
     (0..rows.row_count()).map(|index| rows.row_data(index).unwrap().name.to_string()).collect()
 }
 
 fn tag_index(state: &ForgeState, name: &str) -> i32 {
-    let tags = state.get_picker_tags();
+    let tags = state.get_picker().tags;
     (0..tags.row_count()).find(|index| tags.row_data(*index).unwrap() == name).expect("the tag is in use") as i32
 }
 
@@ -1848,64 +1852,64 @@ fn hover(forge: &Forge, x: f32, y: f32) {
 pub(in super::super) fn picker_captures(session: &Session) {
     let forge = open_picker(session, None, 1100, 700);
     let state = forge.ui.global::<ForgeState>();
-    assert!(state.get_picker_rows().row_count() > 0);
+    assert!(state.get_picker().rows.row_count() > 0);
     assert!(
         picker_names(&state).iter().all(|name| name != "You have no ward"),
         "unique modifiers stay out of the default"
     );
-    assert!(state.get_picker_hidden().contains("unique modifier"), "{}", state.get_picker_hidden());
+    assert!(state.get_picker().hidden.contains("unique modifier"), "{}", state.get_picker().hidden);
     session.capture(&forge.ui, "item-picker-default");
     // Stat tags opens a list of ticks that stays open while they change; Source lists the uniques after its fixed choices.
     session.click(635.0, 181.0);
     session.click(610.0, 283.0);
     forge.ui.window().take_snapshot().expect("render");
-    assert!(state.get_picker_tags_on().iter().any(|on| on), "a tick stays in the open list");
+    assert!(state.get_picker().tags_on.iter().any(|on| on), "a tick stays in the open list");
     session.capture(&forge.ui, "item-picker-tags-list");
     session.key(Key::Escape);
-    assert!(state.get_picker_open(), "Escape closes the list, not the picker");
-    state.invoke_picker_clear_filters();
+    assert!(state.get_picker().open, "Escape closes the list, not the picker");
+    state.invoke_picker_filter_changed(PickerFilter::Clear, 0, false);
     settle();
     session.click(484.0, 181.0);
     session.capture(&forge.ui, "item-picker-source-list");
     session.key(Key::Escape);
 
     // The filters narrow the list, each shown as a chip; a chip clears its own and Clear filters the rest.
-    state.invoke_picker_level_changed(3);
-    state.invoke_picker_tag_toggled(tag_index(&state, "Fire"), true);
-    state.invoke_picker_filter_changed(1);
+    state.invoke_picker_filter_changed(PickerFilter::Level, 3, false);
+    state.invoke_picker_filter_changed(PickerFilter::Tag, tag_index(&state, "Fire"), true);
+    state.invoke_picker_filter_changed(PickerFilter::Side, 1, false);
     settle();
     assert_eq!(picker_names(&state), ["Increased Fire Damage"], "level 40 or under, Fire, prefixes");
-    assert_eq!(state.get_picker_chips().row_count(), 3);
+    assert_eq!(state.get_picker().chips.row_count(), 3);
     session.capture(&forge.ui, "item-picker-filtered");
     // Real clicks: the first chip (Level), then Clear filters, with a frame drawn first as the app would.
     forge.ui.window().take_snapshot().expect("render");
     session.click(150.0, 253.0);
-    assert_eq!(state.get_picker_chips().row_count(), 2);
-    assert_eq!(state.get_picker_level(), 0, "the first chip was Level");
+    assert_eq!(state.get_picker().chips.row_count(), 2);
+    assert_eq!(state.get_picker().level, 0, "the first chip was Level");
     forge.ui.window().take_snapshot().expect("render");
     session.click(668.0, 285.0);
-    assert_eq!(state.get_picker_chips().row_count(), 0);
+    assert_eq!(state.get_picker().chips.row_count(), 0);
 
     // "Allow incompatible affixes" opens Slot, since it is for what this slot can't roll, and closing it puts Slot back.
-    let boots = state.get_picker_slot();
-    state.invoke_picker_allow_changed(true);
+    let boots = state.get_picker().slot;
+    state.invoke_picker_filter_changed(PickerFilter::Allow, 0, true);
     settle();
-    assert_eq!(state.get_picker_slot(), 0, "Any slot");
+    assert_eq!(state.get_picker().slot, 0, "Any slot");
     assert!(
         picker_names(&state).iter().any(|name| name == "Increased Melee Attack Speed"),
         "a glove affix, listed for boots"
     );
-    state.invoke_picker_allow_changed(false);
+    state.invoke_picker_filter_changed(PickerFilter::Allow, 0, false);
     settle();
-    assert_eq!(state.get_picker_slot(), boots);
+    assert_eq!(state.get_picker().slot, boots);
 
     // Source: unique modifiers from any slot, by the game's stats and one of several lines.
-    state.invoke_picker_source_changed(1);
-    state.invoke_picker_slot_changed(0);
+    state.invoke_picker_filter_changed(PickerFilter::Source, 1, false);
+    state.invoke_picker_filter_changed(PickerFilter::Slot, 0, false);
     settle();
     assert!(picker_names(&state).iter().any(|name| name == "You have no ward"), "Source: Unique modifiers, Any slot");
     session.capture(&forge.ui, "item-picker-uniques");
-    state.invoke_picker_clear_filters();
+    state.invoke_picker_filter_changed(PickerFilter::Clear, 0, false);
     settle();
 
     // Typing a unique's name reaches its modifiers on another slot, with no other step; its stat alone does not.
@@ -1938,7 +1942,7 @@ pub(in super::super) fn picker_captures(session: &Session) {
     settle();
     forge.ui.window().take_snapshot().expect("render");
     settle();
-    assert_eq!(state.get_picker_selected(), 1);
+    assert_eq!(state.get_picker().selected, 1);
     session.capture(&forge.ui, "item-picker-keyboard");
     session.key(Key::Escape);
     drop(forge);
@@ -1947,18 +1951,18 @@ pub(in super::super) fn picker_captures(session: &Session) {
     let forge = open_picker(session, None, 1100, 700);
     let state = forge.ui.global::<ForgeState>();
     session.type_text("no such affix");
-    assert_eq!(state.get_picker_rows().row_count(), 0);
-    assert_eq!(state.get_picker_empty_reason(), "No affix matches this search.");
-    assert!(state.get_picker_empty_clear_search());
+    assert_eq!(state.get_picker().rows.row_count(), 0);
+    assert_eq!(state.get_picker().empty_reason, "No affix matches this search.");
+    assert!(state.get_picker().empty_clear_search);
     session.capture(&forge.ui, "item-picker-empty");
     session.click(163.0, 323.0);
-    assert!(state.get_picker_rows().row_count() > 0, "Clear search brings the list back");
-    assert_eq!(state.get_picker_search(), "");
-    state.invoke_picker_slot_changed(state.get_picker_slots().iter().position(|slot| slot == "Relic").unwrap() as i32);
+    assert!(state.get_picker().rows.row_count() > 0, "Clear search brings the list back");
+    assert_eq!(state.get_picker().search, "");
+    state.invoke_picker_filter_changed(PickerFilter::Slot, state.get_picker().slots.iter().position(|slot| slot == "Relic").unwrap() as i32, false);
     settle();
-    assert_eq!(state.get_picker_rows().row_count(), 0, "with Allow off, a relic's affixes don't fit boots");
-    assert_eq!(state.get_picker_empty_reason(), "These affixes roll on another slot.");
-    assert!(state.get_picker_empty_allow() && state.get_picker_empty_clear_filters());
+    assert_eq!(state.get_picker().rows.row_count(), 0, "with Allow off, a relic's affixes don't fit boots");
+    assert_eq!(state.get_picker().empty_reason, "These affixes roll on another slot.");
+    assert!(state.get_picker().empty_allow && state.get_picker().empty_clear_filters);
     session.capture(&forge.ui, "item-picker-empty-slot");
     drop(forge);
 
@@ -1975,11 +1979,11 @@ pub(in super::super) fn picker_captures(session: &Session) {
     let forge = Forge::open(session, World::picker(None), 1100, 700);
     session.click(145.0, 262.0 + 54.0 * 4.0 - 2.0);
     let state = forge.ui.global::<ForgeState>();
-    assert_eq!(state.get_picker_hidden(), "");
-    state.invoke_picker_source_changed(1);
+    assert_eq!(state.get_picker().hidden, "");
+    state.invoke_picker_filter_changed(PickerFilter::Source, 1, false);
     settle();
-    assert_eq!(state.get_picker_empty_reason(), "Unique modifiers need \"I know what I'm doing\" in Settings.");
-    assert!(state.get_picker_empty_clear_filters() && !state.get_picker_empty_allow());
+    assert_eq!(state.get_picker().empty_reason, "Unique modifiers need \"I know what I'm doing\" in Settings.");
+    assert!(state.get_picker().empty_clear_filters && !state.get_picker().empty_allow);
     session.capture(&forge.ui, "item-picker-needs-override");
     drop(forge);
 
@@ -1998,7 +2002,7 @@ pub(in super::super) fn picker_captures(session: &Session) {
     session.click(456.0, 97.0);
     session.click(250.0, 97.0);
     session.type_text("Exsanguinous");
-    assert_eq!(state.get_picker_rows().row_count(), 2);
+    assert_eq!(state.get_picker().rows.row_count(), 2);
     session.capture(&forge.ui, "item-picker-narrow-search");
     drop(forge);
 
@@ -2016,16 +2020,16 @@ pub(in super::super) fn picker_captures(session: &Session) {
         println!(
             "picker over {definitions} definitions, {search:?}: filtered in {filtered:?}, drawn by {:?}, {} rows",
             started.elapsed(),
-            state.get_picker_rows().row_count()
+            state.get_picker().rows.row_count()
         );
     }
-    state.invoke_picker_source_changed(2);
-    state.invoke_picker_slot_changed(0);
+    state.invoke_picker_filter_changed(PickerFilter::Source, 2, false);
+    state.invoke_picker_filter_changed(PickerFilter::Slot, 0, false);
     settle();
     let started = std::time::Instant::now();
     session.scroll(300.0, 300.0, -3000.0);
     forge.ui.window().take_snapshot().expect("render");
-    println!("picker: scrolled {} rows and drew them in {:?}", state.get_picker_rows().row_count(), started.elapsed());
+    println!("picker: scrolled {} rows and drew them in {:?}", state.get_picker().rows.row_count(), started.elapsed());
     session.capture(&forge.ui, "item-picker-long-list");
     drop(forge);
 }

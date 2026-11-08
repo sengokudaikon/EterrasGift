@@ -10,6 +10,19 @@ import { PillView } from "../../widgets/pill.slint";
 export enum CellKind { affix, unique, implicit, field }
 export struct CellRef { kind: CellKind, row: int, roll: int }
 
+// What a value cell asks of its value: a press (focus or a click), a drag by `amount` of its span, the drag's end or its
+// cancel, `amount` steps, either end, and leaving the popover with Escape or by a click away.
+export enum CellAction { press, scrub, end-scrub, cancel-scrub, step, to-start, to-end, cancel-input, finish-input }
+
+// The value popover, for the one cell typing: what its box starts with (typing goes to Rust as it is typed), the label,
+// the range, and why the text is no value (empty while it is one).
+export struct CellInput { typing: bool, cell: CellRef, label: string, text: string, range: string, error: string }
+
+// A cell Rust asks to take keyboard focus (a ledger entry for a value, Up/Down between rows), and a serial that moves with
+// each ask. Parts of an affix row: 0 value, 1 name, 2 tier, 3 seal. A field (kind field): 0 its value, 1 its flag toggle;
+// with row -1, 4 the base and 5 the identity in the header.
+export struct CellFocus { cell: CellRef, part: int, serial: int }
+
 // The game-owned colour a name takes.
 export enum ItemRarity { normal, magic, rare, exalted, unique, set, legendary }
 
@@ -114,6 +127,57 @@ export struct MenuOptionView {
 // An affix picker's row: its name, its facts as pills, all the rest for its tip, one fact a line, and pills and tip together
 // for a screen reader.
 export struct PickerRowView { name: string, pills: [PillView], detail: string, spoken: string }
+
+// Which of the affix picker's filters changed: a choice box (its `index`), a stat tag (`index` and `on`), "Allow
+// incompatible affixes" (`on`), a chip removed (its `index`), every filter cleared, or the unique modifiers the default
+// Source holds back listed.
+export enum PickerFilter { side, category, class, slot, level, source, tag, allow, chip, clear, uniques }
+
+// The affix picker: whether it is open, and what it shows.
+export struct PickerView {
+    open: bool,
+    title: string,
+    subtitle: string,
+    search: string,
+    // The filters: each one's choices and the chosen one; a choice its list no longer holds shows its `-text`.
+    sides: [string],
+    side: int,
+    categories: [string],
+    category: int,
+    classes: [string],
+    class: int,
+    slots: [string],
+    slot: int,
+    slot-text: string,
+    slot-active: bool,
+    levels: [string],
+    level: int,
+    sources: [string],
+    source: int,
+    source-text: string,
+    source-active: bool,
+    tags: [string],
+    tags-on: [bool],
+    tags-text: string,
+    tags-active: bool,
+    allow: bool,
+    allow-enabled: bool,
+    // The filters in force, off their defaults, each with what it takes to clear it.
+    chips: [string],
+    count: string,
+    // The offer to list the unique modifiers the default Source holds back; empty when none are.
+    hidden: string,
+    // Why the list is empty, and which ways out it offers.
+    empty-reason: string,
+    empty-clear-search: bool,
+    empty-clear-filters: bool,
+    empty-allow: bool,
+    rows: [PickerRowView],
+    selected: int,
+    status: string,
+    action: string,
+    can-use: bool,
+}
 
 // A saved item template: its name, what it holds, and both in one line for screen readers.
 export struct TemplateRowView { name: string, facts: [string], label: string }
@@ -244,63 +308,11 @@ export global ForgeState {
     in property <bool> can-apply;
 
     // The value popover, for the one cell typing; typing ended elsewhere (Undo, an item change) closes it.
-    in property <bool> typing;
-    in property <CellRef> typing-cell: { kind: CellKind.affix, row: -1, roll: -1 };
-    in property <string> input-label;
-    in-out property <string> input-text;
-    in property <string> input-range;
-    in property <string> input-error;
-
-    // The affix picker.
-    in property <bool> picker-open;
-    in property <string> picker-title;
-    in property <string> picker-subtitle;
-    in property <string> picker-search;
-    in property <int> picker-filter;
-    in property <bool> picker-allow;
-    // The filters: each one's choices and the chosen one; a choice its list no longer holds shows its `-text`.
-    in property <[string]> picker-sides;
-    in property <[string]> picker-categories;
-    in property <[string]> picker-classes;
-    in property <int> picker-category;
-    in property <int> picker-class;
-    in property <[string]> picker-slots;
-    in property <int> picker-slot;
-    in property <string> picker-slot-text;
-    in property <bool> picker-slot-active;
-    in property <[string]> picker-levels;
-    in property <int> picker-level;
-    in property <[string]> picker-sources;
-    in property <int> picker-source;
-    in property <string> picker-source-text;
-    in property <bool> picker-source-active;
-    in property <[string]> picker-tags;
-    in property <[bool]> picker-tags-on;
-    in property <string> picker-tags-text;
-    in property <bool> picker-tags-active;
-    // The filters in force, off their defaults, each with what it takes to clear it.
-    in property <[string]> picker-chips;
-    in property <string> picker-count;
-    // The offer to list the unique modifiers the default Source holds back; empty when none are.
-    in property <string> picker-hidden;
-    // Why the list is empty, and which ways out it offers.
-    in property <string> picker-empty-reason;
-    in property <bool> picker-empty-clear-search;
-    in property <bool> picker-empty-clear-filters;
-    in property <bool> picker-empty-allow;
-    in property <bool> picker-allow-enabled;
-    in property <[PickerRowView]> picker-rows;
-    in property <int> picker-selected: -1;
-    in property <string> picker-status;
-    in property <string> picker-action;
-    in property <bool> can-use-picker;
-
-    // Rust asks a cell to take keyboard focus (a ledger entry for a value, Up/Down between rows).
-    in property <CellRef> focus-cell: { kind: CellKind.affix, row: -1, roll: -1 };
-    // Which of an affix row's cells: 0 value, 1 name, 2 tier, 3 seal. A field (kind field): 0 its value, 1 its flag toggle;
-    // with row -1, 4 the base and 5 the identity in the header.
-    in property <int> focus-part;
-    in property <int> focus-serial;
+    in property <CellInput> cell-input: { cell: { kind: CellKind.affix, row: -1, roll: -1 } };
+    // The affix picker, for an addition or a replacement.
+    in property <PickerView> picker: { selected: -1 };
+    // The cell Rust asks to take keyboard focus.
+    in property <CellFocus> focus-target: { cell: { kind: CellKind.affix, row: -1, roll: -1 } };
 
     callback select-affix(int);
     callback select-unique(int);
@@ -313,16 +325,10 @@ export global ForgeState {
     // from one in a direction (the same one when there is none).
     pure callback option-start([MenuOptionView]) -> int;
     pure callback option-step([MenuOptionView], int, int) -> int;
-    callback press(CellRef);
-    callback scrub(CellRef, float);
-    callback end-scrub(CellRef, bool);
-    callback step(CellRef, int);
-    callback step-to-end(CellRef, bool);
+    callback cell-acted(CellRef, CellAction, float);
     callback begin-input(CellRef) -> bool;
     callback input-edited(CellRef, string);
     callback commit-input(CellRef) -> bool;
-    callback cancel-input(CellRef);
-    callback finish-input(CellRef);
     callback pick-tier(int, int);
     callback pick-seal(int, int);
     callback toggle-flag(int, bool);
@@ -341,17 +347,7 @@ export global ForgeState {
     callback template-apply(int);
     callback template-delete(int);
     callback picker-search-edited(string);
-    callback picker-filter-changed(int);
-    callback picker-allow-changed(bool);
-    callback picker-category-changed(int);
-    callback picker-class-changed(int);
-    callback picker-slot-changed(int);
-    callback picker-level-changed(int);
-    callback picker-source-changed(int);
-    callback picker-tag-toggled(int, bool);
-    callback picker-chip-removed(int);
-    callback picker-clear-filters();
-    callback picker-show-uniques();
+    callback picker-filter-changed(PickerFilter, int, bool);
     callback picker-select(int);
     callback use-picker();
     callback cancel-picker();

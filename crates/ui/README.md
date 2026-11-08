@@ -3,6 +3,16 @@
 The app's view: hosts over the pages' features, and the Slint files they show. Slint is pinned to `=1.18.1` and used under
 the GPLv3, as the app is; Settings' About section says "Made with Slint" and names the bundled fonts' and icons' licences.
 
+## A page's view
+
+- The page's root reads its global (`ForgeState`, `TrainerState`). The components under it take what they show as
+  properties and say what happened through callbacks, so each shows what it is handed and nothing else.
+- What travels together is one struct (`PickerView`, `CellInput`, `CellFocus`), and the gestures of a cell or a row are one
+  callback carrying an action (`cell-acted(CellRef, CellAction, float)`, `acted(RowAction)`). Handing them down a level is
+  then one line each.
+- Rust sets such a struct whole on every render. Slint passes it on only when it changed, and a list inside it that is the
+  same model as before keeps its rows (and their focus and scroll).
+
 ## Words
 
 How the app's words read.

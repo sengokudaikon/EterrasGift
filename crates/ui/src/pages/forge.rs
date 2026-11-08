@@ -6,7 +6,7 @@ mod picker_rows;
 mod show;
 
 use crate::shell::{Page, ShellHandle};
-use crate::{CellKind, CellRef, ForgeState, MainWindow};
+use crate::{CellFocus, CellKind, CellRef, ForgeState, MainWindow};
 use eg_core::fault::{FaultDetails, FaultLog};
 use eg_trainer::backend::{BackendHandle, Command, ForgeSnapshot, forge_record};
 use eg_trainer::item::template::TemplateStore;
@@ -96,16 +96,18 @@ impl WindowHost<Forge> for ForgeHost {
         let focus = state.focus();
         self.focused.update(focus.serial(), || {
             let Focus { target, part } = *focus.value();
-            forge.set_focus_cell(match target {
-                FocusTarget::Cell(cell) => show::reference_of(cell),
-                FocusTarget::Header => CellRef {
-                    kind: CellKind::Field,
-                    row: -1,
-                    roll: -1,
+            forge.set_focus_target(CellFocus {
+                cell: match target {
+                    FocusTarget::Cell(cell) => show::reference_of(cell),
+                    FocusTarget::Header => CellRef {
+                        kind: CellKind::Field,
+                        row: -1,
+                        roll: -1,
+                    },
                 },
+                part,
+                serial: focus.serial(),
             });
-            forge.set_focus_part(part);
-            forge.set_focus_serial(focus.serial());
         });
     }
 

@@ -1,6 +1,6 @@
 // The Item Forge's lists: the implicits, the affix table, the unique modifiers and the tier ladder. Takes what it shows as properties.
 
-import { AffixRowView, CellKind, CellRef, ForgeReveal, ModifierRowView, PickerRowView, TemplateRowView } from "state.slint";
+import { AffixRowView, CellAction, CellFocus, CellInput, CellKind, CellRef, ForgeReveal, ModifierRowView, PickerFilter, PickerView, TemplateRowView } from "state.slint";
 import { ScrollView } from "../../widgets/scroll-view.slint";
 import { Tokens } from "../../tokens.slint";
 import { TipTrigger } from "../../widgets/focus.slint";
@@ -13,23 +13,27 @@ import { TemplatesPanel, TemplateMetrics, TemplatesMeasure } from "templates.sli
 
 export component ForgeLists inherits ScrollView {
     // From the page: what this shows and what it asks of it.
+    in property <CellInput> cell-input;
+    in property <CellFocus> focus-target;
+    callback cell-acted(CellRef, CellAction, float);
+    callback begin-input(CellRef) -> bool;
+    callback input-edited(CellRef, string);
+    callback commit-input(CellRef) -> bool;
+    in property <PickerView> picker;
+    callback open-add() -> bool;
+    callback open-replace(int) -> bool;
+    callback picker-search-edited(string);
+    callback picker-filter-changed(PickerFilter, int, bool);
+    callback picker-select(int);
+    callback use-picker();
+    callback cancel-picker();
     in property <string> add-affix-tip;
     in property <string> affix-list-note;
     in property <[AffixRowView]> affixes;
-    callback begin-input(CellRef) -> bool;
     in property <bool> can-change-affix-list;
     in property <bool> can-max-rolls;
     in property <bool> can-max-tiers;
-    in property <bool> can-use-picker;
-    callback cancel-input(CellRef);
-    callback cancel-picker();
-    callback commit-input(CellRef) -> bool;
     callback discard-row(int);
-    callback end-scrub(CellRef, bool);
-    callback finish-input(CellRef);
-    in property <CellRef> focus-cell;
-    in property <int> focus-part;
-    in property <int> focus-serial;
     in property <string> formatting-error;
     in property <bool> formatting-loading;
     in property <bool> has-implicits;
@@ -41,11 +45,6 @@ export component ForgeLists inherits ScrollView {
     in property <bool> implicit-preview-draft;
     in property <bool> implicit-rows-shown;
     in property <[ModifierRowView]> implicits;
-    callback input-edited(CellRef, string);
-    in property <string> input-error;
-    in property <string> input-label;
-    in property <string> input-range;
-    in-out property <string> input-text;
     in property <string> ladder-note;
     callback max-rolls();
     in property <string> max-rolls-tip;
@@ -54,72 +53,16 @@ export component ForgeLists inherits ScrollView {
     callback move-implicit(int, int, int);
     callback move-row(int, int, int);
     callback move-unique(int, int, int);
-    callback open-add() -> bool;
-    callback open-replace(int) -> bool;
     callback pick-seal(int, int);
     callback pick-tier(int, int);
-    in property <string> picker-action;
-    in property <bool> picker-allow;
-    callback picker-allow-changed(bool);
-    in property <bool> picker-allow-enabled;
-    in property <[string]> picker-categories;
-    in property <int> picker-category;
-    callback picker-category-changed(int);
-    callback picker-chip-removed(int);
-    in property <[string]> picker-chips;
-    in property <int> picker-class;
-    callback picker-class-changed(int);
-    in property <[string]> picker-classes;
-    callback picker-clear-filters();
-    in property <string> picker-count;
-    in property <bool> picker-empty-allow;
-    in property <bool> picker-empty-clear-filters;
-    in property <bool> picker-empty-clear-search;
-    in property <string> picker-empty-reason;
-    in property <int> picker-filter;
-    callback picker-filter-changed(int);
-    in property <string> picker-hidden;
-    in property <int> picker-level;
-    callback picker-level-changed(int);
-    in property <[string]> picker-levels;
-    in property <bool> picker-open;
-    in property <[PickerRowView]> picker-rows;
-    in property <string> picker-search;
-    callback picker-search-edited(string);
-    callback picker-select(int);
-    in property <int> picker-selected;
-    callback picker-show-uniques();
-    in property <[string]> picker-sides;
-    in property <int> picker-slot;
-    in property <bool> picker-slot-active;
-    callback picker-slot-changed(int);
-    in property <string> picker-slot-text;
-    in property <[string]> picker-slots;
-    in property <int> picker-source;
-    in property <bool> picker-source-active;
-    callback picker-source-changed(int);
-    in property <string> picker-source-text;
-    in property <[string]> picker-sources;
-    in property <string> picker-status;
-    in property <string> picker-subtitle;
-    callback picker-tag-toggled(int, bool);
-    in property <[string]> picker-tags;
-    in property <bool> picker-tags-active;
-    in property <[bool]> picker-tags-on;
-    in property <string> picker-tags-text;
-    in property <string> picker-title;
-    callback press(CellRef);
     in property <bool> preview-failed;
     in property <bool> preview-stale;
     in property <string> preview-status;
     callback remove-affix(int);
-    callback scrub(CellRef, float);
     callback select-affix(int);
     callback select-unique(int);
     in property <int> selected-affix;
     in property <int> selected-unique;
-    callback step(CellRef, int);
-    callback step-to-end(CellRef, bool);
     callback template-apply(int);
     callback template-delete(int);
     in property <string> template-name;
@@ -129,10 +72,7 @@ export component ForgeLists inherits ScrollView {
     in property <[TemplateRowView]> template-rows;
     callback template-save(string, bool);
     callback templates-opened();
-    in property <bool> typing;
-    in property <CellRef> typing-cell;
     in property <[ModifierRowView]> unique-modifiers;
-    callback use-picker();
     in property <bool> wide;
     in property <length> lists-width;
     in property <length> range-width;
@@ -147,13 +87,29 @@ export component ForgeLists inherits ScrollView {
         : root.unique-beside ? root.lists-width / 2
         : root.wide ? Math.min(Tokens.affix-table-max-width, root.lists-width) : root.lists-width;
     property <int> reveal-serial: ForgeReveal.serial;
-    // The add picker's flyout: closing it any way but Use or Cancel cancels, and Rust dropping the picker closes it.
     // The line under the template form: what saving the typed name would replace, else what the last action said.
     property <string> template-note: root.template-replaces != ""
         ? ForgeText.saving-replaces(root.template-replaces)
         : root.template-message;
-    property <bool> add-shown: add-popup.is-open;
-    property <bool> picker-live: root.picker-open;
+    // The affix picker's flyout, for an addition or a row's replacement: where it opens, in window coordinates, and the
+    // row it replaces (-1 adding). Closing it any way but Use or Cancel (a click outside) cancels, and Rust dropping the
+    // picker closes it. Closed over a replacement, it hands focus back to the row's name.
+    property <length> picker-x;
+    property <length> picker-y;
+    property <int> replacing: -1;
+    property <int> refocus-row: -1;
+    property <int> refocus;
+    property <bool> picker-shown: picker-popup.is-open;
+    property <bool> picker-live: root.picker.open;
+
+    function open-picker(row: int, x: length, y: length) {
+        if (row < 0 ? root.open-add() : root.open-replace(row)) {
+            root.picker-x = x;
+            root.picker-y = y;
+            root.replacing = row;
+            picker-popup.show();
+        }
+    }
     // A row Rust selected or focused scrolls into view.
     changed reveal-serial => {
         let top = ForgeReveal.top - root.absolute-position.y;
@@ -164,18 +120,49 @@ export component ForgeLists inherits ScrollView {
             root.content-y = Math.max(Math.min(0px, root.visible-height - root.content-height), root.content-y - (bottom - root.visible-height));
         }
     }
-    changed add-shown => {
-        if (!root.add-shown && root.picker-open) {
+    changed picker-shown => {
+        if (!root.picker-shown && root.picker.open) {
             root.cancel-picker();
         }
     }
     changed picker-live => {
         if (!root.picker-live) {
-            add-popup.close();
+            picker-popup.close();
         }
     }
 
     content-width: self.visible-width;
+
+    picker-anchor := Rectangle {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+
+        picker-popup := PopupWindow {
+            x: root.picker-x - picker-anchor.absolute-position.x;
+            y: root.picker-y - picker-anchor.absolute-position.y;
+            width: PickerMetrics.width;
+            height: PickerMetrics.height;
+            close-policy: PopupClosePolicy.close-on-click-outside;
+
+            AffixPickerPanel {
+                picker: root.picker;
+                picker-search-edited(a0) => { root.picker-search-edited(a0); }
+                picker-filter-changed(a0, a1, a2) => { root.picker-filter-changed(a0, a1, a2); }
+                picker-select(a0) => { root.picker-select(a0); }
+                use-picker() => { root.use-picker(); }
+                cancel-picker() => { root.cancel-picker(); }
+                done => {
+                    picker-popup.close();
+                    if (root.replacing >= 0) {
+                        root.refocus-row = root.replacing;
+                        root.refocus += 1;
+                    }
+                }
+            }
+        }
+    }
     content-height: Math.max(affix-section.height + (root.has-unique && !root.unique-beside ? Tokens.unique-section-margin.top + unique-section.height : 0px),
         root.unique-beside ? Tokens.unique-section-beside-margin.top + unique-section.height : 0px,
         root.ladder ? ladder.height : 0px) + Tokens.lists-bottom-margin.bottom;
@@ -222,28 +209,15 @@ export component ForgeLists inherits ScrollView {
 
             if root.implicit-rows-shown: VerticalLayout {
                 for line[index] in root.implicits: ModifierRowItem {
+                    cell-input: root.cell-input;
+                    focus-target: root.focus-target;
+                    cell-acted(a0, a1, a2) => { root.cell-acted(a0, a1, a2); }
                     begin-input(a0) => { return root.begin-input(a0); }
-                    cancel-input(a0) => { root.cancel-input(a0); }
-                    commit-input(a0) => { return root.commit-input(a0); }
-                    end-scrub(a0, a1) => { root.end-scrub(a0, a1); }
-                    finish-input(a0) => { root.finish-input(a0); }
-                    focus-cell: root.focus-cell;
-                    focus-part: root.focus-part;
-                    focus-serial: root.focus-serial;
                     input-edited(a0, a1) => { root.input-edited(a0, a1); }
-                    input-error: root.input-error;
-                    input-label: root.input-label;
-                    input-range: root.input-range;
-                    input-text <=> root.input-text;
+                    commit-input(a0) => { return root.commit-input(a0); }
                     move-implicit(a0, a1, a2) => { root.move-implicit(a0, a1, a2); }
                     move-unique(a0, a1, a2) => { root.move-unique(a0, a1, a2); }
-                    press(a0) => { root.press(a0); }
-                    scrub(a0, a1) => { root.scrub(a0, a1); }
                     select-unique(a0) => { root.select-unique(a0); }
-                    step(a0, a1) => { root.step(a0, a1); }
-                    step-to-end(a0, a1) => { root.step-to-end(a0, a1); }
-                    typing: root.typing;
-                    typing-cell: root.typing-cell;
                     line: line;
                     index: index;
                     kind: CellKind.implicit;
@@ -315,86 +289,21 @@ export component ForgeLists inherits ScrollView {
                 spacing: Tokens.row-gap.bottom;
 
                 for affix[index] in root.affixes: AffixRowItem {
+                    cell-input: root.cell-input;
+                    focus-target: root.focus-target;
+                    cell-acted(a0, a1, a2) => { root.cell-acted(a0, a1, a2); }
                     begin-input(a0) => { return root.begin-input(a0); }
-                    can-change-affix-list: root.can-change-affix-list;
-                    can-use-picker: root.can-use-picker;
-                    cancel-input(a0) => { root.cancel-input(a0); }
-                    cancel-picker() => { root.cancel-picker(); }
-                    commit-input(a0) => { return root.commit-input(a0); }
-                    discard-row(a0) => { root.discard-row(a0); }
-                    end-scrub(a0, a1) => { root.end-scrub(a0, a1); }
-                    finish-input(a0) => { root.finish-input(a0); }
-                    focus-cell: root.focus-cell;
-                    focus-part: root.focus-part;
-                    focus-serial: root.focus-serial;
                     input-edited(a0, a1) => { root.input-edited(a0, a1); }
-                    input-error: root.input-error;
-                    input-label: root.input-label;
-                    input-range: root.input-range;
-                    input-text <=> root.input-text;
+                    commit-input(a0) => { return root.commit-input(a0); }
+                    can-change-affix-list: root.can-change-affix-list;
+                    discard-row(a0) => { root.discard-row(a0); }
                     move-row(a0, a1, a2) => { root.move-row(a0, a1, a2); }
-                    open-replace(a0) => { return root.open-replace(a0); }
                     pick-seal(a0, a1) => { root.pick-seal(a0, a1); }
                     pick-tier(a0, a1) => { root.pick-tier(a0, a1); }
-                    picker-action: root.picker-action;
-                    picker-allow: root.picker-allow;
-                    picker-allow-changed(a0) => { root.picker-allow-changed(a0); }
-                    picker-allow-enabled: root.picker-allow-enabled;
-                    picker-categories: root.picker-categories;
-                    picker-category: root.picker-category;
-                    picker-category-changed(a0) => { root.picker-category-changed(a0); }
-                    picker-chip-removed(a0) => { root.picker-chip-removed(a0); }
-                    picker-chips: root.picker-chips;
-                    picker-class: root.picker-class;
-                    picker-class-changed(a0) => { root.picker-class-changed(a0); }
-                    picker-classes: root.picker-classes;
-                    picker-clear-filters() => { root.picker-clear-filters(); }
-                    picker-count: root.picker-count;
-                    picker-empty-allow: root.picker-empty-allow;
-                    picker-empty-clear-filters: root.picker-empty-clear-filters;
-                    picker-empty-clear-search: root.picker-empty-clear-search;
-                    picker-empty-reason: root.picker-empty-reason;
-                    picker-filter: root.picker-filter;
-                    picker-filter-changed(a0) => { root.picker-filter-changed(a0); }
-                    picker-hidden: root.picker-hidden;
-                    picker-level: root.picker-level;
-                    picker-level-changed(a0) => { root.picker-level-changed(a0); }
-                    picker-levels: root.picker-levels;
-                    picker-open: root.picker-open;
-                    picker-rows: root.picker-rows;
-                    picker-search: root.picker-search;
-                    picker-search-edited(a0) => { root.picker-search-edited(a0); }
-                    picker-select(a0) => { root.picker-select(a0); }
-                    picker-selected: root.picker-selected;
-                    picker-show-uniques() => { root.picker-show-uniques(); }
-                    picker-sides: root.picker-sides;
-                    picker-slot: root.picker-slot;
-                    picker-slot-active: root.picker-slot-active;
-                    picker-slot-changed(a0) => { root.picker-slot-changed(a0); }
-                    picker-slot-text: root.picker-slot-text;
-                    picker-slots: root.picker-slots;
-                    picker-source: root.picker-source;
-                    picker-source-active: root.picker-source-active;
-                    picker-source-changed(a0) => { root.picker-source-changed(a0); }
-                    picker-source-text: root.picker-source-text;
-                    picker-sources: root.picker-sources;
-                    picker-status: root.picker-status;
-                    picker-subtitle: root.picker-subtitle;
-                    picker-tag-toggled(a0, a1) => { root.picker-tag-toggled(a0, a1); }
-                    picker-tags: root.picker-tags;
-                    picker-tags-active: root.picker-tags-active;
-                    picker-tags-on: root.picker-tags-on;
-                    picker-tags-text: root.picker-tags-text;
-                    picker-title: root.picker-title;
-                    press(a0) => { root.press(a0); }
                     remove-affix(a0) => { root.remove-affix(a0); }
-                    scrub(a0, a1) => { root.scrub(a0, a1); }
                     select-affix(a0) => { root.select-affix(a0); }
-                    step(a0, a1) => { root.step(a0, a1); }
-                    step-to-end(a0, a1) => { root.step-to-end(a0, a1); }
-                    typing: root.typing;
-                    typing-cell: root.typing-cell;
-                    use-picker() => { root.use-picker(); }
+                    replace(row, x, y) => { root.open-picker(row, x, y); }
+                    refocus: root.refocus-row == index ? root.refocus : 0;
                     affix: affix;
                     index: index;
                     selected: root.selected-affix == index;
@@ -422,75 +331,7 @@ export component ForgeLists inherits ScrollView {
                     enabled: root.can-change-affix-list;
                     tip: root.add-affix-tip;
                     clicked => {
-                        if (root.open-add()) {
-                            add-popup.show();
-                        }
-                    }
-                }
-
-                add-popup := PopupWindow {
-                    x: 0;
-                    y: parent.height + Tokens.space-4;
-                    width: PickerMetrics.width;
-                    height: PickerMetrics.height;
-                    close-policy: PopupClosePolicy.close-on-click-outside;
-
-                    AffixPickerPanel {
-                        can-use-picker: root.can-use-picker;
-                        cancel-picker() => { root.cancel-picker(); }
-                        picker-action: root.picker-action;
-                        picker-allow: root.picker-allow;
-                        picker-allow-changed(a0) => { root.picker-allow-changed(a0); }
-                        picker-allow-enabled: root.picker-allow-enabled;
-                        picker-categories: root.picker-categories;
-                        picker-category: root.picker-category;
-                        picker-category-changed(a0) => { root.picker-category-changed(a0); }
-                        picker-chip-removed(a0) => { root.picker-chip-removed(a0); }
-                        picker-chips: root.picker-chips;
-                        picker-class: root.picker-class;
-                        picker-class-changed(a0) => { root.picker-class-changed(a0); }
-                        picker-classes: root.picker-classes;
-                        picker-clear-filters() => { root.picker-clear-filters(); }
-                        picker-count: root.picker-count;
-                        picker-empty-allow: root.picker-empty-allow;
-                        picker-empty-clear-filters: root.picker-empty-clear-filters;
-                        picker-empty-clear-search: root.picker-empty-clear-search;
-                        picker-empty-reason: root.picker-empty-reason;
-                        picker-filter: root.picker-filter;
-                        picker-filter-changed(a0) => { root.picker-filter-changed(a0); }
-                        picker-hidden: root.picker-hidden;
-                        picker-level: root.picker-level;
-                        picker-level-changed(a0) => { root.picker-level-changed(a0); }
-                        picker-levels: root.picker-levels;
-                        picker-rows: root.picker-rows;
-                        picker-search: root.picker-search;
-                        picker-search-edited(a0) => { root.picker-search-edited(a0); }
-                        picker-select(a0) => { root.picker-select(a0); }
-                        picker-selected: root.picker-selected;
-                        picker-show-uniques() => { root.picker-show-uniques(); }
-                        picker-sides: root.picker-sides;
-                        picker-slot: root.picker-slot;
-                        picker-slot-active: root.picker-slot-active;
-                        picker-slot-changed(a0) => { root.picker-slot-changed(a0); }
-                        picker-slot-text: root.picker-slot-text;
-                        picker-slots: root.picker-slots;
-                        picker-source: root.picker-source;
-                        picker-source-active: root.picker-source-active;
-                        picker-source-changed(a0) => { root.picker-source-changed(a0); }
-                        picker-source-text: root.picker-source-text;
-                        picker-sources: root.picker-sources;
-                        picker-status: root.picker-status;
-                        picker-subtitle: root.picker-subtitle;
-                        picker-tag-toggled(a0, a1) => { root.picker-tag-toggled(a0, a1); }
-                        picker-tags: root.picker-tags;
-                        picker-tags-active: root.picker-tags-active;
-                        picker-tags-on: root.picker-tags-on;
-                        picker-tags-text: root.picker-tags-text;
-                        picker-title: root.picker-title;
-                        use-picker() => { root.use-picker(); }
-                        done => {
-                            add-popup.close();
-                        }
+                        root.open-picker(-1, add-button.absolute-position.x, add-button.absolute-position.y + add-button.height + Tokens.space-4);
                     }
                 }
             }
@@ -707,28 +548,15 @@ export component ForgeLists inherits ScrollView {
                     spacing: Tokens.row-gap.bottom;
 
                     for line[index] in root.unique-modifiers: ModifierRowItem {
+                        cell-input: root.cell-input;
+                        focus-target: root.focus-target;
+                        cell-acted(a0, a1, a2) => { root.cell-acted(a0, a1, a2); }
                         begin-input(a0) => { return root.begin-input(a0); }
-                        cancel-input(a0) => { root.cancel-input(a0); }
-                        commit-input(a0) => { return root.commit-input(a0); }
-                        end-scrub(a0, a1) => { root.end-scrub(a0, a1); }
-                        finish-input(a0) => { root.finish-input(a0); }
-                        focus-cell: root.focus-cell;
-                        focus-part: root.focus-part;
-                        focus-serial: root.focus-serial;
                         input-edited(a0, a1) => { root.input-edited(a0, a1); }
-                        input-error: root.input-error;
-                        input-label: root.input-label;
-                        input-range: root.input-range;
-                        input-text <=> root.input-text;
+                        commit-input(a0) => { return root.commit-input(a0); }
                         move-implicit(a0, a1, a2) => { root.move-implicit(a0, a1, a2); }
                         move-unique(a0, a1, a2) => { root.move-unique(a0, a1, a2); }
-                        press(a0) => { root.press(a0); }
-                        scrub(a0, a1) => { root.scrub(a0, a1); }
                         select-unique(a0) => { root.select-unique(a0); }
-                        step(a0, a1) => { root.step(a0, a1); }
-                        step-to-end(a0, a1) => { root.step-to-end(a0, a1); }
-                        typing: root.typing;
-                        typing-cell: root.typing-cell;
                         line: line;
                         index: index;
                         kind: CellKind.unique;

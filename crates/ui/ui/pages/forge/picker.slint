@@ -14,7 +14,7 @@ import { FocusRing, TipBubble, TipTrigger } from "../../widgets/focus.slint";
 import { FlyoutSurface } from "../../widgets/menu.slint";
 import { ChoiceBox } from "../../widgets/choice-box.slint";
 import { MultiChoiceBox } from "../../widgets/multi-choice-box.slint";
-import { PickerRowView } from "state.slint";
+import { PickerFilter, PickerView } from "state.slint";
 import { ForgeText } from "../../strings/forge.slint";
 import { CheckBox } from "../../widgets/check-box.slint";
 import { HelpButton } from "../../widgets/help-button.slint";
@@ -32,58 +32,12 @@ export global PickerMetrics {
 
 export component AffixPickerPanel inherits FlyoutSurface {
     // From the page: what this shows and what it asks of it.
-    in property <bool> can-use-picker;
-    callback cancel-picker();
-    in property <string> picker-action;
-    in property <bool> picker-allow;
-    callback picker-allow-changed(bool);
-    in property <bool> picker-allow-enabled;
-    in property <[string]> picker-categories;
-    in property <int> picker-category;
-    callback picker-category-changed(int);
-    callback picker-chip-removed(int);
-    in property <[string]> picker-chips;
-    in property <int> picker-class;
-    callback picker-class-changed(int);
-    in property <[string]> picker-classes;
-    callback picker-clear-filters();
-    in property <string> picker-count;
-    in property <bool> picker-empty-allow;
-    in property <bool> picker-empty-clear-filters;
-    in property <bool> picker-empty-clear-search;
-    in property <string> picker-empty-reason;
-    in property <int> picker-filter;
-    callback picker-filter-changed(int);
-    in property <string> picker-hidden;
-    in property <int> picker-level;
-    callback picker-level-changed(int);
-    in property <[string]> picker-levels;
-    in property <[PickerRowView]> picker-rows;
-    in property <string> picker-search;
+    in property <PickerView> picker;
     callback picker-search-edited(string);
+    callback picker-filter-changed(PickerFilter, int, bool);
     callback picker-select(int);
-    in property <int> picker-selected;
-    callback picker-show-uniques();
-    in property <[string]> picker-sides;
-    in property <int> picker-slot;
-    in property <bool> picker-slot-active;
-    callback picker-slot-changed(int);
-    in property <string> picker-slot-text;
-    in property <[string]> picker-slots;
-    in property <int> picker-source;
-    in property <bool> picker-source-active;
-    callback picker-source-changed(int);
-    in property <string> picker-source-text;
-    in property <[string]> picker-sources;
-    in property <string> picker-status;
-    in property <string> picker-subtitle;
-    callback picker-tag-toggled(int, bool);
-    in property <[string]> picker-tags;
-    in property <bool> picker-tags-active;
-    in property <[bool]> picker-tags-on;
-    in property <string> picker-tags-text;
-    in property <string> picker-title;
     callback use-picker();
+    callback cancel-picker();
 
     // The picker closed itself (used, cancelled or dismissed with Escape).
     callback done();
@@ -106,7 +60,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
     }
 
     function use-entry() {
-        if (root.can-use-picker) {
+        if (root.picker.can-use) {
             root.close-tip();
             root.use-picker();
             root.done();
@@ -118,8 +72,8 @@ export component AffixPickerPanel inherits FlyoutSurface {
 
     // The entry last brought into view exactly, by the entry itself.
     property <int> revealed: -1;
-    property <int> selected: root.picker-selected;
-    property <int> row-count: root.picker-rows.length;
+    property <int> selected: root.picker.selected;
+    property <int> row-count: root.picker.rows.length;
 
     // Keeps the selected entry in view as the keyboard moves it: exactly, from an entry the list has built.
     function reveal-entry(index: int, top: length, height: length) {
@@ -177,14 +131,14 @@ export component AffixPickerPanel inherits FlyoutSurface {
                 spacing: Tokens.space-2;
 
                 Text {
-                    text: root.picker-title;
+                    text: root.picker.title;
                     font-size: Tokens.font-size-section;
                     font-weight: Tokens.emphasis-weight;
                     color: Tokens.text-brush;
                 }
 
                 Text {
-                    text: root.picker-subtitle;
+                    text: root.picker.subtitle;
                     font-size: Tokens.font-size-caption;
                     color: Tokens.text-muted-brush;
                     wrap: word-wrap;
@@ -195,7 +149,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
                 spacing: Tokens.space-8;
 
                 search := SearchBox {
-                    text: root.picker-search;
+                    text: root.picker.search;
                     placeholder: ForgeText.affix-search-placeholder;
                     label: ForgeText.affix-search;
                     horizontal-stretch: 1;
@@ -207,8 +161,8 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     }
                     // Down leaves the search for the list; Enter in the search does nothing, so typing never picks.
                     down => {
-                        if (root.picker-rows.length > 0) {
-                            if (root.picker-selected < 0) {
+                        if (root.picker.rows.length > 0) {
+                            if (root.picker.selected < 0) {
                                 root.picker-select(0);
                             }
                             KeyboardFocus.visible = true;
@@ -249,12 +203,12 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     y: parent.at-y(0);
                     width: parent.cell;
                     label: ForgeText.slot;
-                    choices: root.picker-slots;
-                    index: root.picker-slot;
-                    fallback-text: root.picker-slot-text;
-                    active: root.picker-slot-active;
+                    choices: root.picker.slots;
+                    index: root.picker.slot;
+                    fallback-text: root.picker.slot-text;
+                    active: root.picker.slot-active;
                     chosen(index) => {
-                        root.picker-slot-changed(index);
+                        root.picker-filter-changed(PickerFilter.slot, index, false);
                     }
                 }
 
@@ -263,11 +217,11 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     y: parent.at-y(1);
                     width: parent.cell;
                     label: ForgeText.level;
-                    choices: root.picker-levels;
-                    index: root.picker-level;
-                    active: root.picker-level > 0;
+                    choices: root.picker.levels;
+                    index: root.picker.level;
+                    active: root.picker.level > 0;
                     chosen(index) => {
-                        root.picker-level-changed(index);
+                        root.picker-filter-changed(PickerFilter.level, index, false);
                     }
                 }
 
@@ -276,12 +230,12 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     y: parent.at-y(2);
                     width: parent.cell;
                     label: ForgeText.source;
-                    choices: root.picker-sources;
-                    index: root.picker-source;
-                    fallback-text: root.picker-source-text;
-                    active: root.picker-source-active;
+                    choices: root.picker.sources;
+                    index: root.picker.source;
+                    fallback-text: root.picker.source-text;
+                    active: root.picker.source-active;
                     chosen(index) => {
-                        root.picker-source-changed(index);
+                        root.picker-filter-changed(PickerFilter.source, index, false);
                     }
                 }
 
@@ -290,12 +244,12 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     y: parent.at-y(3);
                     width: parent.cell;
                     label: ForgeText.stat-tags;
-                    choices: root.picker-tags;
-                    checked: root.picker-tags-on;
-                    summary: root.picker-tags-text;
-                    active: root.picker-tags-active;
+                    choices: root.picker.tags;
+                    checked: root.picker.tags-on;
+                    summary: root.picker.tags-text;
+                    active: root.picker.tags-active;
                     toggled(index, on) => {
-                        root.picker-tag-toggled(index, on);
+                        root.picker-filter-changed(PickerFilter.tag, index, on);
                     }
                 }
 
@@ -304,11 +258,11 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     y: parent.at-y(4);
                     width: parent.cell;
                     label: ForgeText.side;
-                    choices: root.picker-sides;
-                    index: root.picker-filter;
-                    active: root.picker-filter > 0;
+                    choices: root.picker.sides;
+                    index: root.picker.side;
+                    active: root.picker.side > 0;
                     chosen(index) => {
-                        root.picker-filter-changed(index);
+                        root.picker-filter-changed(PickerFilter.side, index, false);
                     }
                 }
 
@@ -317,11 +271,11 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     y: parent.at-y(5);
                     width: parent.cell;
                     label: ForgeText.affix-kind;
-                    choices: root.picker-categories;
-                    index: root.picker-category;
-                    active: root.picker-category > 0;
+                    choices: root.picker.categories;
+                    index: root.picker.category;
+                    active: root.picker.category > 0;
                     chosen(index) => {
-                        root.picker-category-changed(index);
+                        root.picker-filter-changed(PickerFilter.category, index, false);
                     }
                 }
 
@@ -330,28 +284,28 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     y: parent.at-y(6);
                     width: parent.cell;
                     label: ForgeText.class;
-                    choices: root.picker-classes;
-                    index: root.picker-class;
-                    active: root.picker-class > 0;
+                    choices: root.picker.classes;
+                    index: root.picker.class;
+                    active: root.picker.class > 0;
                     chosen(index) => {
-                        root.picker-class-changed(index);
+                        root.picker-filter-changed(PickerFilter.class, index, false);
                     }
                 }
             }
 
             // The filters in force: each chip clears its own. One line; a row out of room shrinks them, their words in the tip.
-            if root.picker-chips.length > 0: HorizontalLayout {
+            if root.picker.chips.length > 0: HorizontalLayout {
                 spacing: Tokens.space-4;
                 alignment: start;
 
-                for chip[index] in root.picker-chips: FilterChip {
+                for chip[index] in root.picker.chips: FilterChip {
                     text: chip;
                     tip: ForgeText.remove-filter(chip);
                     removable: true;
                     in-flyout: true;
                     clicked => {
-                        root.picker-chip-removed(index);
-                        if (index >= root.picker-chips.length) {
+                        root.picker-filter-changed(PickerFilter.chip, index, false);
+                        if (index >= root.picker.chips.length) {
                             search.focus-input();
                         }
                     }
@@ -364,19 +318,19 @@ export component AffixPickerPanel inherits FlyoutSurface {
                 height: Tokens.pill-chip-height;
 
                 Text {
-                    text: root.picker-count;
+                    text: root.picker.count;
                     font-size: Tokens.font-size-caption;
                     color: Tokens.text-secondary-brush;
                     vertical-alignment: center;
                     horizontal-stretch: 0;
                 }
 
-                if root.picker-hidden != "": FilterChip {
-                    text: root.picker-hidden;
+                if root.picker.hidden != "": FilterChip {
+                    text: root.picker.hidden;
                     tip: ForgeText.show-uniques-tip;
                     in-flyout: true;
                     clicked => {
-                        root.picker-show-uniques();
+                        root.picker-filter-changed(PickerFilter.uniques, 0, false);
                     }
                 }
 
@@ -384,11 +338,11 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     horizontal-stretch: 1;
                 }
 
-                if root.picker-chips.length > 0 && root.picker-rows.length > 0: FilterChip {
+                if root.picker.chips.length > 0 && root.picker.rows.length > 0: FilterChip {
                     text: ForgeText.clear-filters;
                     in-flyout: true;
                     clicked => {
-                        root.picker-clear-filters();
+                        root.picker-filter-changed(PickerFilter.clear, 0, false);
                         search.focus-input();
                     }
                 }
@@ -408,14 +362,14 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     }
                     key-pressed(event) => {
                         if (event.text == Key.DownArrow) {
-                            root.picker-select(Math.min(root.picker-rows.length - 1, root.picker-selected + 1));
+                            root.picker-select(Math.min(root.picker.rows.length - 1, root.picker.selected + 1));
                             return accept;
                         }
                         if (event.text == Key.UpArrow) {
-                            if (root.picker-selected <= 0) {
+                            if (root.picker.selected <= 0) {
                                 search.focus-input();
                             } else {
-                                root.picker-select(root.picker-selected - 1);
+                                root.picker-select(root.picker.selected - 1);
                             }
                             return accept;
                         }
@@ -432,8 +386,8 @@ export component AffixPickerPanel inherits FlyoutSurface {
                         // The focus scope around it is the named list.
                         accessible-role: none;
 
-                        for entry[index] in root.picker-rows: Rectangle {
-                            property <bool> chosen: root.picker-selected == index;
+                        for entry[index] in root.picker.rows: Rectangle {
+                            property <bool> chosen: root.picker.selected == index;
                             // An entry built or chosen while selected scrolls itself into view exactly, after the list's
                             // estimate brought it near (`reveal-selected`).
                             init => {
@@ -446,7 +400,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
                                     root.reveal-entry(index, self.y, Tokens.affix-picker-row-height);
                                 }
                             }
-                            height: Tokens.affix-picker-row-height + (index < root.picker-rows.length - 1 ? Tokens.space-2 : 0px);
+                            height: Tokens.affix-picker-row-height + (index < root.picker.rows.length - 1 ? Tokens.space-2 : 0px);
 
                             Rectangle {
                                 y: 0;
@@ -521,12 +475,12 @@ export component AffixPickerPanel inherits FlyoutSurface {
                                     width: parent.width * 0.6;
                                     text: entry.detail;
                                     hovered: !PickerMetrics.narrow && entry-touch.has-hover;
-                                    focused: list-focus.has-focus && root.picker-selected == index;
+                                    focused: list-focus.has-focus && root.picker.selected == index;
                                     in-flyout: true;
                                 }
 
                                 FocusRing {
-                                    focused: list-focus.has-focus && root.picker-selected == index;
+                                    focused: list-focus.has-focus && root.picker.selected == index;
                                 }
                             }
                         }
@@ -534,7 +488,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
                 }
 
                 // Why the list is empty, and the ways out it has.
-                if root.picker-rows.length == 0: VerticalLayout {
+                if root.picker.rows.length == 0: VerticalLayout {
                     x: Tokens.empty-list-margin.left;
                     y: Tokens.empty-list-margin.top;
                     width: parent.width - Tokens.empty-list-margin.left - Tokens.empty-list-margin.right;
@@ -542,7 +496,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     spacing: Tokens.space-8;
 
                     Text {
-                        text: root.picker-empty-reason;
+                        text: root.picker.empty-reason;
                         color: Tokens.text-secondary-brush;
                         wrap: word-wrap;
                     }
@@ -551,7 +505,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
                         alignment: start;
                         spacing: Tokens.space-8;
 
-                        if root.picker-empty-clear-search: Button {
+                        if root.picker.empty-clear-search: Button {
                             in-flyout: true;
                             text: ForgeText.clear-search;
                             clicked => {
@@ -559,17 +513,17 @@ export component AffixPickerPanel inherits FlyoutSurface {
                             }
                         }
 
-                        if root.picker-empty-clear-filters: Button {
+                        if root.picker.empty-clear-filters: Button {
                             in-flyout: true;
                             text: ForgeText.clear-filters;
                             clicked => {
-                                root.picker-clear-filters();
+                                root.picker-filter-changed(PickerFilter.clear, 0, false);
                                 search.focus-input();
                             }
                         }
                     }
 
-                    if root.picker-empty-allow: HorizontalLayout {
+                    if root.picker.empty-allow: HorizontalLayout {
                         alignment: start;
 
                         Button {
@@ -577,7 +531,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
                             text: ForgeText.list-incompatible;
                             tip: ForgeText.picker-allow-note;
                             clicked => {
-                                root.picker-allow-changed(true);
+                                root.picker-filter-changed(PickerFilter.allow, 0, true);
                                 search.focus-input();
                             }
                         }
@@ -586,7 +540,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
             }
 
             Text {
-                text: root.picker-status;
+                text: root.picker.status;
                 font-size: Tokens.font-size-caption;
                 color: Tokens.text-secondary-brush;
                 wrap: word-wrap;
@@ -598,10 +552,10 @@ export component AffixPickerPanel inherits FlyoutSurface {
 
                 CheckBox {
                     text: ForgeText.allow-incompatible;
-                    checked: root.picker-allow;
-                    enabled: root.picker-allow-enabled;
+                    checked: root.picker.allow;
+                    enabled: root.picker.allow-enabled;
                     toggled(on) => {
-                        root.picker-allow-changed(on);
+                        root.picker-filter-changed(PickerFilter.allow, 0, on);
                     }
                 }
 
@@ -628,9 +582,9 @@ export component AffixPickerPanel inherits FlyoutSurface {
                 }
 
                 Button {
-                    text: root.picker-action;
+                    text: root.picker.action;
                     kind: ButtonKind.primary;
-                    enabled: root.can-use-picker;
+                    enabled: root.picker.can-use;
                     width: (footer.width - footer.spacing) / 2;
                     clicked => {
                         root.use-entry();

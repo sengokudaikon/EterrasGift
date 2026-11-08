@@ -4,7 +4,7 @@ import { Tokens } from "../../tokens.slint";
 import { KeyboardFocus } from "../../globals.slint";
 import { FocusRing, TipTrigger } from "../../widgets/focus.slint";
 import { MenuMetrics, OptionMenu, PopupMenu } from "../../widgets/menu.slint";
-import { AffixRowView, CellKind, CellRef, ForgeReveal, ModifierRowView, PickerRowView, TierOption } from "state.slint";
+import { AffixRowView, CellAction, CellFocus, CellInput, CellKind, CellRef, ForgeReveal, ModifierRowView, TierOption } from "state.slint";
 import { ValueScrubber } from "scrubber.slint";
 import { ForgeText } from "../../strings/forge.slint";
 
@@ -14,7 +14,6 @@ global Settle {
     out property <easing> curve: cubic-bezier(0.215, 0.61, 0.355, 1);
 }
 import { CellButton, MenuRow } from "cells.slint";
-import { AffixPickerPanel, PickerMetrics } from "picker.slint";
 
 // The tiers as menu rows: "T5", its range in the game's format, "in game" on the tier the game holds.
 export component TierList inherits VerticalLayout {
@@ -122,86 +121,23 @@ export component TierLadder inherits Rectangle {
 // One affix: [value | name over type | range at wide | tier | seal | status]. Touching any cell selects the row.
 export component AffixRowItem inherits Rectangle {
     // From the page: what this shows and what it asks of it.
+    in property <CellInput> cell-input;
+    in property <CellFocus> focus-target;
+    callback cell-acted(CellRef, CellAction, float);
     callback begin-input(CellRef) -> bool;
-    in property <bool> can-change-affix-list;
-    in property <bool> can-use-picker;
-    callback cancel-input(CellRef);
-    callback cancel-picker();
-    callback commit-input(CellRef) -> bool;
-    callback discard-row(int);
-    callback end-scrub(CellRef, bool);
-    callback finish-input(CellRef);
-    in property <CellRef> focus-cell;
-    in property <int> focus-part;
-    in property <int> focus-serial;
     callback input-edited(CellRef, string);
-    in property <string> input-error;
-    in property <string> input-label;
-    in property <string> input-range;
-    in-out property <string> input-text;
+    callback commit-input(CellRef) -> bool;
+    in property <bool> can-change-affix-list;
+    callback discard-row(int);
     callback move-row(int, int, int);
-    callback open-replace(int) -> bool;
     callback pick-seal(int, int);
     callback pick-tier(int, int);
-    in property <string> picker-action;
-    in property <bool> picker-allow;
-    callback picker-allow-changed(bool);
-    in property <bool> picker-allow-enabled;
-    in property <[string]> picker-categories;
-    in property <int> picker-category;
-    callback picker-category-changed(int);
-    callback picker-chip-removed(int);
-    in property <[string]> picker-chips;
-    in property <int> picker-class;
-    callback picker-class-changed(int);
-    in property <[string]> picker-classes;
-    callback picker-clear-filters();
-    in property <string> picker-count;
-    in property <bool> picker-empty-allow;
-    in property <bool> picker-empty-clear-filters;
-    in property <bool> picker-empty-clear-search;
-    in property <string> picker-empty-reason;
-    in property <int> picker-filter;
-    callback picker-filter-changed(int);
-    in property <string> picker-hidden;
-    in property <int> picker-level;
-    callback picker-level-changed(int);
-    in property <[string]> picker-levels;
-    in property <bool> picker-open;
-    in property <[PickerRowView]> picker-rows;
-    in property <string> picker-search;
-    callback picker-search-edited(string);
-    callback picker-select(int);
-    in property <int> picker-selected;
-    callback picker-show-uniques();
-    in property <[string]> picker-sides;
-    in property <int> picker-slot;
-    in property <bool> picker-slot-active;
-    callback picker-slot-changed(int);
-    in property <string> picker-slot-text;
-    in property <[string]> picker-slots;
-    in property <int> picker-source;
-    in property <bool> picker-source-active;
-    callback picker-source-changed(int);
-    in property <string> picker-source-text;
-    in property <[string]> picker-sources;
-    in property <string> picker-status;
-    in property <string> picker-subtitle;
-    callback picker-tag-toggled(int, bool);
-    in property <[string]> picker-tags;
-    in property <bool> picker-tags-active;
-    in property <[bool]> picker-tags-on;
-    in property <string> picker-tags-text;
-    in property <string> picker-title;
-    callback press(CellRef);
     callback remove-affix(int);
-    callback scrub(CellRef, float);
     callback select-affix(int);
-    callback step(CellRef, int);
-    callback step-to-end(CellRef, bool);
-    in property <bool> typing;
-    in property <CellRef> typing-cell;
-    callback use-picker();
+    // The row asks for its replacement picker, to open at (x, y) in window coordinates; `refocus` moves when it closes,
+    // and focus comes back to the name.
+    callback replace(int, length, length);
+    in property <int> refocus;
 
     in property <AffixRowView> affix;
     in property <int> index;
@@ -209,20 +145,16 @@ export component AffixRowItem inherits Rectangle {
     in property <bool> wide;
     in property <length> range-width;
 
-    property <int> serial: root.focus-serial;
+    property <int> serial: root.focus-target.serial;
     property <length> content-height: Math.max(Tokens.row-min-height, name-cell.height);
-    // The replace picker's flyout: closing it any way but Use or Cancel (a click outside) cancels the replacement, and Rust
-    // dropping the picker closes it.
-    property <bool> picker-shown: picker-popup.is-open;
-    property <bool> picker-live: root.picker-open;
 
     changed serial => {
-        if (root.focus-cell.kind == CellKind.affix && root.focus-cell.row == root.index) {
-            if (root.focus-part == 1) {
+        if (root.focus-target.cell.kind == CellKind.affix && root.focus-target.cell.row == root.index) {
+            if (root.focus-target.part == 1) {
                 name-cell.focus-cell();
-            } else if (root.focus-part == 2) {
+            } else if (root.focus-target.part == 2) {
                 tier-cell.focus-cell();
-            } else if (root.focus-part == 3) {
+            } else if (root.focus-target.part == 3) {
                 seal-cell.focus-cell();
             }
             ForgeReveal.show(root.absolute-position.y, root.height);
@@ -236,15 +168,9 @@ export component AffixRowItem inherits Rectangle {
         }
     }
 
-    changed picker-shown => {
-        if (!root.picker-shown && root.picker-open) {
-            root.cancel-picker();
-        }
-    }
-
-    changed picker-live => {
-        if (!root.picker-live) {
-            picker-popup.close();
+    changed refocus => {
+        if (root.refocus > 0) {
+            name-cell.focus-cell();
         }
     }
 
@@ -258,10 +184,9 @@ export component AffixRowItem inherits Rectangle {
         seal-popup.show();
     }
 
+    // Under the name, as a menu opens under its cell.
     function open-picker() {
-        if (root.open-replace(root.index)) {
-            picker-popup.show();
-        }
+        root.replace(root.index, name-cell.absolute-position.x, name-cell.absolute-position.y + name-cell.height + Tokens.space-4);
     }
 
     function show-menu(at-x: length) {
@@ -337,25 +262,12 @@ export component AffixRowItem inherits Rectangle {
                     width: Tokens.affix-value-column-width;
 
                     ValueScrubber {
+                        cell-input: root.cell-input;
+                        focus-target: root.focus-target;
+                        cell-acted(a0, a1, a2) => { root.cell-acted(a0, a1, a2); }
                         begin-input(a0) => { return root.begin-input(a0); }
-                        cancel-input(a0) => { root.cancel-input(a0); }
-                        commit-input(a0) => { return root.commit-input(a0); }
-                        end-scrub(a0, a1) => { root.end-scrub(a0, a1); }
-                        finish-input(a0) => { root.finish-input(a0); }
-                        focus-cell: root.focus-cell;
-                        focus-part: root.focus-part;
-                        focus-serial: root.focus-serial;
                         input-edited(a0, a1) => { root.input-edited(a0, a1); }
-                        input-error: root.input-error;
-                        input-label: root.input-label;
-                        input-range: root.input-range;
-                        input-text <=> root.input-text;
-                        press(a0) => { root.press(a0); }
-                        scrub(a0, a1) => { root.scrub(a0, a1); }
-                        step(a0, a1) => { root.step(a0, a1); }
-                        step-to-end(a0, a1) => { root.step-to-end(a0, a1); }
-                        typing: root.typing;
-                        typing-cell: root.typing-cell;
+                        commit-input(a0) => { return root.commit-input(a0); }
                         y: (parent.height - self.height) / 2;
                         width: parent.width;
                         cell: root.affix.value;
@@ -501,74 +413,6 @@ export component AffixRowItem inherits Rectangle {
                                     color: Tokens.warning-brush;
                                     overflow: elide;
                                 }
-                            }
-                        }
-                    }
-
-
-                    picker-popup := PopupWindow {
-                        x: Tokens.cell-outdent.left;
-                        y: (parent.height + name-cell.height) / 2 + Tokens.space-4;
-                        width: PickerMetrics.width;
-                        height: PickerMetrics.height;
-                        close-policy: PopupClosePolicy.close-on-click-outside;
-
-                        AffixPickerPanel {
-                            can-use-picker: root.can-use-picker;
-                            cancel-picker() => { root.cancel-picker(); }
-                            picker-action: root.picker-action;
-                            picker-allow: root.picker-allow;
-                            picker-allow-changed(a0) => { root.picker-allow-changed(a0); }
-                            picker-allow-enabled: root.picker-allow-enabled;
-                            picker-categories: root.picker-categories;
-                            picker-category: root.picker-category;
-                            picker-category-changed(a0) => { root.picker-category-changed(a0); }
-                            picker-chip-removed(a0) => { root.picker-chip-removed(a0); }
-                            picker-chips: root.picker-chips;
-                            picker-class: root.picker-class;
-                            picker-class-changed(a0) => { root.picker-class-changed(a0); }
-                            picker-classes: root.picker-classes;
-                            picker-clear-filters() => { root.picker-clear-filters(); }
-                            picker-count: root.picker-count;
-                            picker-empty-allow: root.picker-empty-allow;
-                            picker-empty-clear-filters: root.picker-empty-clear-filters;
-                            picker-empty-clear-search: root.picker-empty-clear-search;
-                            picker-empty-reason: root.picker-empty-reason;
-                            picker-filter: root.picker-filter;
-                            picker-filter-changed(a0) => { root.picker-filter-changed(a0); }
-                            picker-hidden: root.picker-hidden;
-                            picker-level: root.picker-level;
-                            picker-level-changed(a0) => { root.picker-level-changed(a0); }
-                            picker-levels: root.picker-levels;
-                            picker-rows: root.picker-rows;
-                            picker-search: root.picker-search;
-                            picker-search-edited(a0) => { root.picker-search-edited(a0); }
-                            picker-select(a0) => { root.picker-select(a0); }
-                            picker-selected: root.picker-selected;
-                            picker-show-uniques() => { root.picker-show-uniques(); }
-                            picker-sides: root.picker-sides;
-                            picker-slot: root.picker-slot;
-                            picker-slot-active: root.picker-slot-active;
-                            picker-slot-changed(a0) => { root.picker-slot-changed(a0); }
-                            picker-slot-text: root.picker-slot-text;
-                            picker-slots: root.picker-slots;
-                            picker-source: root.picker-source;
-                            picker-source-active: root.picker-source-active;
-                            picker-source-changed(a0) => { root.picker-source-changed(a0); }
-                            picker-source-text: root.picker-source-text;
-                            picker-sources: root.picker-sources;
-                            picker-status: root.picker-status;
-                            picker-subtitle: root.picker-subtitle;
-                            picker-tag-toggled(a0, a1) => { root.picker-tag-toggled(a0, a1); }
-                            picker-tags: root.picker-tags;
-                            picker-tags-active: root.picker-tags-active;
-                            picker-tags-on: root.picker-tags-on;
-                            picker-tags-text: root.picker-tags-text;
-                            picker-title: root.picker-title;
-                            use-picker() => { root.use-picker(); }
-                            done => {
-                                picker-popup.close();
-                                name-cell.focus-cell();
                             }
                         }
                     }
@@ -765,28 +609,15 @@ export component AffixRowItem inherits Rectangle {
 // One implicit or unique modifier on the table's columns: its rolls scrub in the value column, the game's line beside them.
 export component ModifierRowItem inherits Rectangle {
     // From the page: what this shows and what it asks of it.
+    in property <CellInput> cell-input;
+    in property <CellFocus> focus-target;
+    callback cell-acted(CellRef, CellAction, float);
     callback begin-input(CellRef) -> bool;
-    callback cancel-input(CellRef);
-    callback commit-input(CellRef) -> bool;
-    callback end-scrub(CellRef, bool);
-    callback finish-input(CellRef);
-    in property <CellRef> focus-cell;
-    in property <int> focus-part;
-    in property <int> focus-serial;
     callback input-edited(CellRef, string);
-    in property <string> input-error;
-    in property <string> input-label;
-    in property <string> input-range;
-    in-out property <string> input-text;
+    callback commit-input(CellRef) -> bool;
     callback move-implicit(int, int, int);
     callback move-unique(int, int, int);
-    callback press(CellRef);
-    callback scrub(CellRef, float);
     callback select-unique(int);
-    callback step(CellRef, int);
-    callback step-to-end(CellRef, bool);
-    in property <bool> typing;
-    in property <CellRef> typing-cell;
 
     in property <ModifierRowView> line;
     in property <int> index;
@@ -844,25 +675,12 @@ export component ModifierRowItem inherits Rectangle {
                 spacing: Tokens.space-2;
 
                 for cell[roll] in root.line.rolls: ValueScrubber {
+                    cell-input: root.cell-input;
+                    focus-target: root.focus-target;
+                    cell-acted(a0, a1, a2) => { root.cell-acted(a0, a1, a2); }
                     begin-input(a0) => { return root.begin-input(a0); }
-                    cancel-input(a0) => { root.cancel-input(a0); }
-                    commit-input(a0) => { return root.commit-input(a0); }
-                    end-scrub(a0, a1) => { root.end-scrub(a0, a1); }
-                    finish-input(a0) => { root.finish-input(a0); }
-                    focus-cell: root.focus-cell;
-                    focus-part: root.focus-part;
-                    focus-serial: root.focus-serial;
                     input-edited(a0, a1) => { root.input-edited(a0, a1); }
-                    input-error: root.input-error;
-                    input-label: root.input-label;
-                    input-range: root.input-range;
-                    input-text <=> root.input-text;
-                    press(a0) => { root.press(a0); }
-                    scrub(a0, a1) => { root.scrub(a0, a1); }
-                    step(a0, a1) => { root.step(a0, a1); }
-                    step-to-end(a0, a1) => { root.step-to-end(a0, a1); }
-                    typing: root.typing;
-                    typing-cell: root.typing-cell;
+                    commit-input(a0) => { return root.commit-input(a0); }
                     cell: cell;
                     on-unique: root.on-unique;
                     vertical(delta) => {

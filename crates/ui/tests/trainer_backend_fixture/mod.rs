@@ -13,6 +13,7 @@ use eg_trainer::{
     session::Cleanup,
     testing::{self, Connects, Games, Log, Unreached},
 };
+use eg_ui::{CellAction, PickerFilter, RowAction, RowActionKind};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 mod world;
@@ -711,16 +712,16 @@ pub(super) fn capture(session: &Session) {
     wait(|| ui.global::<eg_ui::ForgeState>().get_item_name() == "Replaced item");
     // Open the actual pop-up, then submit through its keyboard action.
     session.click(280.0, 258.0);
-    assert!(forge.get_picker_open());
+    assert!(forge.get_picker().open);
     forge.invoke_picker_search_edited("Class restricted".into());
-    assert_eq!(forge.get_picker_rows().row_count(), 0, "captured class rules filter the picker");
+    assert_eq!(forge.get_picker().rows.row_count(), 0, "captured class rules filter the picker");
     forge.invoke_picker_search_edited("Vitality".into());
     forge.invoke_picker_select(0);
     session.capture(&ui, "backend-forge-affix-picker");
     // Enter in the search does nothing: Down moves into the list, where Enter uses the entry.
     session.key(Key::DownArrow);
     session.key(Key::Return);
-    assert!(!forge.get_picker_open());
+    assert!(!forge.get_picker().open);
     forge.invoke_pick_tier(0, 2);
     forge.invoke_pick_seal(0, 1);
     assert!(forge.get_can_apply());
@@ -781,7 +782,7 @@ pub(super) fn capture(session: &Session) {
     assert!(forge.get_can_change_affix_list());
     // Click the real Add button and confirm through the visible picker.
     session.click(160.0, 307.0);
-    assert!(forge.get_picker_open());
+    assert!(forge.get_picker().open);
     forge.invoke_picker_search_edited("Vitality".into());
     forge.invoke_picker_select(0);
     session.capture(&ui, "backend-forge-add-picker");
@@ -830,7 +831,7 @@ pub(super) fn capture(session: &Session) {
     // still undo the newly appended slot rather than the original affix.
     command(&handle, Command::SetOverride(true), || true);
     assert!(forge.invoke_open_add());
-    forge.invoke_picker_allow_changed(true);
+    forge.invoke_picker_filter_changed(PickerFilter::Allow, 0, true);
     forge.invoke_picker_search_edited("Health".into());
     forge.invoke_picker_select(0);
     forge.invoke_use_picker();
@@ -915,7 +916,7 @@ pub(super) fn capture(session: &Session) {
         row: 0,
         roll: 0,
     };
-    forge.invoke_step_to_end(affix_cell.clone(), true);
+    forge.invoke_cell_acted(affix_cell.clone(), CellAction::ToEnd, 0.0);
     assert_eq!(forge.get_affixes().row_data(0).unwrap().value.display, "447 Ω");
     assert_eq!(forge.get_drafts().row_count(), 1);
     session.capture(&ui, "backend-forge-roll-draft");
@@ -1034,6 +1035,8 @@ pub(super) fn capture(session: &Session) {
     assert_eq!(forge.get_unique_modifiers().row_data(0).unwrap().text, "Game unique +17 Ω");
     assert_eq!(forge.get_unique_modifiers().row_data(1).unwrap().rolls.row_count(), 2);
     wait(|| forge.get_unique_modifiers().row_data(0).unwrap().rolls.row_data(0).unwrap().editable);
+    // Each roll's table is a read of its own: the captures wait for the two lines' three, or they show whichever came first.
+    wait(|| (0..2).all(|row| forge.get_unique_modifiers().row_data(row).unwrap().rolls.iter().all(|roll| roll.mapped)));
     assert!(!forge.get_can_apply());
     session.capture(&ui, "backend-forge-unique-descriptions");
     session.resize(680, 580);
@@ -1181,9 +1184,20 @@ fn gameplay_hooks(session: &Session, ui: &MainWindow, handle: &BackendHandle, da
             wait(|| state.get_rows().row_data(row).unwrap().can_use);
             if index == 0 {
                 assert!(state.get_rows().row_data(row).unwrap().choice_only);
-                state.invoke_value_chosen(row as i32, 0, if on { 1 } else { 0 });
+                state.invoke_acted(RowAction {
+                    kind: RowActionKind::ValueChosen,
+                    row: row as i32,
+                    item: 0,
+                    number: if on { 1 } else { 0 },
+                    ..Default::default()
+                });
             } else {
-                state.invoke_hook_toggled(row as i32, on);
+                state.invoke_acted(RowAction {
+                    kind: RowActionKind::Toggled,
+                    row: row as i32,
+                    on,
+                    ..Default::default()
+                });
             }
             let id = eg_trainer::features::HookId::parse(id).unwrap();
             wait(|| handle.snapshot().hooks.get(&id) == Some(if on { &backend::HookRun::On } else { &backend::HookRun::Off }));
@@ -1191,7 +1205,13 @@ fn gameplay_hooks(session: &Session, ui: &MainWindow, handle: &BackendHandle, da
             assert_eq!(data.gameplay_hooks[index].load(Ordering::SeqCst), on);
             if on && index == 2 {
                 for percent in [0, 100, 50] {
-                    state.invoke_value_committed(row as i32, 0, percent.to_string().into());
+                    state.invoke_acted(RowAction {
+                        kind: RowActionKind::ValueCommitted,
+                        row: row as i32,
+                        item: 0,
+                        text: percent.to_string().into(),
+                        ..Default::default()
+                    });
                     wait(|| data.damage_percent.load(Ordering::SeqCst) == percent);
                     wait(|| state.get_rows().row_data(row).unwrap().status == "On in the game.");
                     session.capture(ui, &format!("backend-hook-damage-{percent}"));
@@ -1202,7 +1222,13 @@ fn gameplay_hooks(session: &Session, ui: &MainWindow, handle: &BackendHandle, da
             }
             if on && index == 0 {
                 wait(|| state.get_rows().row_data(row).unwrap().status == "Portal selected in the game.");
-                state.invoke_value_chosen(row as i32, 0, 2);
+                state.invoke_acted(RowAction {
+                    kind: RowActionKind::ValueChosen,
+                    row: row as i32,
+                    item: 0,
+                    number: 2,
+                    ..Default::default()
+                });
                 wait(|| data.rift_choice.load(Ordering::SeqCst) == 2);
                 wait(|| state.get_rows().row_data(row).unwrap().status == "Boss selected in the game.");
                 session.scroll(500.0, 400.0, -10_000.0);
@@ -1211,7 +1237,13 @@ fn gameplay_hooks(session: &Session, ui: &MainWindow, handle: &BackendHandle, da
                 session.scroll(500.0, 400.0, -10_000.0);
                 session.capture(ui, "backend-hook-rift-boss-narrow");
                 session.resize(1100, 700);
-                state.invoke_value_chosen(row as i32, 0, 1);
+                state.invoke_acted(RowAction {
+                    kind: RowActionKind::ValueChosen,
+                    row: row as i32,
+                    item: 0,
+                    number: 1,
+                    ..Default::default()
+                });
                 wait(|| data.rift_choice.load(Ordering::SeqCst) == 1);
                 wait(|| state.get_rows().row_data(row).unwrap().status == "Portal selected in the game.");
             }
@@ -1491,7 +1523,12 @@ pub(super) fn capture_profiles(session: &Session) {
     let damage = || state.get_rows().row_data(3).expect("Damage enemies take");
     assert_eq!(damage().title, "Damage enemies take");
     assert!(damage().can_use && !damage().on);
-    state.invoke_hook_toggled(3, true);
+    state.invoke_acted(RowAction {
+        kind: RowActionKind::Toggled,
+        row: 3,
+        on: true,
+        ..Default::default()
+    });
     assert!(damage().on, "the switch shows flipped at once");
     let mira = |snapshot: &backend::BackendSnapshot| snapshot.profiles.profiles()[0].hooks.wanted().map(|id| id.as_str()).collect::<Vec<_>>();
     wait(|| mira(&handle.snapshot()) == ["enemy-damage"] && saves.lock().unwrap().last().is_some_and(|book| *book == *handle.snapshot().profiles));

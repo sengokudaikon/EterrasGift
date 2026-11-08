@@ -4,8 +4,8 @@
 
 use super::picker_rows::{Listed, PickerRows};
 use crate::{
-    AffixRowView, AppliedEntryView, CellKind, CellRef, DraftEntryView, FieldView, ForgeState, ItemRarity, MenuOptionView, MessageTone, ModifierRowView, TemplateRowView,
-    TierOption, ValueCell,
+    AffixRowView, AppliedEntryView, CellKind, CellRef, DraftEntryView, FieldView, ForgeState, ItemRarity, MenuOptionView, MessageTone, ModifierRowView, PickerView,
+    TemplateRowView, TierOption, ValueCell,
 };
 use eg_trainer::screens::forge::editor::{AppliedEntry, Cell, ForgeEditor, MessageKind, Picker, tr};
 use eg_trainer::screens::forge::feature::State;
@@ -100,6 +100,9 @@ struct Models {
     template_rows: Rows<TemplateRowView>,
     template_facts: InnerRows<SharedString>,
     picker_rows: Rc<PickerRows>,
+    picker_sides: Rows<SharedString>,
+    picker_categories: Rows<SharedString>,
+    picker_classes: Rows<SharedString>,
     picker_slots: Rows<SharedString>,
     picker_levels: Rows<SharedString>,
     picker_sources: Rows<SharedString>,
@@ -130,13 +133,12 @@ impl View {
         forge.set_base_options(models.base_options.model());
         forge.set_identity_options(models.identity_options.model());
         forge.set_template_rows(models.template_rows.model());
-        forge.set_picker_rows(ModelRc::from(models.picker_rows.clone()));
-        forge.set_picker_slots(models.picker_slots.model());
-        forge.set_picker_levels(models.picker_levels.model());
-        forge.set_picker_sources(models.picker_sources.model());
-        forge.set_picker_tags(models.picker_tags.model());
-        forge.set_picker_tags_on(models.picker_tags_on.model());
-        forge.set_picker_chips(models.picker_chips.model());
+        // The picker's lists are its own, given again whenever it shows; these three name what never changes.
+        models.picker_sides.sync(picker::PICKER_SIDES.iter().map(|side| SharedString::from(side.get())));
+        models
+            .picker_categories
+            .sync(picker::PICKER_CATEGORIES.iter().map(|(name, _)| SharedString::from(name.get())));
+        models.picker_classes.sync(picker::PICKER_CLASSES.iter().map(|class| SharedString::from(class.get())));
         View {
             models,
             regions: Regions::default(),
@@ -271,24 +273,27 @@ fn show_templates(forge: &ForgeState, state: &State, regions: &mut Regions, mode
 /// The typing popover: what it opened on, and how the typing stands.
 fn show_input(forge: &ForgeState, state: &State, regions: &mut Regions) {
     let editor = state.editor();
+    // The label, text and range are the ones the popover opened with.
+    let mut shown = forge.get_cell_input();
     regions.input.update(state.opened_input().version(), || {
         if let Some(input) = state.opened_input().and_then(|cell| editor.input_of(cell)) {
-            forge.set_input_label(input.label().into());
-            forge.set_input_text(input.input.clone().into());
-            forge.set_input_range(format!("{} – {}", input.minimum_text(), input.maximum_text()).into());
+            shown.label = input.label().into();
+            shown.text = input.input.clone().into();
+            shown.range = format!("{} – {}", input.minimum_text(), input.maximum_text()).into();
         }
     });
-    forge.set_input_error(editor.typing().map(ValueEditor::input_error).unwrap_or_default().into());
+    shown.error = editor.typing().map(ValueEditor::input_error).unwrap_or_default().into();
     let typing = editor.typing_cell();
-    forge.set_typing(typing.is_some());
-    forge.set_typing_cell(typing.map_or(
+    shown.typing = typing.is_some();
+    shown.cell = typing.map_or(
         CellRef {
             kind: CellKind::Affix,
             row: -1,
             roll: -1,
         },
         reference_of,
-    ));
+    );
+    forge.set_cell_input(shown);
 }
 
 fn show_header(forge: &ForgeState, editor: &ForgeEditor, drafted: Option<&ForgeItem>, regions: &mut Regions, models: &mut Models) {
@@ -572,26 +577,17 @@ fn history_rows(history: &Tracked<Vec<AppliedEntry>>) -> Vec<AppliedEntryView> {
         .collect()
 }
 
+/// The picker as one value: Slint passes it on only when something in it changed, and its lists are the same models each
+/// time, so an unchanged list keeps its rows.
 fn show_picker(forge: &ForgeState, editor: &ForgeEditor, drafted: Option<&ForgeItem>, regions: &mut Regions, models: &mut Models) {
     let Some(picker) = editor.picker.as_ref() else {
-        forge.set_picker_open(false);
+        forge.set_picker(PickerView {
+            open: false,
+            ..forge.get_picker()
+        });
         return;
     };
-    forge.set_picker_open(true);
-    forge.set_picker_title(editor.picker_title().into());
-    forge.set_picker_subtitle(editor.picker_subtitle_of(drafted).into());
-    forge.set_picker_search(picker.search.clone().into());
     let filters = &picker.filters;
-    forge.set_picker_filter(match filters.side {
-        KindFilter::All => 0,
-        KindFilter::Prefixes => 1,
-        KindFilter::Suffixes => 2,
-    });
-    forge.set_picker_allow(picker.allow_incompatible);
-    forge.set_picker_category(filters.category as i32);
-    forge.set_picker_class(filters.class as i32);
-    forge.set_picker_allow_enabled(editor.can_mutate());
-    show_picker_choices(forge, editor, picker, models);
     // Choosing an entry shows again with the same list; its rows are rebuilt only when the list changes.
     let listed = editor.picker_indices();
     let base = editor.value_base();
@@ -604,31 +600,51 @@ fn show_picker(forge: &ForgeState, editor: &ForgeEditor, drafted: Option<&ForgeI
             base,
         });
     });
-    forge.set_picker_count(picker::count_text(listed.len()).into());
-    forge.set_picker_hidden(if picker.hidden_uniques > 0 {
-        picker::hidden_text(picker.hidden_uniques).into()
-    } else {
-        SharedString::new()
-    });
     let empty = editor.picker_empty();
-    forge.set_picker_empty_reason(empty.as_ref().map_or_else(SharedString::new, |empty| empty.reason.as_str().into()));
-    forge.set_picker_empty_clear_search(empty.as_ref().is_some_and(|empty| empty.clear_search));
-    forge.set_picker_empty_clear_filters(empty.as_ref().is_some_and(|empty| empty.clear_filters));
-    forge.set_picker_empty_allow(empty.as_ref().is_some_and(|empty| empty.allow));
-    forge.set_picker_selected(
-        picker
+    let mut view = PickerView {
+        open: true,
+        title: editor.picker_title().into(),
+        subtitle: editor.picker_subtitle_of(drafted).into(),
+        search: picker.search.clone().into(),
+        sides: models.picker_sides.model(),
+        side: match filters.side {
+            KindFilter::All => 0,
+            KindFilter::Prefixes => 1,
+            KindFilter::Suffixes => 2,
+        },
+        categories: models.picker_categories.model(),
+        category: filters.category as i32,
+        classes: models.picker_classes.model(),
+        class: filters.class as i32,
+        allow: picker.allow_incompatible,
+        allow_enabled: editor.can_mutate(),
+        count: picker::count_text(listed.len()).into(),
+        hidden: if picker.hidden_uniques > 0 {
+            picker::hidden_text(picker.hidden_uniques).into()
+        } else {
+            SharedString::new()
+        },
+        empty_reason: empty.as_ref().map_or_else(SharedString::new, |empty| empty.reason.as_str().into()),
+        empty_clear_search: empty.as_ref().is_some_and(|empty| empty.clear_search),
+        empty_clear_filters: empty.as_ref().is_some_and(|empty| empty.clear_filters),
+        empty_allow: empty.as_ref().is_some_and(|empty| empty.allow),
+        rows: ModelRc::from(models.picker_rows.clone()),
+        selected: picker
             .selected
             .and_then(|id| editor.picker_list().position(|definition| definition.id == id))
             .map_or(-1, |index| index as i32),
-    );
-    forge.set_picker_status(editor.picker_status().into());
-    forge.set_picker_action(editor.picker_action().into());
-    forge.set_can_use_picker(editor.can_use_picker());
+        status: editor.picker_status().into(),
+        action: editor.picker_action().into(),
+        can_use: editor.can_use_picker(),
+        ..PickerView::default()
+    };
+    show_picker_choices(&mut view, editor, picker, models);
+    forge.set_picker(view);
 }
 
 /// The filter bar's choices and what each holds. The models are updated in place, so a list open over the picker survives a
 /// change.
-fn show_picker_choices(forge: &ForgeState, editor: &ForgeEditor, picker: &Picker, models: &Models) {
+fn show_picker_choices(view: &mut PickerView, editor: &ForgeEditor, picker: &Picker, models: &Models) {
     let filters = &picker.filters;
     let shared = |text: &str| SharedString::from(text);
     let catalog = editor.catalog();
@@ -637,42 +653,46 @@ fn show_picker_choices(forge: &ForgeState, editor: &ForgeEditor, picker: &Picker
     let mut choices = vec![shared(picker::AnySlot.get())];
     choices.extend(slots.iter().map(|(_, name)| shared(name)));
     models.picker_slots.sync(choices);
-    forge.set_picker_slot(
-        filters
-            .slot
-            .map_or(0, |slot| slots.iter().position(|(id, _)| *id == slot).map_or(-1, |index| index as i32 + 1)),
-    );
-    forge.set_picker_slot_text(filters.slot.map_or_else(SharedString::new, |slot| picker::slot_name(catalog, slot).into()));
-    forge.set_picker_slot_active(filters.slot != picker.own_slot());
+    view.slots = models.picker_slots.model();
+    view.slot = filters
+        .slot
+        .map_or(0, |slot| slots.iter().position(|(id, _)| *id == slot).map_or(-1, |index| index as i32 + 1));
+    view.slot_text = filters.slot.map_or_else(SharedString::new, |slot| picker::slot_name(catalog, slot).into());
+    view.slot_active = filters.slot != picker.own_slot();
 
     let levels = picker.level_choices();
     models.picker_levels.sync(levels.iter().map(|(_, text)| shared(text)));
-    forge.set_picker_level(levels.iter().position(|(level, _)| *level == filters.level).map_or(0, |index| index as i32));
+    view.levels = models.picker_levels.model();
+    view.level = levels.iter().position(|(level, _)| *level == filters.level).map_or(0, |index| index as i32);
 
     let mut sources: Vec<SharedString> = picker::source_words().iter().map(|word| shared(word)).collect();
     sources.extend(picker.source_uniques.iter().map(|(_, name)| shared(name)));
     models.picker_sources.sync(sources);
+    view.sources = models.picker_sources.model();
     let source = filters.effective_source();
-    forge.set_picker_source(match source {
+    view.source = match source {
         SourceChoice::Game => 0,
         SourceChoice::Uniques => 1,
         SourceChoice::All => 2,
         SourceChoice::Unique(unique) => picker.source_uniques.iter().position(|(id, _)| *id == unique).map_or(-1, |index| index as i32 + 3),
-    });
-    forge.set_picker_source_text(if let SourceChoice::Unique(unique) = source {
+    };
+    view.source_text = if let SourceChoice::Unique(unique) = source {
         catalog.source_name(unique).into()
     } else {
         SharedString::new()
-    });
-    forge.set_picker_source_active(source != SourceChoice::Game);
+    };
+    view.source_active = source != SourceChoice::Game;
 
     let tags = editor.picker_tags();
     models.picker_tags.sync(tags.iter().map(|tag| shared(picker::STAT_TAGS[*tag].name.get())));
     models.picker_tags_on.sync(tags.iter().map(|tag| filters.tags & (1u64 << tag) != 0));
-    forge.set_picker_tags_text(picker::tags_summary(filters).into());
-    forge.set_picker_tags_active(filters.tags != 0);
+    view.tags = models.picker_tags.model();
+    view.tags_on = models.picker_tags_on.model();
+    view.tags_text = picker::tags_summary(filters).into();
+    view.tags_active = filters.tags != 0;
 
     models.picker_chips.sync(editor.picker_chips().into_iter().map(|(_, text)| SharedString::from(text)));
+    view.chips = models.picker_chips.model();
 }
 
 /// Facts shown side by side, each its own text.

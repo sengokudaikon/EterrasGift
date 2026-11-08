@@ -1,6 +1,7 @@
 //! The trainer pages' scenarios: fake sessions behind the real pages, with no worker.
 
 use super::*;
+use eg_ui::{RowAction, RowActionKind};
 
 pub(super) fn trainer_captures(session: &Session) {
     use eg_trainer::screens::profiles::Profile;
@@ -406,16 +407,38 @@ pub(super) fn trainer_captures(session: &Session) {
     // A connected game: an editor applied and read back.
     let fake = FakeTrainer::holding(&[("points-earned", &[("", 40.0), ("", 30.0)])]);
     let ui = open("character", 0, 1100, 700, Some(fake));
-    state(&ui).invoke_field_committed(5, 0, "48".into());
-    state(&ui).invoke_apply(5);
+    state(&ui).invoke_acted(RowAction {
+        kind: RowActionKind::FieldEdited,
+        row: 5,
+        item: 0,
+        text: "48".into(),
+        ..Default::default()
+    });
+    state(&ui).invoke_acted(RowAction {
+        kind: RowActionKind::Apply,
+        row: 5,
+        ..Default::default()
+    });
     show(&ui);
     sizes(&ui, "character-points", &[(680, 580), (940, 580), (1100, 700), (1440, 900), (1920, 1080)]);
 
     let fake = FakeTrainer::holding(&[("currency", &[("", 1200.0), ("", 3.0), ("", 45.0)])]);
     let ui = open("stash", 0, 1100, 700, Some(fake));
     sizes(&ui, "stash-currency", &small);
-    state(&ui).invoke_field_committed(0, 0, "5,000".into());
-    state(&ui).invoke_field_committed(0, 2, "120".into());
+    state(&ui).invoke_acted(RowAction {
+        kind: RowActionKind::FieldEdited,
+        row: 0,
+        item: 0,
+        text: "5,000".into(),
+        ..Default::default()
+    });
+    state(&ui).invoke_acted(RowAction {
+        kind: RowActionKind::FieldEdited,
+        row: 0,
+        item: 2,
+        text: "120".into(),
+        ..Default::default()
+    });
     show(&ui);
     session.capture(&ui, "stash-currency-draft-1100");
 
@@ -423,11 +446,27 @@ pub(super) fn trainer_captures(session: &Session) {
     let fake = FakeTrainer::holding(&[("keys", keys)]);
     let ui = open("stash", 1, 1100, 700, Some(fake));
     sizes(&ui, "stash-keys", &small);
-    state(&ui).invoke_field_committed(0, 0, "10".into());
-    state(&ui).invoke_field_committed(0, 1, "0".into());
+    state(&ui).invoke_acted(RowAction {
+        kind: RowActionKind::FieldEdited,
+        row: 0,
+        item: 0,
+        text: "10".into(),
+        ..Default::default()
+    });
+    state(&ui).invoke_acted(RowAction {
+        kind: RowActionKind::FieldEdited,
+        row: 0,
+        item: 1,
+        text: "0".into(),
+        ..Default::default()
+    });
     show(&ui);
     session.capture(&ui, "stash-keys-draft-1100");
-    state(&ui).invoke_apply(0);
+    state(&ui).invoke_acted(RowAction {
+        kind: RowActionKind::Apply,
+        row: 0,
+        ..Default::default()
+    });
     show(&ui);
     session.capture(&ui, "stash-keys-applied-1100");
     let fake = FakeTrainer::holding(&[("keys", &[])]);
@@ -474,14 +513,30 @@ pub(super) fn trainer_captures(session: &Session) {
     let fake = FakeTrainer::holding(&[("faction-standing", standing)]);
     let ui = open("factions", 0, 1100, 700, Some(fake));
     sizes(&ui, "factions-standing", &small);
-    state(&ui).invoke_field_committed(0, 9, "6".into());
+    state(&ui).invoke_acted(RowAction {
+        kind: RowActionKind::FieldEdited,
+        row: 0,
+        item: 9,
+        text: "6".into(),
+        ..Default::default()
+    });
     show(&ui);
     session.capture(&ui, "factions-standing-draft-1100");
 
     let fake = FakeTrainer::holding(&[("monolith-run", &[("", 300.0), ("", 10000.0), ("", 1.0)])]);
     let ui = open("monolith", 0, 1100, 700, Some(fake));
-    state(&ui).invoke_field_committed(0, 0, "325".into());
-    state(&ui).invoke_apply(0);
+    state(&ui).invoke_acted(RowAction {
+        kind: RowActionKind::FieldEdited,
+        row: 0,
+        item: 0,
+        text: "325".into(),
+        ..Default::default()
+    });
+    state(&ui).invoke_acted(RowAction {
+        kind: RowActionKind::Apply,
+        row: 0,
+        ..Default::default()
+    });
     show(&ui);
     sizes(&ui, "monolith-run", &small);
 

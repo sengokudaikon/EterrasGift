@@ -4,7 +4,9 @@
 //! row follows.
 
 use crate::shell::Page;
-use crate::{FeatureFieldView, FeatureRowKind, FeatureRowModels, FeatureRowPlace, FeatureRowView, FeatureTone, FeatureValueView, MainWindow, Tokens, TrainerState};
+use crate::{
+    FeatureFieldView, FeatureRowKind, FeatureRowModels, FeatureRowPlace, FeatureRowView, FeatureTone, FeatureValueView, MainWindow, RowAction, RowActionKind, Tokens, TrainerState,
+};
 use eg_trainer::backend::BackendHandle;
 use eg_trainer::screens::pages::Tone;
 use eg_trainer::screens::registry::{Area, Feature};
@@ -216,31 +218,42 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
         on_select_section: |section| Intent::SelectSection(section),
         on_columns_changed: |columns| Intent::ColumnsChanged(columns),
         on_row_measured: |row, height| Intent::RowMeasured(row, height),
-        on_hook_toggled: |row, on| Intent::HookToggled(row, on),
-        on_value_committed: |row, index, text| Intent::ValueCommitted(row, index, text.into()),
-        on_value_stepped: |row, index, direction| Intent::ValueStepped(row, index, direction),
-        on_value_stepped_to_end: |row, index, end| Intent::ValueSteppedToEnd(row, index, end),
-        on_value_scrubbed: |row, index, delta| Intent::ValueScrubbed(row, index, delta),
-        on_value_scrub_ended: |row, index, cancelled| Intent::ValueScrubEnded(row, index, cancelled),
+        on_acted: |action| row_action(action),
     });
     // A binding asks this: while a reducer runs, the text is fine, for now.
     view.on_value_checked({
         let store = store.clone();
         move |row, index, text| store.try_read(|state| state.check(row, index, &text)).unwrap_or_default().into()
     });
-    callbacks!(view, store, {
-        on_value_chosen: |row, index, choice| Intent::ValueChosen(row, index, choice),
-    });
-    callbacks!(view, store, {
-        on_field_edited: |row, index, text| Intent::FieldEdited(row, index, text.into()),
-        on_field_committed: |row, index, text| Intent::FieldEdited(row, index, text.into()),
-    });
-    callbacks!(view, store, {
-        on_field_stepped: |row, index, direction| Intent::FieldStepped(row, index, direction),
-        on_read: |row| Intent::Read(row),
-        on_apply: |row| Intent::Apply(row),
-        on_discard: |row| Intent::Discard(row),
-    });
+}
+
+/// What a row's action asks of the trainer.
+fn row_action(action: RowAction) -> Intent {
+    let RowAction {
+        kind,
+        row,
+        item,
+        number,
+        share,
+        on,
+        text,
+    } = action;
+    match kind {
+        RowActionKind::Toggled => Intent::HookToggled(row, on),
+        RowActionKind::ValueCommitted => Intent::ValueCommitted(row, item, text.into()),
+        RowActionKind::ValueStepped => Intent::ValueStepped(row, item, number),
+        RowActionKind::ValueScrubbed => Intent::ValueScrubbed(row, item, share),
+        RowActionKind::ValueScrubEnded => Intent::ValueScrubEnded(row, item, false),
+        RowActionKind::ValueScrubCancelled => Intent::ValueScrubEnded(row, item, true),
+        RowActionKind::ValueToStart => Intent::ValueSteppedToEnd(row, item, false),
+        RowActionKind::ValueToEnd => Intent::ValueSteppedToEnd(row, item, true),
+        RowActionKind::ValueChosen => Intent::ValueChosen(row, item, number),
+        RowActionKind::FieldEdited => Intent::FieldEdited(row, item, text.into()),
+        RowActionKind::FieldStepped => Intent::FieldStepped(row, item, number),
+        RowActionKind::Read => Intent::Read(row),
+        RowActionKind::Apply => Intent::Apply(row),
+        RowActionKind::Discard => Intent::Discard(row),
+    }
 }
 
 impl WindowHost<TrainerPages> for Window {

@@ -1,13 +1,13 @@
 //! What the view's callbacks mean as intents, and the names of what never changes.
 
 use super::show::cell_of;
-use crate::ForgeState;
+use crate::{CellAction, ForgeState, PickerFilter};
+use eg_trainer::screens::forge::editor::Cell;
 use eg_trainer::screens::forge::feature::{Forge, Intent, State};
 use eg_trainer::screens::forge::item::Seal;
-use eg_trainer::screens::forge::picker::{self, KindFilter};
-use slint::{Model, ModelRc, SharedString, VecModel};
+use eg_trainer::screens::forge::picker::KindFilter;
+use slint::Model;
 use spiderland::{Store, callbacks};
-use std::rc::Rc;
 
 fn index(value: i32) -> usize {
     value.max(0) as usize
@@ -28,14 +28,8 @@ pub(super) fn connect(forge: &ForgeState, store: &Store<Forge>) {
     callbacks!(forge, store, {
         on_select_affix: |row| Intent::SelectAffix(usize::try_from(row).ok()),
         on_select_unique: |row| Intent::SelectUnique(usize::try_from(row).ok()),
-        on_press: |cell| Intent::Press(cell_of(&cell)),
-        on_scrub: |cell, fraction| Intent::Scrub(cell_of(&cell), f64::from(fraction)),
-        on_end_scrub: |cell, cancelled| Intent::EndScrub(cell_of(&cell), cancelled),
-        on_step: |cell, steps| Intent::Step(cell_of(&cell), steps),
-        on_step_to_end: |cell, maximum| Intent::StepToEnd(cell_of(&cell), maximum),
+        on_cell_acted: |cell, action, amount| cell_action(cell_of(&cell), action, amount),
         on_input_edited: |cell, text| Intent::InputEdited(cell_of(&cell), text.into()),
-        on_cancel_input: |cell| Intent::CancelInput(cell_of(&cell)),
-        on_finish_input: |cell| Intent::FinishInput(cell_of(&cell)),
         on_pick_tier: |row, tier| Intent::PickTier(index(row), (tier + 1).clamp(1, 8) as u8),
         on_pick_seal: |row, seal| Intent::PickSeal(index(row), Seal::ALL[seal.clamp(0, 3) as usize]),
         on_toggle_flag: |row, on| Intent::ToggleFlag(index(row), on),
@@ -45,21 +39,7 @@ pub(super) fn connect(forge: &ForgeState, store: &Store<Forge>) {
         on_identity_search_edited: |text| Intent::IdentitySearch(text.into()),
         on_base_allow: |allow| Intent::BaseAllow(allow),
         on_picker_search_edited: |text| Intent::PickerSearch(text.into()),
-        on_picker_filter_changed: |filter| Intent::PickerFilter(match filter {
-        1 => KindFilter::Prefixes,
-        2 => KindFilter::Suffixes,
-        _ => KindFilter::All,
-    }),
-        on_picker_allow_changed: |allow| Intent::PickerAllow(allow),
-        on_picker_category_changed: |choice| Intent::PickerCategory(index(choice)),
-        on_picker_class_changed: |choice| Intent::PickerClass(index(choice)),
-        on_picker_slot_changed: |choice| Intent::PickerSlot(index(choice)),
-        on_picker_level_changed: |choice| Intent::PickerLevel(index(choice)),
-        on_picker_source_changed: |choice| Intent::PickerSource(index(choice)),
-        on_picker_tag_toggled: |choice, on| Intent::PickerTag(index(choice), on),
-        on_picker_chip_removed: |chip| Intent::PickerRemoveChip(index(chip)),
-        on_picker_clear_filters: || Intent::PickerClearFilters,
-        on_picker_show_uniques: || Intent::PickerShowUniques,
+        on_picker_filter_changed: |filter, choice, on| picker_filter(filter, choice, on),
         on_picker_select: |entry| Intent::PickerSelect(index(entry)),
         on_use_picker: || Intent::UsePicker,
         on_cancel_picker: || Intent::CancelPicker,
@@ -116,9 +96,40 @@ pub(super) fn connect(forge: &ForgeState, store: &Store<Forge>) {
         }
         from
     });
+}
 
-    let names = |names: &mut dyn Iterator<Item = &str>| ModelRc::from(Rc::new(VecModel::from(names.map(SharedString::from).collect::<Vec<_>>())));
-    forge.set_picker_sides(names(&mut picker::PICKER_SIDES.iter().map(|side| side.get())));
-    forge.set_picker_categories(names(&mut picker::PICKER_CATEGORIES.iter().map(|(name, _)| name.get())));
-    forge.set_picker_classes(names(&mut picker::PICKER_CLASSES.iter().map(|class| class.get())));
+/// What a value cell's gesture asks: `amount` is a drag's share of the cell's span, or a number of steps.
+fn cell_action(cell: Cell, action: CellAction, amount: f32) -> Intent {
+    match action {
+        CellAction::Press => Intent::Press(cell),
+        CellAction::Scrub => Intent::Scrub(cell, f64::from(amount)),
+        CellAction::EndScrub => Intent::EndScrub(cell, false),
+        CellAction::CancelScrub => Intent::EndScrub(cell, true),
+        CellAction::Step => Intent::Step(cell, amount.round() as i32),
+        CellAction::ToStart => Intent::StepToEnd(cell, false),
+        CellAction::ToEnd => Intent::StepToEnd(cell, true),
+        CellAction::CancelInput => Intent::CancelInput(cell),
+        CellAction::FinishInput => Intent::FinishInput(cell),
+    }
+}
+
+/// What a change to the picker's filters asks: a choice box's `choice`, a stat tag's or "Allow incompatible affixes"' `on`.
+fn picker_filter(filter: PickerFilter, choice: i32, on: bool) -> Intent {
+    match filter {
+        PickerFilter::Side => Intent::PickerFilter(match choice {
+            1 => KindFilter::Prefixes,
+            2 => KindFilter::Suffixes,
+            _ => KindFilter::All,
+        }),
+        PickerFilter::Category => Intent::PickerCategory(index(choice)),
+        PickerFilter::Class => Intent::PickerClass(index(choice)),
+        PickerFilter::Slot => Intent::PickerSlot(index(choice)),
+        PickerFilter::Level => Intent::PickerLevel(index(choice)),
+        PickerFilter::Source => Intent::PickerSource(index(choice)),
+        PickerFilter::Tag => Intent::PickerTag(index(choice), on),
+        PickerFilter::Allow => Intent::PickerAllow(on),
+        PickerFilter::Chip => Intent::PickerRemoveChip(index(choice)),
+        PickerFilter::Clear => Intent::PickerClearFilters,
+        PickerFilter::Uniques => Intent::PickerShowUniques,
+    }
 }
