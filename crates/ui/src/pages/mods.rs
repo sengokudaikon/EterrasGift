@@ -16,7 +16,7 @@ use eg_companion::mods::{
 use eg_core::settings_service::SettingsService;
 use phrases::phrases;
 use slint::{ComponentHandle, ModelRc, SharedString};
-use spiderland::{CheckedSlice, Intents, Store, Version, callbacks};
+use spiderland::{CheckedSlice, Intents, Store, Version, Wiring, callbacks};
 use spiderland_slint::{Background, InnerRows, Rows, WindowHost, Windowed, every};
 use std::any::Any;
 use task_runtime::CancellationToken;
@@ -57,9 +57,9 @@ struct Window {
     shown_selected: CheckedSlice<SelectedKey, SelectedView>,
 }
 
-/// Binds the page, and returns its store for the window's close, which it goes first in: it finishes the build, keeps the
-/// drafts and waits for the worker, and answers with [`Output::Closed`].
-pub(crate) fn bind(window: &MainWindow, page: ModsPage, background: Background, shell: &ShellHandle) -> Store<Mods> {
+/// Builds the page's store, not started, so the window's close can be wired to it first: it goes first in the close, where it
+/// finishes the build, keeps the drafts and waits for the worker, and answers with [`Output::Closed`]. [`bind`] takes it started.
+pub(crate) fn build(window: &MainWindow, page: ModsPage, background: Background, shell: &ShellHandle) -> Wiring<Mods> {
     let host = Window {
         services: page,
         background,
@@ -81,8 +81,19 @@ pub(crate) fn bind(window: &MainWindow, page: ModsPage, background: Background, 
     view.set_settings(host.setting_rows.model());
     view.set_log_lines(host.log_rows.model());
     view.set_readiness_facts(host.facts.model());
-    let store = Store::<Mods>::new(State::new(jiff::Timestamp::now(), shell.current() == Page::Mods), Windowed::new(window, host));
-    crate::trail::follow(&store, "mods");
+    let wiring = Store::<Mods>::build(State::new(jiff::Timestamp::now(), shell.current() == Page::Mods), Windowed::new(window, host));
+    crate::trail::follow(&wiring, "mods");
+    shell.forward_shown(Page::Mods, &wiring.intents(), |shown| Intent::PageChanged {
+        shown,
+        now: jiff::Timestamp::now(),
+    });
+    wiring.forward(&shell.intents(), |output| (*output == Output::ShowPage).then_some(ShellIntent::Navigate(Page::Mods)));
+    wiring
+}
+
+/// Connects the view's callbacks to the started store, which they keep alive for as long as the window lasts.
+pub(crate) fn bind(window: &MainWindow, store: Store<Mods>) -> Store<Mods> {
+    let view = window.global::<ModsState>();
     callbacks!(view, store, {
         on_refresh: || Intent::Refresh,
         on_commit_settings: || Intent::CommitSettings,
@@ -103,11 +114,6 @@ pub(crate) fn bind(window: &MainWindow, page: ModsPage, background: Background, 
         on_setting_toggled: |index, on| Intent::SettingToggled(index, on),
         on_setting_choice: |index, value| Intent::SettingChoice(index, value.into()),
     });
-    shell.forward_shown(Page::Mods, &store.intents(), |shown| Intent::PageChanged {
-        shown,
-        now: jiff::Timestamp::now(),
-    });
-    store.forward(&shell.intents(), |output| (*output == Output::ShowPage).then_some(ShellIntent::Navigate(Page::Mods)));
     store
 }
 

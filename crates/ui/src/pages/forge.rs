@@ -52,10 +52,11 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, background: Background,
         mappings: HashMap::new(),
         preview: Timer::default(),
     };
-    let store = Store::new(state, Windowed::new(window, host));
-    crate::trail::follow(&store, "forge");
+    let wiring = Store::build(state, Windowed::new(window, host));
+    crate::trail::follow(&wiring, "forge");
+    shell.forward(&wiring.intents(), |page| Intent::PageChanged { forge: page == Page::Forge });
+    let store = wiring.start();
     connect::connect(&window.global::<ForgeState>(), &store);
-    shell.forward(&store.intents(), |page| Intent::PageChanged { forge: page == Page::Forge });
     ForgeHandle { store }
 }
 

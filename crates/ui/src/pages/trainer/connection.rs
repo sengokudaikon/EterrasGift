@@ -10,7 +10,7 @@ use crate::{
 use eg_trainer::backend::{BackendHandle, Command, Phase};
 use eg_trainer_screens::connection::{Access, ConnectionFeature, ConnectionView, Effect, Intent, State, Subscription, connect_command, unbound as unbound_view};
 use slint::ComponentHandle;
-use spiderland::{Intents, Slice, Store, Version, callbacks};
+use spiderland::{Intents, Slice, Store, Version, Wiring, callbacks};
 use spiderland_slint::{WindowHost, Windowed, on_watch};
 use std::any::Any;
 use std::rc::Rc;
@@ -55,10 +55,10 @@ fn observed(backend: &BackendHandle) -> Intent {
     }
 }
 
-/// Binds the connection to the worker. The window's callbacks keep the binding alive. Returns the store, whose
-/// [`WorkerChanged`](eg_trainer_screens::connection::WorkerChanged) tells what else follows the worker.
-pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, decorations: Rc<Decorations<MainWindow>>) -> Store<ConnectionFeature> {
-    let store = Store::<ConnectionFeature>::new(
+/// Builds the connection to the worker, not started, so what follows the worker can be wired to its
+/// [`WorkerChanged`](eg_trainer_screens::connection::WorkerChanged) first. [`bind`] takes it started.
+pub fn build(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, decorations: Rc<Decorations<MainWindow>>) -> Wiring<ConnectionFeature> {
+    let wiring = Store::<ConnectionFeature>::build(
         State::new(shell.current().is_trainer()),
         Windowed::new(
             window,
@@ -69,15 +69,19 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, de
             },
         ),
     );
-    crate::trail::follow(&store, "connection");
+    crate::trail::follow(&wiring, "connection");
+    shell.forward(
+        &wiring.intents(),
+        |page| if page.is_trainer() { Intent::TrainerPageEntered } else { Intent::OtherPageEntered },
+    );
+    wiring
+}
+
+/// Connects the window's Connect button to the started store, which it keeps alive for as long as the window lasts.
+pub fn bind(window: &MainWindow, store: Store<ConnectionFeature>) {
     callbacks!(window.global::<Connection>(), store, {
         on_connect: || Intent::Connect,
     });
-    shell.forward(
-        &store.intents(),
-        |page| if page.is_trainer() { Intent::TrainerPageEntered } else { Intent::OtherPageEntered },
-    );
-    store
 }
 
 impl WindowHost<ConnectionFeature> for Window {

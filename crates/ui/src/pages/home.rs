@@ -40,7 +40,7 @@ pub fn bind(
     let Some(launcher) = launcher else {
         return;
     };
-    let store = Store::<Home>::new(
+    let wiring = Store::<Home>::build(
         State::new(shell.current() == Page::Home),
         Windowed::new(
             window,
@@ -53,12 +53,13 @@ pub fn bind(
             },
         ),
     );
-    crate::trail::follow(&store, "home");
+    crate::trail::follow(&wiring, "home");
+    shell.forward_shown(Page::Home, &wiring.intents(), |shown| if shown { Intent::Shown } else { Intent::Hidden });
+    let store = wiring.start();
     // The window's callback keeps the store alive, for as long as the window lasts.
     callbacks!(state, store, {
         on_start: |mode| Intent::Start(mode_of(mode)),
     });
-    shell.forward_shown(Page::Home, &store.intents(), |shown| if shown { Intent::Shown } else { Intent::Hidden });
 }
 
 fn mode_of(mode: ViewMode) -> LaunchMode {

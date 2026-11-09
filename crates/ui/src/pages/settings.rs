@@ -11,7 +11,7 @@ use eg_companion::settings::{
 };
 use eg_core::settings_service::SettingsService;
 use slint::{ComponentHandle, Timer};
-use spiderland::{CheckedSlice, Intents, Store, Version, callbacks};
+use spiderland::{CheckedSlice, Intents, Store, Version, Wiring, callbacks};
 use spiderland_slint::{Rows, WindowHost, Windowed, on_wake};
 use std::any::Any;
 use std::cell::Cell;
@@ -84,10 +84,10 @@ struct Window {
     shown_locations: CheckedSlice<Version, Vec<LocationView>>,
 }
 
-/// Puts the page and module-supplied sections behind the window's `SettingsState`, and takes the window's close: the
-/// `close_first` pages that go first hear of it through [`Output::Lifecycle`], and answer with [`Intent::CloseAnswered`].
-/// Returns the store, for them to be wired to.
-pub(crate) fn bind(window: &MainWindow, settings: Settings, close_first: usize, shell: &ShellHandle) -> Store<SettingsPage> {
+/// Builds the store behind the window's `SettingsState`, not started, so the `close_first` pages that go first in the window's
+/// close can be wired to it: they hear of it through [`Output::Lifecycle`], and answer with [`Intent::CloseAnswered`].
+/// [`bind`] takes it started.
+pub(crate) fn build(window: &MainWindow, settings: Settings, close_first: usize, shell: &ShellHandle) -> Wiring<SettingsPage> {
     let Settings {
         service,
         mut state,
@@ -110,9 +110,16 @@ pub(crate) fn bind(window: &MainWindow, settings: Settings, close_first: usize, 
     view.set_modules(host.modules.model());
     view.set_sections(host.sections.model());
     view.set_locations(host.locations.model());
-    let store = Store::<SettingsPage>::new(state, Windowed::new(window, host));
-    crate::trail::follow(&store, "settings");
+    let wiring = Store::<SettingsPage>::build(state, Windowed::new(window, host));
+    crate::trail::follow(&wiring, "settings");
+    wiring.forward(&shell.intents(), |output| (*output == Output::ShowPage).then_some(ShellIntent::Navigate(Page::Settings)));
+    wiring
+}
 
+/// Puts the started store behind the page's controls and takes the window's close. The callbacks keep it alive for as long as
+/// the window lasts.
+pub(crate) fn bind(window: &MainWindow, store: Store<SettingsPage>) -> Store<SettingsPage> {
+    let view = window.global::<SettingsState>();
     // A close always waits here and goes ahead from `Effect::Close`, so it can wait for saves in flight.
     window.window().on_close_requested({
         let store = store.clone();
@@ -121,7 +128,6 @@ pub(crate) fn bind(window: &MainWindow, settings: Settings, close_first: usize, 
             slint::CloseRequestResponse::KeepWindowShown
         }
     });
-    store.forward(&shell.intents(), |output| (*output == Output::ShowPage).then_some(ShellIntent::Navigate(Page::Settings)));
     callbacks!(view, store, {
         on_save_locations: || Intent::SaveLocations,
         on_retry: || Intent::Retry,

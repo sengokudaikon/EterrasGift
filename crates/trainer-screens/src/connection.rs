@@ -176,8 +176,10 @@ impl Feature for ConnectionFeature {
                 if state.revision == Some(snapshot.revision) {
                     return;
                 }
-                state.revision = Some(snapshot.revision);
-                effects.emit(WorkerChanged);
+                // The first look is where the worker stands, which whatever follows it read as it began; only a move on is news.
+                if state.revision.replace(snapshot.revision).is_some() {
+                    effects.emit(WorkerChanged);
+                }
                 let status = status(&snapshot);
                 state.wait = status.waiting;
                 state.view.set(ConnectionView {
@@ -372,6 +374,16 @@ mod tests {
     #[test]
     fn the_connection_starts_by_looking_at_the_worker() {
         assert!(matches!(spiderland::start::<ConnectionFeature>(&mut State::new(false))[..], [Effect::Observe]));
+    }
+
+    #[test]
+    fn only_a_worker_that_moves_on_is_news() {
+        use crate::testing::snapshot;
+        let mut state = State::new(false);
+        let observed = |revision| Intent::Observed(Arc::new(snapshot(revision, Phase::Disconnected)));
+        assert!(step::<ConnectionFeature>(&mut state, observed(4)).outputs.is_empty(), "the first look is where it stands");
+        assert!(step::<ConnectionFeature>(&mut state, observed(4)).outputs.is_empty(), "nothing moved");
+        assert_eq!(step::<ConnectionFeature>(&mut state, observed(5)).outputs, [WorkerChanged]);
     }
 
     #[test]

@@ -95,18 +95,18 @@ pub fn install(window: &MainWindow, app: App) -> Installed {
     let shell = shell::bind(window, navigation);
     let decorations = decorations::Decorations::install(window);
     home::bind(window, app.launcher, app.game, app.background.clone(), &shell, decorations.clone());
-    let mods = app.mods.map(|page| mods::bind(window, page, app.background.clone(), &shell));
+    let mods = app.mods.map(|page| mods::build(window, page, app.background.clone(), &shell));
     let trainer_backend = app.trainer_backend.filter(|_| app.trainer);
     let background = app.background;
-    logs::bind(window, app.logs, trainer_backend.clone(), background.clone(), &shell);
     // The trainer's switches reach its session as they flip; Game definitions follows its game data.
     let settings_page = match &trainer_backend {
         Some(backend) => app.settings.link(trainer_settings::ID, trainer_settings::link(backend.clone())),
         None => app.settings,
     };
     // Settings takes the window's close. Mods goes first, keeping its drafts and finishing its work, and then Settings waits
-    // for saves. Either one can keep the window open to show what failed.
-    let settings = settings::bind(window, settings_page, usize::from(mods.is_some()), &shell);
+    // for saves. Either one can keep the window open to show what failed. The two are wired to each other before either
+    // starts, so neither misses what the other does as it starts.
+    let settings = settings::build(window, settings_page, usize::from(mods.is_some()), &shell);
     if let Some(mods) = &mods {
         let told = |output: &SettingsOutput| match output {
             SettingsOutput::Lifecycle(Lifecycle::CloseRequested) => Some(ModsIntent::CloseRequested),
@@ -119,12 +119,17 @@ pub fn install(window: &MainWindow, app: App) -> Installed {
             ModsOutput::ShowPage => None,
         });
     }
+    // In the order the pages have always started: Mods, Logs, then Settings.
+    let mods = mods.map(|mods| mods::bind(window, mods.start()));
+    logs::bind(window, app.logs, trainer_backend.clone(), background.clone(), &shell);
+    let settings = settings::bind(window, settings.start());
     trainer::connection::unbound(window, app.trainer);
     trainer::install(window, trainer_backend.clone(), app.planned, background.clone());
     let forge = trainer_backend.map(|backend| {
         // A linked module's state moves on with the worker's, so Settings reads its status sections again.
-        let connection = trainer::connection::bind(window, backend.clone(), &shell, decorations);
+        let connection = trainer::connection::build(window, backend.clone(), &shell, decorations);
         connection.forward(&settings.intents(), |_: &WorkerChanged| SettingsIntent::LinkChanged);
+        trainer::connection::bind(window, connection.start());
         forge::bind(window, backend, background, &shell, app.faults, app.templates)
     });
     apply_system_settings(window);

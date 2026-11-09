@@ -16,3 +16,6 @@ pub mod registry;
 pub mod session;
 pub mod settings;
 pub mod trainer_pages;
+
+#[cfg(test)]
+mod testing;

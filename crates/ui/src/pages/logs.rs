@@ -41,7 +41,7 @@ struct Window {
 }
 
 pub(crate) fn bind(window: &MainWindow, files: Option<LogFiles>, backend: Option<BackendHandle>, background: Background, shell: &ShellHandle) {
-    let store = Store::<Logs>::new(
+    let wiring = Store::<Logs>::build(
         State::new(shell.current() == Page::Logs),
         Windowed::new(
             window,
@@ -53,7 +53,9 @@ pub(crate) fn bind(window: &MainWindow, files: Option<LogFiles>, backend: Option
             },
         ),
     );
-    crate::trail::follow(&store, "logs");
+    crate::trail::follow(&wiring, "logs");
+    shell.forward_shown(Page::Logs, &wiring.intents(), |shown| if shown { Intent::Shown } else { Intent::Hidden });
+    let store = wiring.start();
     let state = window.global::<LogsState>();
     callbacks!(state, store, {
         on_refresh: || Intent::Refresh,
@@ -66,7 +68,6 @@ pub(crate) fn bind(window: &MainWindow, files: Option<LogFiles>, backend: Option
             }
         }
     });
-    shell.forward_shown(Page::Logs, &store.intents(), |shown| if shown { Intent::Shown } else { Intent::Hidden });
 }
 
 fn source_of(index: i32) -> Option<Source> {
