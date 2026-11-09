@@ -22,6 +22,7 @@ use eg_companion::launch::launcher::GameLauncher;
 use eg_companion::mods::feature::{Intent as ModsIntent, Mods, Output as ModsOutput};
 use eg_companion::settings::{Intent as SettingsIntent, Output as SettingsOutput};
 use eg_trainer_screens::connection::WorkerChanged;
+use eg_trainer_screens::forge::feature::{Intent as ForgeIntent, Output as ForgeOutput};
 use eg_trainer_screens::settings as trainer_settings;
 use pages::{forge, home, logs, mods, settings, trainer};
 use shell::{Navigation, Page};
@@ -67,7 +68,8 @@ pub fn select_language() {
     let _ = slint::select_bundled_translation(language.unwrap_or(""));
 }
 
-/// Mods' index among the pages that go first in the window's close: the only one.
+/// Mods' index among the pages that go first in the window's close: the first. The Forge, in a run with the trainer, comes
+/// after it.
 const MODS_CLOSE: usize = 0;
 
 /// What a window was bound to: captures set up the forge's states through it, and the app's shutdown stops the Mods page's
@@ -103,10 +105,12 @@ pub fn install(window: &MainWindow, app: App) -> Installed {
         Some(backend) => app.settings.link(trainer_settings::ID, trainer_settings::link(backend.clone())),
         None => app.settings,
     };
-    // Settings takes the window's close. Mods goes first, keeping its drafts and finishing its work, and then Settings waits
-    // for saves. Either one can keep the window open to show what failed. The two are wired to each other before either
-    // starts, so neither misses what the other does as it starts.
-    let settings = settings::build(window, settings_page, usize::from(mods.is_some()), &shell);
+    // Settings takes the window's close. Mods and the Forge go first: Mods keeps its drafts and finishes its work, the Forge
+    // finishes a write under way, whose later steps only the window can send. Then Settings waits for saves. Any of them can
+    // keep the window open to show what failed. Each is wired to Settings before it starts, so none misses what the other
+    // does as it starts.
+    let forge_close = usize::from(mods.is_some());
+    let settings = settings::build(window, settings_page, forge_close + usize::from(trainer_backend.is_some()), &shell);
     if let Some(mods) = &mods {
         let told = |output: &SettingsOutput| match output {
             SettingsOutput::Lifecycle(Lifecycle::CloseRequested) => Some(ModsIntent::CloseRequested),
@@ -130,7 +134,17 @@ pub fn install(window: &MainWindow, app: App) -> Installed {
         let connection = trainer::connection::build(window, backend.clone(), &shell, decorations);
         connection.forward(&settings.intents(), |_: &WorkerChanged| SettingsIntent::LinkChanged);
         trainer::connection::bind(window, connection.start());
-        forge::bind(window, backend, background, &shell, app.faults, app.templates)
+        let forge = forge::build(window, backend, background, &shell, app.faults, app.templates);
+        settings.forward(&forge.intents(), |output| match output {
+            SettingsOutput::Lifecycle(Lifecycle::CloseRequested) => Some(ForgeIntent::CloseRequested),
+            SettingsOutput::Lifecycle(Lifecycle::CloseCalledOff) => Some(ForgeIntent::CloseCalledOff),
+            _ => None,
+        });
+        forge.forward(&settings.intents(), move |output| match output {
+            ForgeOutput::Closed(answer) => Some(SettingsIntent::CloseAnswered(forge_close, *answer)),
+            ForgeOutput::ShowPage => None,
+        });
+        forge::bind(window, forge.start())
     });
     apply_system_settings(window);
     Installed { forge, mods }

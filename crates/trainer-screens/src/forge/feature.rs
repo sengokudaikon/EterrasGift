@@ -2,7 +2,7 @@
 //! worker's snapshots do to it. What the editor asks of the worker leaves as effects, and what comes back returns as
 //! intents, so the reducer never touches the worker.
 
-use super::editor::{Cell, ForgeEditor, RowRef};
+use super::editor::{Cell, ForgeEditor, MessageKind, RowRef};
 use super::game::{Catalog, ForgeGame, Request};
 use super::item::Seal;
 use super::picker::KindFilter;
@@ -12,7 +12,7 @@ use eg_trainer::backend::{BackendError, BackendSnapshot, ForgeSnapshot, ForgeSta
 use eg_trainer::definitions::catalog::GameCatalog;
 use eg_trainer::item::template::ItemTemplate;
 use phrases::phrases;
-use spiderland::{Effects, Error, Feature, Pulse, Tracked};
+use spiderland::{CloseAnswer, Effects, Error, Feature, Pulse, Tracked};
 use std::sync::Arc;
 
 phrases! {
@@ -22,6 +22,16 @@ phrases! {
 
 /// The forge as a feature: see the module's documentation.
 pub struct Forge;
+
+/// What the Forge tells the rest of the window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Output {
+    /// Bring the page into view, to show what kept the window open.
+    ShowPage,
+    /// The answer to [`Intent::CloseRequested`]: nothing is being written, or a write the close waited for failed and the
+    /// window stays to show it.
+    Closed(CloseAnswer),
+}
 
 /// What can be given the keyboard's focus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -151,6 +161,11 @@ pub enum Intent {
         roll: usize,
     },
     ShowDraft(usize),
+    /// The window is closing. The Forge goes first: a write under way needs the window to send its later steps, so the
+    /// close waits for it.
+    CloseRequested,
+    /// The window stays after all.
+    CloseCalledOff,
     /// Whether the report of the item read at `generation` went into a fault log.
     UnshownReported {
         generation: u64,
@@ -200,6 +215,8 @@ pub struct State {
     opened_input: Tracked<Option<Cell>>,
     /// Where the keyboard's focus was last sent; the same cell can be asked for again.
     focus: Pulse<Focus>,
+    /// The window waits for the Forge to close: `Some(true)` once it has waited for a write.
+    closing: Option<bool>,
 }
 
 impl State {
@@ -219,6 +236,7 @@ impl State {
                 target: FocusTarget::Header,
                 part: 0,
             }),
+            closing: None,
         }
     }
 
@@ -261,7 +279,7 @@ fn next_with_rolls(from: usize, delta: i32, count: usize, rolls_of: impl Fn(usiz
     None
 }
 
-fn read_templates(editor: &ForgeEditor, effects: &mut Effects<Effect>) {
+fn read_templates<O>(editor: &ForgeEditor, effects: &mut Effects<Effect, O>) {
     if editor.keeps_templates {
         effects.push(Effect::ReadTemplates);
     }
@@ -277,7 +295,7 @@ fn failure_of(result: Result<Result<(), String>, Error>) -> Option<String> {
 
 /// Takes what came, and settles what it means for the editor: a new read is shown only while the page shows, and a write
 /// on its way settles wherever the user is.
-fn settle(state: &mut State, completed: bool, effects: &mut Effects<Effect>) {
+fn settle(state: &mut State, completed: bool, effects: &mut Effects<Effect, Output>) {
     let game_ask = |state: &State| {
         let game = state.editor.game();
         game.ask_descriptions();
@@ -331,7 +349,7 @@ fn settle(state: &mut State, completed: bool, effects: &mut Effects<Effect>) {
 }
 
 /// Records an item the forge cannot show, once, so the refused value can be traced. Returns what the forge says in its place.
-fn report_unshown(state: &mut State, error: String, effects: &mut Effects<Effect>) -> String {
+fn report_unshown(state: &mut State, error: String, effects: &mut Effects<Effect, Output>) -> String {
     if !state.has_fault_log {
         return error;
     }
@@ -362,7 +380,7 @@ impl Feature for Forge {
     type State = State;
     type Intent = Intent;
     type Effect = Effect;
-    type Output = spiderland::Never;
+    type Output = Output;
     type Subscription = Subscription;
 
     fn subscriptions(_: &State) -> impl IntoIterator<Item = Subscription> {
@@ -374,7 +392,7 @@ impl Feature for Forge {
         read_templates(&state.editor, effects);
     }
 
-    fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
+    fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect, Output>) {
         let editor = &mut state.editor;
         match intent {
             Intent::Observed { snapshot, running } => {
@@ -570,10 +588,34 @@ impl Feature for Forge {
                     state.reported = None;
                 }
             }
+            Intent::CloseRequested => {
+                state.closing.get_or_insert(false);
+            }
+            Intent::CloseCalledOff => state.closing = None,
         }
         for request in state.editor.game().take_requests() {
             effects.push(Effect::Worker(request));
         }
+        answer_close(state, effects);
+    }
+}
+
+/// While the window waits to close, answers it once nothing is being written. A write it waited for that failed keeps the
+/// window open, with the page showing why; an older failure doesn't.
+fn answer_close(state: &mut State, effects: &mut Effects<Effect, Output>) {
+    let Some(waited) = state.closing else {
+        return;
+    };
+    if state.editor.is_writing() {
+        state.closing = Some(true);
+        return;
+    }
+    state.closing = None;
+    if waited && state.editor.message().1 == MessageKind::Error {
+        effects.emit(Output::ShowPage);
+        effects.emit(Output::Closed(CloseAnswer::StayingOpen));
+    } else {
+        effects.emit(Output::Closed(CloseAnswer::Closed));
     }
 }
 
@@ -592,6 +634,21 @@ mod tests {
             snapshot: Arc::new(snapshot(revision, phase)),
             running,
         }
+    }
+
+    #[test]
+    fn a_close_with_nothing_being_written_goes_ahead_at_once() {
+        let mut state = state(true);
+        assert_eq!(step::<Forge>(&mut state, Intent::CloseRequested).outputs, [Output::Closed(CloseAnswer::Closed)]);
+        assert!(step::<Forge>(&mut state, observed(1, Phase::Ready, true)).outputs.is_empty(), "answered once");
+    }
+
+    #[test]
+    fn a_close_called_off_is_answered_no_more() {
+        let mut state = state(true);
+        state.closing = Some(true);
+        step::<Forge>(&mut state, Intent::CloseCalledOff);
+        assert!(step::<Forge>(&mut state, observed(1, Phase::Ready, true)).outputs.is_empty());
     }
 
     #[test]

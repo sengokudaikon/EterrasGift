@@ -5,16 +5,16 @@ mod connect;
 mod picker_rows;
 mod show;
 
-use crate::shell::{Page, ShellHandle};
+use crate::shell::{Intent as ShellIntent, Page, ShellHandle};
 use crate::{CellFocus, CellKind, CellRef, ForgeState, MainWindow};
 use eg_core::fault::{FaultDetails, FaultLog};
 use eg_trainer::backend::{BackendHandle, Command, ForgeSnapshot, forge_record};
 use eg_trainer::item::template::TemplateStore;
 use eg_trainer_screens::forge::editor::ForgeEditor;
-use eg_trainer_screens::forge::feature::{Effect, Focus, FocusTarget, Forge, Intent, State, Subscription};
+use eg_trainer_screens::forge::feature::{Effect, Focus, FocusTarget, Forge, Intent, Output, State, Subscription};
 use eg_trainer_screens::forge::game::{PREVIEW_DELAY, Request};
 use slint::{ComponentHandle, Timer};
-use spiderland::{Dropping, Intents, Slice, Store};
+use spiderland::{Dropping, Intents, Slice, Store, Wiring};
 use spiderland_slint::{Background, WindowHost, Windowed, after, on_watch};
 use std::any::Any;
 use std::collections::HashMap;
@@ -37,8 +37,16 @@ impl ForgeHandle {
     }
 }
 
-/// Puts the forge on the worker.
-pub fn bind(window: &MainWindow, backend: BackendHandle, background: Background, shell: &ShellHandle, faults: Option<FaultLog>, templates: Option<TemplateStore>) -> ForgeHandle {
+/// Builds the forge on the worker, not started, so the window's close can be wired to it first: it goes first in the close,
+/// whose write under way needs the window to send its later steps. [`bind`] takes it started.
+pub fn build(
+    window: &MainWindow,
+    backend: BackendHandle,
+    background: Background,
+    shell: &ShellHandle,
+    faults: Option<FaultLog>,
+    templates: Option<TemplateStore>,
+) -> Wiring<Forge> {
     let mut state = State::new(backend.snapshot(), backend.is_running(), shell.current() == Page::Forge, faults.is_some());
     state.editor_mut().keeps_templates = templates.is_some();
     let host = ForgeHost {
@@ -55,7 +63,12 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, background: Background,
     let wiring = Store::build(state, Windowed::new(window, host));
     crate::trail::follow(&wiring, "forge");
     shell.forward(&wiring.intents(), |page| Intent::PageChanged { forge: page == Page::Forge });
-    let store = wiring.start();
+    wiring.forward(&shell.intents(), |output| (*output == Output::ShowPage).then_some(ShellIntent::Navigate(Page::Forge)));
+    wiring
+}
+
+/// Connects the view's callbacks to the started forge, which they keep alive for as long as the window lasts.
+pub fn bind(window: &MainWindow, store: Store<Forge>) -> ForgeHandle {
     connect::connect(&window.global::<ForgeState>(), &store);
     ForgeHandle { store }
 }

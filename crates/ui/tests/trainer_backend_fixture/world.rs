@@ -435,6 +435,8 @@ struct WorldData {
     world: World,
     item: Mutex<ForgeSnapshot>,
     writes: AtomicUsize,
+    /// True holds each write in the game, once counted, until it is false again.
+    held: tokio::sync::watch::Sender<bool>,
 }
 
 /// Answers from the world's ranges: value = round(min + (max - min) × roll / 255), half to even as .NET rounds, shown as
@@ -516,6 +518,7 @@ impl BackendConnection for WorldConnection {
     }
     async fn write(&mut self, plan: &ForgePlan, _: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
         self.0.writes.fetch_add(1, Ordering::SeqCst);
+        let _ = self.0.held.subscribe().wait_for(|held| !*held).await;
         let mut after = plan.projected().clone();
         // The game names the item after its new identity.
         if let ItemEdit::UniqueIdentity(edit) = plan.edit_intent()
@@ -673,6 +676,7 @@ impl Forge {
             },
             item: Mutex::new(world.item.clone()),
             writes: AtomicUsize::new(0),
+            held: tokio::sync::watch::channel(false).0,
             world,
         });
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
@@ -915,6 +919,25 @@ pub(in super::super) fn item_captures(session: &Session) {
     assert!(forge.ui.global::<ForgeState>().get_message().starts_with("2 drafts applied."));
     assert_eq!(forge.writes(), 2);
     session.capture(&forge.ui, "item-confirmed");
+    drop(forge);
+
+    // A close while Apply writes waits for the steps only the window can send, and the window closes once they are done.
+    let forge = Forge::open(session, World::boots(), 1100, 700);
+    forge.type_value(Cell::Affix(0), "37");
+    forge.send([Intent::SelectAffix(Some(3)), Intent::PickSeal(3, Seal::Normal)]);
+    forge.data.held.send_replace(true);
+    forge.handle.send(Intent::Apply);
+    wait(|| forge.writes() == 1);
+    forge.ui.window().dispatch_event(WindowEvent::CloseRequested);
+    for _ in 0..20 {
+        std::thread::sleep(Duration::from_millis(5));
+        settle();
+    }
+    assert!(forge.ui.window().is_visible(), "the close waits for the write under way");
+    forge.data.held.send_replace(false);
+    wait(|| !forge.ui.window().is_visible());
+    assert_eq!(forge.writes(), 2, "the window sent the second step before it closed");
+    assert!(!forge.read(ForgeEditor::is_writing));
     drop(forge);
 
     // A name too long for the header wraps to two lines and ends in an ellipsis, with a seal drafted and another row

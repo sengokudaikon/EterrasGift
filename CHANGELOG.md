@@ -5,6 +5,7 @@ code and its tests, and what is still to build in [the helper's backlog](crates/
 
 ## 2026-11-09
 
+- Item Forge: closing the window during Apply or Undo waits until every step is sent and read back; a step that fails keeps the window open on the Forge.
 - Mods: closing during a build stops the compiler and closes at once; a build already installing finishes and isn't started again if the close is called off.
 - Build: a dev build composites Eterra's band as a shipped one does (1.3–1.6 ms a frame, from 11–12): it is eg-ui-band, optimised in every profile.
 - UI: work a page hands off that never gets to run now ends as a fault would, not with the page loading for good.
