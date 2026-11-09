@@ -2,7 +2,7 @@
 # Rust nightly is selected by rust-toolchain.toml; slint-viewer and slint-lsp 1.18.1 are on PATH.
 
 [tasks.build]
-description = "Build the app and its libraries"
+description = "Build the app and everything it uses: the same build `run` makes, so the two share it"
 run = "cargo build"
 
 [tasks.run]

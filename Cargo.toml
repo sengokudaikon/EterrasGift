@@ -3,6 +3,11 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# A plain `cargo build` builds the app, so it resolves features as `cargo run -p eterras-gift` does and the two share every
+# unit. Built as members, the helper and xtask would add their own features to the app's dependencies (windows-sys,
+# iced-x86, bitflags, phrases) and every crate above them would build twice. The app reaches every other crate, the helper
+# as its artifact; lint and test name the whole workspace.
+default-members = ["crates/app"]
 exclude = ["libs"]
 
 [workspace.package]
