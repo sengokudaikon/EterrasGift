@@ -11,8 +11,8 @@ import { PopupMenu } from "../../widgets/menu.slint";
 import { MessageTone } from "../common.slint";
 import { AshField } from "../../decorations.slint";
 import { ModCheck, RowSpot } from "rows.slint";
-import { SettingItem } from "settings.slint";
-import { ModRow, SourceRow, ModSettingRow, ModLogRow } from "state.slint";
+import { ModPane } from "pane.slint";
+import { ModRow, SourceRow, ModSettingRow, ModLogRow, SelectedModView } from "state.slint";
 
 // One line of the action bar's status: the icon says what kind of line it is, and the text wraps beside it.
 export component StatusLine inherits Rectangle {
@@ -64,23 +64,8 @@ export component ModsView inherits Rectangle {
     in property <MessageTone> readiness-tone: MessageTone.info;
     in property <bool> can-play;
     in property <bool> busy;
-    in property <string> selected-name;
-    in property <string> selected-detail;
-    in property <string> selected-file;
-    in property <string> selected-source;
-    in property <string> selected-source-path;
-    in property <string> selected-build-status;
-    in property <string> selected-description;
-    in property <string> selected-problem;
-    in property <string> selected-state;
-    in property <bool> selected-enabled;
-    in property <bool> selected-has-sources;
-    in property <bool> can-install-build;
+    in property <SelectedModView> selected;
     in property <bool> building;
-    in property <string> rebuild-text;
-    in property <string> rebuild-tip;
-    in property <string> install-build-text;
-    in property <bool> previous-build;
     in property <string> change-message;
     in property <bool> change-is-draft;
     in property <MessageTone> change-tone: MessageTone.info;
@@ -495,156 +480,25 @@ export component ModsView inherits Rectangle {
         }
         // The selected mod: what it is, whether it loaded, what can be done to it, and its settings.
         // Explicit sibling bounds keep breakpoint widths outside the parent layout solver.
-        pane := Rectangle {
+        pane := ModPane {
             x: root.width - root.pane-width; y: 0; width: root.pane-width; height: bar.y;
-            background: Tokens.raised-brush;
-            Rectangle { x: 0; y: 0; width: 1px; background: Tokens.hairline-brush; }
-            // Inside the pane's 1px left border.
-            if root.selected-index < 0: CaptionText {
-                x: 1px + Tokens.pane-content-margin.left; y: Tokens.pane-content-margin.top;
-                width: parent.width - 1px - Tokens.pane-content-margin.left - Tokens.pane-content-margin.right;
-                height: self.preferred-height;
-                text: root.installed-count > 0 ? ModsText.select-a-mod : ModsText.add-to-see;
-            }
-            if root.selected-index >= 0: ScrollView {
-                x: 1px;
-                width: parent.width - 1px;
-                content-width: self.visible-width;
-                // Measured from where the details really end (crates/ui/README.md: wrapped text in `if` and `for`). The end
-                // marker sits one spacing below the last block, so that spacing comes off.
-                content-height: detail.y + detail-end.y - detail.spacing + Tokens.pane-content-margin.bottom;
-                detail := VerticalLayout {
-                    x: Tokens.pane-content-margin.left; y: Tokens.pane-content-margin.top;
-                    width: parent.width - Tokens.pane-content-margin.left - Tokens.pane-content-margin.right;
-                    height: self.preferred-height; spacing: Tokens.space-18; alignment: start;
-                    // What it is. The name, the file and the project can be elided, and their hover tips say them in full; the
-                    // block is one tab stop whose keyboard tip says all three, so the keyboard reaches them too.
-                    identity := Rectangle {
-                        property <string> full: root.selected-name + "\n" + root.selected-file
-                            + (root.selected-has-sources ? "\n" + root.selected-source-path : "");
-                        identity-focus := FocusScope {
-                            accessible-role: text;
-                            accessible-label: identity.full;
-                            focus-gained(reason) => { if (reason == FocusReason.tab-navigation) { KeyboardFocus.visible = true; } }
-                            TouchArea {
-                                pointer-event(event) => { if (event.kind == PointerEventKind.down) { KeyboardFocus.visible = false; } }
-                            }
-                        }
-                        VerticalLayout {
-                            spacing: Tokens.space-4;
-                            SectionText {
-                                text: root.selected-name; max-lines: Tokens.title-max-lines; overflow: elide;
-                                name-tip := TouchArea { }
-                                TipTrigger { text: root.selected-name; hovered: name-tip.has-hover; }
-                            }
-                            CaptionText { text: root.selected-detail; }
-                            CaptionText {
-                                text: root.selected-file; wrap: no-wrap; overflow: elide;
-                                file-tip := TouchArea { }
-                                TipTrigger { text: root.selected-file; hovered: file-tip.has-hover; }
-                            }
-                            // A mod built here: where its project is, and how its latest build stands to the installed one.
-                            if root.selected-has-sources: CaptionText {
-                                text: root.selected-source; wrap: no-wrap; overflow: elide;
-                                source-tip := TouchArea { }
-                                TipTrigger { text: root.selected-source-path; hovered: source-tip.has-hover; }
-                            }
-                            if root.selected-build-status != "": CaptionText { text: root.selected-build-status; tone: CaptionTone.secondary; }
-                            // Only a change waiting for the next game with mods: on or off itself shows in the row and on the button.
-                            if root.selected-state != "": CaptionText { text: root.selected-state; color: Tokens.draft-brush; }
-                        }
-                        TipTrigger { text: identity.full; focused: identity-focus.has-focus; }
-                        FocusRing { focused: identity-focus.has-focus; }
-                    }
-                    // The reason it did not load sits right above the ways out of it.
-                    if root.selected-problem != "" && root.selected-enabled: HorizontalLayout {
-                        spacing: Tokens.space-6;
-                        Rectangle {
-                            width: Tokens.icon-size-small;
-                            Image { y: Tokens.icon-baseline-nudge.top; width: Tokens.icon-size-small; height: Tokens.icon-size-small; image-fit: contain; source: Tokens.icon-error; colorize: Tokens.error-brush; }
-                        }
-                        CaptionText { text: root.selected-problem; tone: CaptionTone.error; horizontal-stretch: 1; }
-                    }
-                    VerticalLayout {
-                        spacing: Tokens.space-8;
-                        // Everything that can be done to this mod, as in its row menu; Remove keeps to the far side, apart from the rest.
-                        HorizontalLayout {
-                            spacing: Tokens.space-8;
-                            Button {
-                                text: root.selected-enabled ? ModsText.turn-off : ModsText.turn-on; enabled: !root.busy; horizontal-stretch: 0;
-                                tip: ModsText.stays-installed;
-                                clicked => { root.toggle-mod(root.selected-index); }
-                            }
-                            Button {
-                                icon: Tokens.icon-folder; accessible-name: ModsText.show-in-folder; horizontal-stretch: 0; tip: ModsText.show-in-folder-tip;
-                                clicked => { root.reveal-mod(root.selected-index); }
-                            }
-                            Rectangle { horizontal-stretch: 1; }
-                            Button {
-                                text: ModsText.remove; icon: Tokens.icon-delete; kind: ButtonKind.subtle; enabled: !root.busy; horizontal-stretch: 0;
-                                tip: ModsText.remove-tip;
-                                clicked => { root.remove-mod(root.selected-index); }
-                            }
-                        }
-                        // A mod built here: its build, installed as Add mod would, kept apart from what is done to the installed mod.
-                        if root.selected-has-sources: HorizontalLayout {
-                            alignment: start; spacing: Tokens.space-8;
-                            if root.can-install-build: Button {
-                                text: root.install-build-text; enabled: !root.busy && !root.building;
-                                tip: ModsText.install-build-tip;
-                                clicked => { root.install-build(root.selected-index); }
-                            }
-                            Button {
-                                text: root.rebuild-text; enabled: !root.building && !root.busy; tip: root.rebuild-tip;
-                                clicked => { root.rebuild(root.selected-index); }
-                            }
-                        }
-                    }
-                    if root.selected-description != "": BodyText { text: root.selected-description; }
-                    if root.settings.length > 0: VerticalLayout {
-                        spacing: Tokens.space-6;
-                        // "Settings" heads the list unless the mod's own groups do.
-                        if root.settings[0].group == "": LabelText { text: ModsText.settings; }
-                        VerticalLayout {
-                            for item[index] in root.settings: SettingItem {
-                                item: item;
-                                index: index;
-                                busy: root.busy;
-                                setting-toggled(index, value) => { root.setting-toggled(index, value); }
-                                setting-choice(index, value) => { root.setting-choice(index, value); }
-                                setting-edited(index, value) => { root.setting-edited(index, value); }
-                                commit-settings => { root.commit-settings(); }
-                            }
-                        }
-                    }
-                    // Maximized only: what MelonLoader wrote about this mod, after its settings: what can be changed comes before what happened.
-                    if root.wide: VerticalLayout {
-                        spacing: Tokens.space-6;
-                        LabelText { text: ModsText.last-game; }
-                        if root.previous-build: CaptionText { text: ModsText.earlier-build; }
-                        if root.log-lines.length == 0: CaptionText { text: ModsText.nothing-logged; }
-                        if root.log-lines.length > 0: VerticalLayout {
-                            // [time] [error mark, its slot kept on every line so the text column aligns] [text] [×N for a line written N times in a row]
-                            for line in root.log-lines: HorizontalLayout {
-                                padding-top: Tokens.detail-row-margin.top; padding-bottom: Tokens.detail-row-margin.bottom; spacing: Tokens.space-6;
-                                CaptionText { text: line.time; wrap: no-wrap; vertical-alignment: top; }
-                                Rectangle {
-                                    width: Tokens.icon-size-small;
-                                    if line.error: Image { y: Tokens.icon-baseline-nudge.top; source: Tokens.icon-error; image-fit: contain; colorize: Tokens.error-brush; width: Tokens.icon-size-small; height: Tokens.icon-size-small; }
-                                }
-                                CaptionText { text: line.text; tone: line.error ? CaptionTone.error : CaptionTone.secondary; horizontal-stretch: 1; }
-                                if line.count > 1: CaptionText {
-                                    text: ModsText.repeated(line.count); wrap: no-wrap; vertical-alignment: top;
-                                    count-touch := TouchArea { }
-                                    TipTrigger { text: line.count-tip; hovered: count-touch.has-hover; }
-                                }
-                            }
-                        }
-                    }
-                    // Where the details really end; see `content-height`.
-                    detail-end := Rectangle { height: 0px; }
-                }
-            }
+            selected: root.selected;
+            selected-index: root.selected-index;
+            installed-count: root.installed-count;
+            settings: root.settings;
+            log-lines: root.log-lines;
+            busy: root.busy;
+            building: root.building;
+            wide: root.wide;
+            toggle-mod(index) => { root.toggle-mod(index); }
+            reveal-mod(index) => { root.reveal-mod(index); }
+            remove-mod(index) => { root.remove-mod(index); }
+            install-build(index) => { root.install-build(index); }
+            rebuild(index) => { root.rebuild(index); }
+            setting-edited(index, value) => { root.setting-edited(index, value); }
+            setting-toggled(index, value) => { root.setting-toggled(index, value); }
+            setting-choice(index, value) => { root.setting-choice(index, value); }
+            commit-settings => { root.commit-settings(); }
         }
         // Action bar: whether the next game with mods can go well and the latest change on the left; Undo, Revert and Play on the right.
         bar := Rectangle {
@@ -708,7 +562,7 @@ export component ModsView inherits Rectangle {
     // The row menu: what the pane's buttons do, with the keys that do it from the list.
     row-menu := PopupMenu {
         entries: [
-            { title: root.selected-enabled ? ModsText.turn-off : ModsText.turn-on, gesture: ModsText.key-space, disabled: root.selected-index < 0 || root.busy },
+            { title: root.selected.enabled ? ModsText.turn-off : ModsText.turn-on, gesture: ModsText.key-space, disabled: root.selected-index < 0 || root.busy },
             { title: ModsText.show-in-folder, icon: Tokens.icon-folder, disabled: root.selected-index < 0 },
             { separator: true },
             { title: ModsText.remove, icon: Tokens.icon-delete, gesture: ModsText.key-delete, disabled: root.selected-index < 0 || root.busy },

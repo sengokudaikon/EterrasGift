@@ -7,7 +7,7 @@ import { NavPane } from "shell/nav.slint";
 import { HomePage, HomeState, LaunchMode, BloomPhase } from "pages/home.slint";
 import { LogsPage, LogsState } from "pages/logs.slint";
 import { ModsPage } from "pages/mods.slint";
-import { ModsState, ModRow, SourceRow, ModSettingRow, SettingChoiceRow, ModLogRow } from "pages/mods/state.slint";
+import { ModsState, ModRow, SourceRow, ModSettingRow, SettingChoiceRow, ModLogRow, SelectedModView } from "pages/mods/state.slint";
 import { SettingsPage, SettingsState, LocationSetting, ModuleRow, SettingsSectionRow } from "pages/settings.slint";
 import { TrainerPage } from "pages/trainer.slint";
 import { TrainerState, FeatureRowKind, FeatureTone, FeatureValueView, FeatureFieldView, FeatureRowView, FeatureRowModels, FeatureRowPlace } from "pages/trainer/state.slint";
@@ -21,7 +21,7 @@ import { ShellText } from "strings/shell.slint";
 export { ForgeState, CellKind, CellRef, ItemRarity, ValueCell, TierOption, AffixRowView, ModifierRowView, FieldView, DraftEntryView, AppliedEntryView, MenuOptionView,
     PickerRowView, TemplateRowView, PillTone, PillView }
 
-export { Tokens, Nav, NavRow, NavOutcome, Connection, HomeState, LaunchMode, BloomPhase, LogsState, ModsState, ModRow, SourceRow, ModSettingRow, SettingChoiceRow, ModLogRow, SettingsState, LocationSetting, ModuleRow, SettingsSectionRow, TrainerState, TrainerAccess, FeatureRowKind, FeatureTone, FeatureValueView, FeatureFieldView, FeatureRowView, FeatureRowModels, FeatureRowPlace, MessageTone, Eterra, Mote, Tip }
+export { Tokens, Nav, NavRow, NavOutcome, Connection, HomeState, LaunchMode, BloomPhase, LogsState, ModsState, ModRow, SourceRow, ModSettingRow, SettingChoiceRow, ModLogRow, SelectedModView, SettingsState, LocationSetting, ModuleRow, SettingsSectionRow, TrainerState, TrainerAccess, FeatureRowKind, FeatureTone, FeatureValueView, FeatureFieldView, FeatureRowView, FeatureRowModels, FeatureRowPlace, MessageTone, Eterra, Mote, Tip }
 
 export component MainWindow inherits Window {
     title: ShellText.app-name;

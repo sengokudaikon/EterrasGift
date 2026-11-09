@@ -19,6 +19,31 @@ export struct ModSettingRow {
 
 export struct ModLogRow { time: string, text: string, error: bool, count: int, count-tip: string }
 
+// The selected mod as its pane shows it, set whole from Rust (eg_companion's `SelectedView`).
+export struct SelectedModView {
+    name: string,
+    // "Version 0.12.1 by sengokudaikon"; the DLL's file name has a line of its own.
+    detail: string,
+    file: string,
+    // A mod built here: where its project is, and how its latest build stands to the installed one.
+    source: string,
+    source-path: string,
+    build-status: string,
+    description: string,
+    // Why it did not load.
+    problem: string,
+    // A change waiting for the next game with mods.
+    state: string,
+    enabled: bool,
+    has-sources: bool,
+    can-install-build: bool,
+    rebuild-text: string,
+    rebuild-tip: string,
+    install-build-text: string,
+    // The last game's log lines are from an earlier build of it.
+    previous-build: bool,
+}
+
 export global ModsState {
     in property <[ModRow]> mods;
     in property <[SourceRow]> sources;
@@ -40,24 +65,8 @@ export global ModsState {
     in property <MessageTone> readiness-tone: MessageTone.info;
     in property <bool> can-play;
     in property <bool> busy;
-    in property <string> selected-name;
-    // "Version 0.12.1 by sengokudaikon"; the DLL's file name has a line of its own.
-    in property <string> selected-detail;
-    in property <string> selected-file;
-    in property <string> selected-source;
-    in property <string> selected-source-path;
-    in property <string> selected-build-status;
-    in property <string> selected-description;
-    in property <string> selected-problem;
-    in property <string> selected-state;
-    in property <bool> selected-enabled;
-    in property <bool> selected-has-sources;
-    in property <bool> can-install-build;
+    in property <SelectedModView> selected;
     in property <bool> building;
-    in property <string> rebuild-text;
-    in property <string> rebuild-tip;
-    in property <string> install-build-text;
-    in property <bool> previous-build;
     in property <string> change-message;
     in property <bool> change-is-draft;
     in property <MessageTone> change-tone: MessageTone.info;

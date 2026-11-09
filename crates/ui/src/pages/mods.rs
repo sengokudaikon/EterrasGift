@@ -2,7 +2,7 @@
 //! `ModsState` global, and queues library work, runs the compiler and starts the game when the feature says to.
 
 use crate::shell::{Intent as ShellIntent, Page, ShellHandle};
-use crate::{MainWindow, MessageTone, ModLogRow, ModRow, ModSettingRow, ModsState, SettingChoiceRow, SourceRow};
+use crate::{MainWindow, MessageTone, ModLogRow, ModRow, ModSettingRow, ModsState, SelectedModView, SettingChoiceRow, SourceRow};
 use eg_companion::launch::launcher::GameLauncher;
 use eg_companion::mods::{
     feature::{
@@ -181,22 +181,24 @@ fn setting_row(row: SettingView) -> (ModSettingRow, Vec<SettingChoiceRow>) {
 }
 
 fn show_selected(view: &ModsState<'_>, selected: &SelectedView) {
-    view.set_selected_name(selected.name.as_str().into());
-    view.set_selected_detail(selected.detail.as_str().into());
-    view.set_selected_file(selected.file.as_str().into());
-    view.set_selected_description(selected.description.as_str().into());
-    view.set_selected_problem(selected.problem.as_str().into());
-    view.set_selected_state(selected.state.into());
-    view.set_selected_enabled(selected.enabled);
-    view.set_previous_build(selected.previous_build);
-    view.set_rebuild_text(selected.rebuild_text.into());
-    view.set_rebuild_tip(selected.rebuild_tip.into());
-    view.set_install_build_text(selected.install_build_text.as_str().into());
-    view.set_selected_source(selected.source.as_str().into());
-    view.set_selected_source_path(selected.source_path.as_str().into());
-    view.set_selected_has_sources(selected.has_sources);
-    view.set_can_install_build(selected.can_install_build);
-    view.set_selected_build_status(selected.build_status.as_str().into());
+    view.set_selected(SelectedModView {
+        name: selected.name.as_str().into(),
+        detail: selected.detail.as_str().into(),
+        file: selected.file.as_str().into(),
+        source: selected.source.as_str().into(),
+        source_path: selected.source_path.as_str().into(),
+        build_status: selected.build_status.as_str().into(),
+        description: selected.description.as_str().into(),
+        problem: selected.problem.as_str().into(),
+        state: selected.state.into(),
+        enabled: selected.enabled,
+        has_sources: selected.has_sources,
+        can_install_build: selected.can_install_build,
+        rebuild_text: selected.rebuild_text.into(),
+        rebuild_tip: selected.rebuild_tip.into(),
+        install_build_text: selected.install_build_text.as_str().into(),
+        previous_build: selected.previous_build,
+    });
 }
 
 impl WindowHost<Mods> for Window {

@@ -162,7 +162,7 @@ pub(super) fn capture_mods(session: &Session) {
         3,
         "embedded descriptions expose the three declared preferences"
     );
-    assert_eq!(ui.global::<ModsState>().get_selected_description(), "A metadata-only fixture.");
+    assert_eq!(ui.global::<ModsState>().get_selected().description, "A metadata-only fixture.");
     for (class, width, height) in SIZES {
         session.resize(width, height);
         session.capture(&ui, &format!("mods-populated-{class}"));
@@ -333,21 +333,21 @@ fn mods_input(session: &Session) {
     // its focus back, so Space turns the mod on again.
     session.key(Key::Menu);
     session.key(Key::Return);
-    wait_for("menu toggle", || !ui.global::<ModsState>().get_selected_enabled());
+    wait_for("menu toggle", || !ui.global::<ModsState>().get_selected().enabled);
     session.type_text(" ");
-    wait_for("list focus after the menu", || ui.global::<ModsState>().get_selected_enabled());
+    wait_for("list focus after the menu", || ui.global::<ModsState>().get_selected().enabled);
     wait_for("no mod draft", || ui.global::<ModsState>().get_draft_count() == 0);
 
     // Pointer selection establishes the list's keyboard stop; Space changes the durable desired state.
     session.click(200.0, 197.0);
     session.type_text(" ");
-    wait_for("toggle mod", || !ui.global::<ModsState>().get_selected_enabled());
+    wait_for("toggle mod", || !ui.global::<ModsState>().get_selected().enabled);
     assert!(!fixture.worker.call(|library| Ok(library.profile()?.mods[0].enabled)).unwrap());
     session.capture(&ui, "mods-toggled");
 
     session.click(800.0, 670.0);
     wait_for("revert mod draft", || {
-        ui.global::<ModsState>().get_selected_enabled() && ui.global::<ModsState>().get_draft_count() == 0
+        ui.global::<ModsState>().get_selected().enabled && ui.global::<ModsState>().get_draft_count() == 0
     });
     assert!(fixture.worker.call(|library| Ok(library.profile()?.mods[0].enabled)).unwrap());
 
@@ -446,7 +446,7 @@ fn mods_input(session: &Session) {
     assert!(!fixture.worker.call(|library| Ok(library.profile()?.mods[0].enabled)).unwrap());
     session.click(RAIL_X, 122.0);
     wait_for("return to Mods", || {
-        ui.global::<ModsState>().get_installed_count() == 1 && !ui.global::<ModsState>().get_selected_enabled()
+        ui.global::<ModsState>().get_installed_count() == 1 && !ui.global::<ModsState>().get_selected().enabled
     });
     session.capture(&ui, "mods-edit-after-navigation");
 
@@ -683,7 +683,7 @@ pub(super) fn mods_captures(session: &Session) {
     assert_eq!((state(&ui).get_enabled_count(), state(&ui).get_installed_count()), (3, 4));
     assert_eq!(state(&ui).get_readiness(), "Stash Sorter didn't load last time. Turn it off or replace it.");
     select(&ui, "Flicker Dreams");
-    assert_eq!(state(&ui).get_selected_detail(), "Version 0.12.1 by sengokudaikon");
+    assert_eq!(state(&ui).get_selected().detail, "Version 0.12.1 by sengokudaikon");
     assert_eq!(
         state(&ui).get_settings().iter().map(|setting| setting.name.to_string()).collect::<Vec<_>>(),
         ["Reach multiplier", "Refractions move", "Flicks", "Blink"]
@@ -698,7 +698,7 @@ pub(super) fn mods_captures(session: &Session) {
     // A mod that did not load says why, from MelonLoader's own line, and warns before the next game.
     select(&ui, "Stash Sorter");
     assert_eq!(
-        state(&ui).get_selected_problem(),
+        state(&ui).get_selected().problem,
         "Didn't load last time. Failed to load Melon 'Stash Sorter' from '.\\Mods\\StashSorter.dll': built for MelonLoader 0.6.1"
     );
     session.capture(&ui, "mods-problem");
@@ -708,8 +708,8 @@ pub(super) fn mods_captures(session: &Session) {
 
     // Turning it off is a draft until the next game with mods; so are edited settings, counted with it.
     state(&ui).invoke_toggle_mod(index_of(&ui, "Stash Sorter"));
-    wait_for("Stash Sorter off", || !state(&ui).get_selected_enabled() && state(&ui).get_draft_count() == 1);
-    assert_eq!(state(&ui).get_selected_state(), "Turns off the next time you play with mods");
+    wait_for("Stash Sorter off", || !state(&ui).get_selected().enabled && state(&ui).get_draft_count() == 1);
+    assert_eq!(state(&ui).get_selected().state, "Turns off the next time you play with mods");
     select(&ui, "Flicker Dreams");
     state(&ui).invoke_setting_edited(0, "1.5".into());
     state(&ui).invoke_setting_edited(3, "end".into());
@@ -746,7 +746,7 @@ pub(super) fn mods_captures(session: &Session) {
         button: PointerEventButton::Right,
     });
     session.idle();
-    assert_eq!(state(&ui).get_selected_name(), "Flicker Dreams");
+    assert_eq!(state(&ui).get_selected().name, "Flicker Dreams");
     session.capture(&ui, "mods-row-menu-pointer");
     session.key(Key::Escape);
 
@@ -755,12 +755,12 @@ pub(super) fn mods_captures(session: &Session) {
     assert_eq!(state(&ui).get_selected_index(), 0);
     session.key(Key::Delete);
     wait_for("removal", || state(&ui).get_installed_count() == 3 && state(&ui).get_can_undo());
-    assert_eq!(state(&ui).get_selected_name(), "Flicker Dreams");
+    assert_eq!(state(&ui).get_selected().name, "Flicker Dreams");
     assert!(state(&ui).get_change_message().starts_with("Ability Ranges is removed."));
     session.capture(&ui, "mods-removed");
     session.control_key("z");
     wait_for("undo", || state(&ui).get_installed_count() == 4 && state(&ui).get_change_message().is_empty());
-    assert_eq!(state(&ui).get_selected_name(), "Ability Ranges");
+    assert_eq!(state(&ui).get_selected().name, "Ability Ranges");
 
     // A number the cfg can't hold is said under it and kept as typed.
     select(&ui, "Flicker Dreams");
@@ -856,7 +856,7 @@ pub(super) fn mods_captures(session: &Session) {
     wait_message(&ui, "Loom built", "Installed Loom 0.2.0. It loads the next time you play with mods.");
     wait_for("Loom installed", || state(&ui).get_sources().row_count() == 1);
     assert_eq!(
-        (state(&ui).get_selected_name().as_str(), state(&ui).get_selected_state().as_str()),
+        (state(&ui).get_selected().name.as_str(), state(&ui).get_selected().state.as_str()),
         ("Loom", "Turns on the next time you play with mods")
     );
     session.capture(&ui, "mods-not-installed-built");
@@ -878,16 +878,16 @@ pub(super) fn mods_captures(session: &Session) {
     let fixture = game_folder(Some((&sources, runner.clone())));
     let ui = session.open_mods(&fixture, 1100, 700);
     select(&ui, "Flicker Dreams");
-    wait_for("Flicker's sources", || state(&ui).get_selected_has_sources());
+    wait_for("Flicker's sources", || state(&ui).get_selected().has_sources);
     assert_eq!(
-        (state(&ui).get_selected_build_status().as_str(), state(&ui).get_install_build_text().as_str()),
+        (state(&ui).get_selected().build_status.as_str(), state(&ui).get_selected().install_build_text.as_str()),
         ("The latest build (0.13.0) isn't installed.", "Install 0.13.0")
     );
     session.capture(&ui, "mods-source");
     state(&ui).invoke_install_build(state(&ui).get_selected_index());
     wait_message(&ui, "install build", "Installed Flicker Dreams 0.13.0. It loads the next time you play with mods.");
     wait_for("build waiting", || {
-        state(&ui).get_selected_state() == "This build is installed the next time you play with mods"
+        state(&ui).get_selected().state == "This build is installed the next time you play with mods"
     });
     session.capture(&ui, "mods-build-waiting");
     *runner.output.lock().unwrap() = Err(format!("  Mod.cs(3,1): error CS1002: ; expected [{}]", flicker.display()));
@@ -904,9 +904,9 @@ pub(super) fn mods_captures(session: &Session) {
     project(&sources, "flickerdreams/src", "FlickerDreams", true, Some("0.13.0"));
     std::fs::write(&target, FLICKER_0_13_0_FROM_0_13_0).unwrap();
     state(&ui).invoke_refresh();
-    wait_for("update available", || state(&ui).get_rebuild_text() == "Update");
+    wait_for("update available", || state(&ui).get_selected().rebuild_text == "Update");
     assert_eq!(
-        (state(&ui).get_selected_build_status().as_str(), state(&ui).get_can_install_build()),
+        (state(&ui).get_selected().build_status.as_str(), state(&ui).get_selected().can_install_build),
         ("Update available.", false)
     );
     sizes(&ui, "mods-update-available");
