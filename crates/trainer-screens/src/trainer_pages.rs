@@ -40,8 +40,10 @@ pub struct Facts {
     pub unavailable: BTreeMap<&'static str, &'static str>,
 }
 
-/// Reads the session once for everything the rows ask of it.
+/// Reads the session once for everything the rows ask of it, all from one state of the worker.
 pub fn read_facts(session: &dyn TrainerSession, features: &[Feature]) -> Facts {
+    let held = session.at_once();
+    let session = held.as_deref().unwrap_or(session);
     let mut facts = Facts {
         connected: session.is_connected(),
         profiles: session.profiles(),

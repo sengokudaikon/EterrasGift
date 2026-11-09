@@ -1,7 +1,7 @@
 //! Stand-ins for what the worker looks at, for tests and captures that run it with no game: the game's processes, its log,
 //! and the preparation of a connection. Behind the `testing` feature.
 
-use crate::backend::{BackendConnection, BackendError, Connector, ProcessIdentity, ProcessLocator};
+use crate::backend::{BackendConnection, BackendError, BackendHandle, BackendSnapshot, Connector, ProcessIdentity, ProcessLocator};
 use crate::connect::gate::LogSource;
 use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness, LoggedCharacter};
 use jiff::Timestamp;
@@ -9,6 +9,14 @@ use std::marker::PhantomData;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::sync::watch;
+
+/// A handle on snapshots the test publishes through the sender, at the moments it chooses, with no worker behind it: what
+/// a screen reads of a worker, without one.
+pub fn published(first: BackendSnapshot) -> (BackendHandle, watch::Sender<Arc<BackendSnapshot>>) {
+    let (publish, published) = watch::channel(Arc::new(first));
+    (BackendHandle::watching(published), publish)
+}
 
 /// Copies of one game, as a locator finds them. How many can change while the worker runs.
 #[derive(Clone, Debug)]

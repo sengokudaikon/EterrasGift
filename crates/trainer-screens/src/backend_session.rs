@@ -10,6 +10,7 @@ use phrases::phrases;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 phrases! {
     ReadFieldsFirst: "Read these fields before applying changes"
@@ -139,43 +140,52 @@ impl BackendSession {
         Some((snapshot.editing.clone()?, snapshot.shown_hooks()?))
     }
 
-    /// The worker's latest snapshot, while it runs.
+    /// The session as it stands now: the worker's latest snapshot, while it runs, and the changes it hasn't taken.
+    fn now(&self) -> AtOnce<'_> {
+        AtOnce {
+            session: self,
+            snapshot: self.backend.is_running().then(|| self.backend.latest()),
+        }
+    }
+}
+
+/// The session at one snapshot of the worker: every read answers from it, so a read of many questions sees one state.
+/// Changes and requests go to the session.
+struct AtOnce<'a> {
+    session: &'a BackendSession,
+    /// None once the worker has stopped.
+    snapshot: Option<Arc<BackendSnapshot>>,
+}
+
+impl AtOnce<'_> {
     fn with<R>(&self, look: impl FnOnce(&BackendSnapshot) -> R) -> Option<R> {
-        self.backend.is_running().then(|| self.backend.peek(look))
+        self.snapshot.as_deref().map(look)
     }
 }
 
 impl TrainerSession for BackendSession {
+    fn at_once(&self) -> Option<Box<dyn TrainerSession + '_>> {
+        Some(Box::new(self.now()))
+    }
+
     fn is_connected(&self) -> bool {
-        self.with(|snapshot| snapshot.phase == Phase::Ready).unwrap_or(false)
+        self.now().is_connected()
     }
 
     fn unavailable(&self, id: &str) -> Option<&'static str> {
-        let served = self
-            .with(|snapshot| {
-                use eg_trainer::features::{FeatureKey, NativeSupport};
-                match FeatureKey::parse(id).map(|key| key.descriptor().native_support()) {
-                    Some(NativeSupport::GameplayOverride(hook)) => snapshot.capabilities.gameplay_hooks[hook as usize],
-                    Some(NativeSupport::FieldEditor(set)) => snapshot.capabilities.fields[set as usize],
-                    _ => false,
-                }
-            })
-            .unwrap_or(false);
-        (!served).then_some(NotAvailable.get())
+        self.now().unavailable(id)
     }
 
     fn profiles(&self) -> Vec<Profile> {
-        self.with(|snapshot| snapshot.profiles.profiles().iter().map(|profile| profile_of(&profile.key)).collect())
-            .unwrap_or_default()
+        self.now().profiles()
     }
 
     fn shown_profile(&self) -> Option<Profile> {
-        self.with(|snapshot| self.shown(snapshot).map(|(key, _)| profile_of(&key))).flatten()
+        self.now().shown_profile()
     }
 
     fn is_profile_kept(&self) -> bool {
-        self.with(|snapshot| self.shown(snapshot).is_none_or(|(key, _)| snapshot.profiles.get(&key).is_some()))
-            .unwrap_or(true)
+        self.now().is_profile_kept()
     }
 
     fn keep_profile(&self) {
@@ -204,13 +214,7 @@ impl TrainerSession for BackendSession {
     }
 
     fn is_hook_wanted(&self, id: &str) -> bool {
-        let Some(id) = HookId::parse(id) else {
-            return false;
-        };
-        if let Some((_, on)) = self.changes.borrow().switching.get(&id) {
-            return *on;
-        }
-        self.with(|snapshot| self.shown(snapshot).is_some_and(|(_, hooks)| hooks.is_wanted(id))).unwrap_or(false)
+        self.now().is_hook_wanted(id)
     }
 
     fn set_hook(&self, id: &str, on: bool) {
@@ -221,12 +225,7 @@ impl TrainerSession for BackendSession {
     }
 
     fn hook_values(&self, id: &str) -> Vec<f64> {
-        let Some(id) = HookId::parse(id) else {
-            return Vec::new();
-        };
-        self.with(|snapshot| self.shown(snapshot).map(|(_, hooks)| hooks.values(id).to_vec()))
-            .flatten()
-            .unwrap_or_default()
+        self.now().hook_values(id)
     }
 
     fn set_hook_values(&self, id: &str, values: &[f64]) {
@@ -244,11 +243,7 @@ impl TrainerSession for BackendSession {
     }
 
     fn hook_state(&self, id: &str) -> Option<HookState> {
-        let id = HookId::parse(id)?;
-        if self.changes.borrow().switching.contains_key(&id) {
-            return Some(HookState::Applying);
-        }
-        self.with(|snapshot| snapshot.hooks.get(&id).cloned()).flatten()
+        self.now().hook_state(id)
     }
 
     fn is_busy(&self) -> bool {
@@ -298,6 +293,104 @@ impl TrainerSession for BackendSession {
     }
 }
 
+impl TrainerSession for AtOnce<'_> {
+    fn is_connected(&self) -> bool {
+        self.with(|snapshot| snapshot.phase == Phase::Ready).unwrap_or(false)
+    }
+
+    fn unavailable(&self, id: &str) -> Option<&'static str> {
+        let served = self
+            .with(|snapshot| {
+                use eg_trainer::features::{FeatureKey, NativeSupport};
+                match FeatureKey::parse(id).map(|key| key.descriptor().native_support()) {
+                    Some(NativeSupport::GameplayOverride(hook)) => snapshot.capabilities.gameplay_hooks[hook as usize],
+                    Some(NativeSupport::FieldEditor(set)) => snapshot.capabilities.fields[set as usize],
+                    _ => false,
+                }
+            })
+            .unwrap_or(false);
+        (!served).then_some(NotAvailable.get())
+    }
+
+    fn profiles(&self) -> Vec<Profile> {
+        self.with(|snapshot| snapshot.profiles.profiles().iter().map(|profile| profile_of(&profile.key)).collect())
+            .unwrap_or_default()
+    }
+
+    fn shown_profile(&self) -> Option<Profile> {
+        self.with(|snapshot| self.session.shown(snapshot).map(|(key, _)| profile_of(&key))).flatten()
+    }
+
+    fn is_profile_kept(&self) -> bool {
+        self.with(|snapshot| self.session.shown(snapshot).is_none_or(|(key, _)| snapshot.profiles.get(&key).is_some()))
+            .unwrap_or(true)
+    }
+
+    fn is_hook_wanted(&self, id: &str) -> bool {
+        let Some(id) = HookId::parse(id) else {
+            return false;
+        };
+        if let Some((_, on)) = self.session.changes.borrow().switching.get(&id) {
+            return *on;
+        }
+        self.with(|snapshot| self.session.shown(snapshot).is_some_and(|(_, hooks)| hooks.is_wanted(id)))
+            .unwrap_or(false)
+    }
+
+    fn hook_values(&self, id: &str) -> Vec<f64> {
+        let Some(id) = HookId::parse(id) else {
+            return Vec::new();
+        };
+        self.with(|snapshot| self.session.shown(snapshot).map(|(_, hooks)| hooks.values(id).to_vec()))
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    fn hook_state(&self, id: &str) -> Option<HookState> {
+        let id = HookId::parse(id)?;
+        if self.session.changes.borrow().switching.contains_key(&id) {
+            return Some(HookState::Applying);
+        }
+        self.with(|snapshot| snapshot.hooks.get(&id).cloned()).flatten()
+    }
+
+    fn select_profile(&self, profile: &Profile) {
+        self.session.select_profile(profile)
+    }
+
+    fn keep_profile(&self) {
+        self.session.keep_profile()
+    }
+
+    fn delete_profile(&self, profile: &Profile) {
+        self.session.delete_profile(profile)
+    }
+
+    fn set_hook(&self, id: &str, on: bool) {
+        self.session.set_hook(id, on)
+    }
+
+    fn set_hook_values(&self, id: &str, values: &[f64]) {
+        self.session.set_hook_values(id, values)
+    }
+
+    fn is_busy(&self) -> bool {
+        self.session.is_busy()
+    }
+
+    fn settling(&self) -> Vec<Settling> {
+        self.session.settling()
+    }
+
+    fn read_fields(&self, id: &str) -> FieldRequest {
+        self.session.read_fields(id)
+    }
+
+    fn write_fields(&self, id: &str, fields: &[FieldWrite]) -> FieldRequest {
+        self.session.write_fields(id, fields)
+    }
+}
+
 fn profile_of(key: &ProfileKey) -> Profile {
     Profile {
         name: key.name.clone(),
@@ -329,4 +422,23 @@ pub(crate) fn sentence(message: &str) -> String {
         text.push('.');
     }
     text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::snapshot;
+    use eg_trainer::testing::published;
+
+    #[test]
+    fn a_held_read_answers_from_one_snapshot_however_the_worker_moves() {
+        let (backend, publish) = published(snapshot(1, Phase::Ready));
+        let session = BackendSession::new(backend);
+        let held = session.at_once().expect("the worker's session holds a state");
+        assert!(held.is_connected());
+        publish.send_replace(Arc::new(snapshot(2, Phase::WaitingForCharacter)));
+        assert!(held.is_connected(), "a held read answers from the snapshot it was held at");
+        drop(held);
+        assert!(!session.is_connected(), "a read after it sees what the worker published since");
+    }
 }

@@ -117,6 +117,11 @@ pub trait TrainerSession {
     }
     fn read_fields(&self, id: &str) -> FieldRequest;
     fn write_fields(&self, id: &str, fields: &[FieldWrite]) -> FieldRequest;
+    /// The session held at its present state, for a read of many questions: every answer the view gives comes from that
+    /// one state, however the worker moves meanwhile. None from a session that is one state already.
+    fn at_once(&self) -> Option<Box<dyn TrainerSession + '_>> {
+        None
+    }
 }
 
 /// The session without a trainer worker: never connected, and without profiles, so no hook can be set up.

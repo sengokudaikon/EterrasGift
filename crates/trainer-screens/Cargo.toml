@@ -16,6 +16,7 @@ phrases.workspace = true
 jiff.workspace = true
 
 [dev-dependencies]
+eg-trainer = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
 
 [lints]

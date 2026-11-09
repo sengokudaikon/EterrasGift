@@ -312,6 +312,19 @@ impl BackendHandle {
     }
 }
 
+impl BackendHandle {
+    /// A handle on snapshots `published` by a test itself, with no worker behind it: commands find it stopped.
+    #[cfg(feature = "testing")]
+    pub(crate) fn watching(published: watch::Receiver<Arc<BackendSnapshot>>) -> BackendHandle {
+        BackendHandle {
+            commands: mpsc::channel(1).0,
+            snapshots: published,
+            intent: Arc::new(Mutex::new(0)),
+            handles: Arc::new(AtomicUsize::new(1)),
+        }
+    }
+}
+
 impl Drop for BackendHandle {
     fn drop(&mut self) {
         if self.handles.fetch_sub(1, Ordering::AcqRel) == 1 {
