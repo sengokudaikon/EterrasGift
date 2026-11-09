@@ -13,6 +13,7 @@ use eg_trainer::definitions::catalog::GameCatalog;
 use eg_trainer::item::template::ItemTemplate;
 use phrases::phrases;
 use spiderland::{CloseAnswer, Effects, Error, Feature, Pulse, Tracked};
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 phrases! {
@@ -217,6 +218,10 @@ pub struct State {
     focus: Pulse<Focus>,
     /// The window waits for the Forge to close: `Some(true)` once it has waited for a write.
     closing: Option<bool>,
+    /// Work on the template files is under way: one at a time, in the order asked.
+    templates_busy: bool,
+    /// What waits for it, first first.
+    templates_waiting: VecDeque<Effect>,
 }
 
 impl State {
@@ -237,6 +242,8 @@ impl State {
                 part: 0,
             }),
             closing: None,
+            templates_busy: false,
+            templates_waiting: VecDeque::new(),
         }
     }
 
@@ -279,9 +286,28 @@ fn next_with_rolls(from: usize, delta: i32, count: usize, rolls_of: impl Fn(usiz
     None
 }
 
-fn read_templates<O>(editor: &ForgeEditor, effects: &mut Effects<Effect, O>) {
-    if editor.keeps_templates {
-        effects.push(Effect::ReadTemplates);
+fn read_templates<O>(state: &mut State, effects: &mut Effects<Effect, O>) {
+    if state.editor.keeps_templates {
+        template_work(state, Effect::ReadTemplates, effects);
+    }
+}
+
+/// Work on the template files goes one at a time, in the order asked: an older save never lands after a newer one, and a
+/// read sees what was written before it. A read waiting last covers another.
+fn template_work<O>(state: &mut State, work: Effect, effects: &mut Effects<Effect, O>) {
+    if !state.templates_busy {
+        state.templates_busy = true;
+        effects.push(work);
+    } else if !(matches!(work, Effect::ReadTemplates) && matches!(state.templates_waiting.back(), Some(Effect::ReadTemplates))) {
+        state.templates_waiting.push_back(work);
+    }
+}
+
+/// The work under way on the template files came back: what waited next goes.
+fn template_done<O>(state: &mut State, effects: &mut Effects<Effect, O>) {
+    state.templates_busy = false;
+    if let Some(next) = state.templates_waiting.pop_front() {
+        template_work(state, next, effects);
     }
 }
 
@@ -389,7 +415,7 @@ impl Feature for Forge {
 
     fn start(state: &mut State, effects: &mut Effects<Effect>) {
         effects.push(Effect::Observe);
-        read_templates(&state.editor, effects);
+        read_templates(state, effects);
     }
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect, Output>) {
@@ -488,38 +514,42 @@ impl Feature for Forge {
             Intent::MaxTiers => editor.max_tiers(),
             Intent::MaxRolls => editor.max_rolls(),
             // Templates are read from their folder at the start, when the flyout opens and after each change.
-            Intent::ReadTemplates => read_templates(editor, effects),
+            Intent::ReadTemplates => read_templates(state, effects),
             Intent::TemplatesRead(found) => {
                 // After a panic, which is in the fault log, what was read before stays.
                 if let Ok(found) = found {
                     *editor.templates = found;
                 }
+                template_done(state, effects);
             }
             Intent::TemplatesOpened => {
                 editor.template_message.clear();
                 editor.template_name.clear();
-                read_templates(editor, effects);
+                read_templates(state, effects);
             }
             Intent::TemplateName(name) => {
                 editor.template_name = name;
             }
             Intent::TemplateSave(name, whole) => match editor.template_to_save(&name, whole) {
-                Ok((template, replaced)) => effects.push(Effect::SaveTemplate { template, replaced }),
+                Ok((template, replaced)) => template_work(state, Effect::SaveTemplate { template, replaced }, effects),
                 Err(problem) => editor.template_message = problem,
             },
             Intent::TemplateSaved { name, replaced, result } => {
                 editor.template_saved(&name, replaced, failure_of(result));
-                read_templates(editor, effects);
+                // Asked before the next work goes, so a read already waiting covers it.
+                read_templates(state, effects);
+                template_done(state, effects);
             }
             Intent::TemplateApply(index) => editor.apply_template(index),
             Intent::TemplateDelete(index) => {
-                if let Some(template) = editor.templates.get(index) {
-                    effects.push(Effect::DeleteTemplate(template.name.clone()));
+                if let Some(name) = editor.templates.get(index).map(|template| template.name.clone()) {
+                    template_work(state, Effect::DeleteTemplate(name), effects);
                 }
             }
             Intent::TemplateDeleted { name, result } => {
                 editor.template_deleted(&name, failure_of(result));
-                read_templates(editor, effects);
+                read_templates(state, effects);
+                template_done(state, effects);
             }
             Intent::Apply => editor.apply(),
             Intent::Undo => editor.undo(),
@@ -746,9 +776,47 @@ mod tests {
         assert!(matches!(step::<Forge>(&mut state, saved).effects.as_slice(), [Effect::ReadTemplates]));
         assert_eq!(state.editor().template_message, "Saved \"BOOTS\" in place of \"Boots\".");
         assert_eq!(state.editor().template_name, "", "a saved name is done with");
+        step::<Forge>(&mut state, Intent::TemplatesRead(Ok(vec![template("Boots")])));
         let effects = step::<Forge>(&mut state, Intent::TemplateDelete(0)).effects;
         assert!(matches!(effects.as_slice(), [Effect::DeleteTemplate(name)] if name == "Boots"));
         assert!(step::<Forge>(&mut state, Intent::TemplateDelete(5)).effects.is_empty(), "no such row");
+    }
+
+    #[test]
+    fn template_work_goes_one_at_a_time_in_the_order_asked() {
+        let mut state = keeping();
+        step::<Forge>(&mut state, Intent::TemplatesRead(Ok(vec![template("Boots"), template("Gloves")])));
+        let first = step::<Forge>(&mut state, Intent::TemplateDelete(0)).effects;
+        assert!(matches!(first.as_slice(), [Effect::DeleteTemplate(name)] if name == "Boots"));
+        assert!(
+            step::<Forge>(&mut state, Intent::TemplateDelete(1)).effects.is_empty(),
+            "the next delete waits for the first"
+        );
+        assert!(step::<Forge>(&mut state, Intent::TemplatesOpened).effects.is_empty(), "and so does a read");
+        let deleted = |name: &str| Intent::TemplateDeleted {
+            name: name.into(),
+            result: Ok(Ok(())),
+        };
+        let next = step::<Forge>(&mut state, deleted("Boots")).effects;
+        assert!(matches!(next.as_slice(), [Effect::DeleteTemplate(name)] if name == "Gloves"), "the delete goes next");
+        // The read asked while it waited, and the one after each delete, are one read after both.
+        assert!(matches!(step::<Forge>(&mut state, deleted("Gloves")).effects.as_slice(), [Effect::ReadTemplates]));
+        assert!(step::<Forge>(&mut state, Intent::TemplatesRead(Ok(Vec::new()))).effects.is_empty(), "nothing more waits");
+    }
+
+    #[test]
+    fn a_save_that_comes_back_late_leaves_a_newly_typed_name_alone() {
+        let mut state = keeping();
+        step::<Forge>(&mut state, Intent::TemplateName("Gloves".into()));
+        step::<Forge>(
+            &mut state,
+            Intent::TemplateSaved {
+                name: "Boots".into(),
+                replaced: None,
+                result: Ok(Ok(())),
+            },
+        );
+        assert_eq!(state.editor().template_name, "Gloves");
     }
 
     #[test]

@@ -5,6 +5,7 @@ code and its tests, and what is still to build in [the helper's backlog](crates/
 
 ## 2026-11-09
 
+- Item Forge: template saves and deletes run one at a time in the order asked, and a save that finishes late leaves a newly typed name alone.
 - Item Forge: closing the window during Apply or Undo waits until every step is sent and read back; a step that fails keeps the window open on the Forge.
 - Mods: closing during a build stops the compiler and closes at once; a build already installing finishes and isn't started again if the close is called off.
 - Build: a dev build composites Eterra's band as a shipped one does (1.3–1.6 ms a frame, from 11–12): it is eg-ui-band, optimised in every profile.

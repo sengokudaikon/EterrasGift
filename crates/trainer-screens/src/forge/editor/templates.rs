@@ -81,7 +81,8 @@ impl ForgeEditor {
             SavedOver: "Saved \"{name}\" in place of \"{kept}\"."
             Saved: "Saved \"{name}\"."
         }
-        if error.is_none() {
+        // A name typed since the save was asked for is the next one, not this.
+        if error.is_none() && self.template_name == name {
             self.template_name.clear();
         }
         self.template_message = match (error, replaced) {
