@@ -20,17 +20,17 @@ fn points(value: i32, allocated: i32) -> Result<u16, WriteError> {
     u16::try_from(value).map_err(|_| WriteError::Refused("Points earned are from 0 to 65535".into()))
 }
 impl RuntimeAccess {
-    pub(super) unsafe fn points_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>, api: raw::InvocationApi, manager: Root<'a, 'r>) -> Result<FieldGraph<'a, 'r>, WriteError> {
+    pub(super) unsafe fn points_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>, manager: Root<'a, 'r>) -> Result<FieldGraph<'a, 'r>, WriteError> {
         // SAFETY: rooted current actor/trees and checked getter invocation; returned trees are rooted immediately.
         unsafe {
             let actor = self.field_child(attached, &manager, c"actor")?;
             let trees = self.field_child(attached, &actor, c"localTreeData")?;
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let mut entries = Vec::new();
             let mut values = Vec::new();
             for (get_tree, get_points) in [(c"getPassiveTreeData", c"getPointsEarnt"), (c"getWeaverTreeData", c"get_EarnedWeaverPoints")] {
-                let tree = reference(returned(self.field_call(&context, api, &trees, get_tree, 0)?.invoke(Some(&trees), &mut []))?)?;
-                let value = match returned(self.field_call(&context, api, &tree, get_points, 0)?.invoke(Some(&tree), &mut []))? {
+                let tree = reference(returned(self.field_call(&context, &trees, get_tree, 0)?.invoke(Some(&trees), &mut []))?)?;
+                let value = match returned(self.field_call(&context, &tree, get_points, 0)?.invoke(Some(&tree), &mut []))? {
                     ReturnValue::Scalar { value: Scalar::U16(value), .. } => i32::from(value),
                     _ => return Err(WriteError::Refused("Unexpected earned points result".into())),
                 };
@@ -46,25 +46,19 @@ impl RuntimeAccess {
             })
         }
     }
-    pub(super) unsafe fn apply_points(
-        &self,
-        attached: &AttachedThread<'_>,
-        api: raw::InvocationApi,
-        graph: &FieldGraph<'_, '_>,
-        values: &[Option<i32>],
-    ) -> Result<Snapshot, WriteError> {
+    pub(super) unsafe fn apply_points(&self, attached: &AttachedThread<'_>, graph: &FieldGraph<'_, '_>, values: &[Option<i32>]) -> Result<Snapshot, WriteError> {
         // SAFETY: exact setters and all allocation floors are prepared before the first store; tree roots span calls.
         unsafe {
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let mut changes = Vec::new();
             for (index, name) in [c"setPointsEarnt", c"set_EarnedWeaverPoints"].into_iter().enumerate() {
                 let Some(value) = values[index].filter(|value| *value != graph.snapshot.fields[index].value) else {
                     continue;
                 };
                 let tree = &graph.entries[index];
-                let allocated = integer(returned(self.field_call(&context, api, tree, c"numberOfPointsAllocated", 0)?.invoke(Some(tree), &mut []))?)?;
+                let allocated = integer(returned(self.field_call(&context, tree, c"numberOfPointsAllocated", 0)?.invoke(Some(tree), &mut []))?)?;
                 let value = points(value, allocated)?;
-                changes.push((tree, self.field_exact(&context, api, tree, &setter(name))?, value));
+                changes.push((tree, self.field_exact(&context, tree, &setter(name))?, value));
             }
             self.field_gate(attached, graph.snapshot.manager)?;
             stored(
@@ -75,7 +69,7 @@ impl RuntimeAccess {
                     }
                     Ok(())
                 },
-                || self.read_field_set(attached, api, graph.snapshot.manager, graph.snapshot.set),
+                || self.read_field_set(attached, graph.snapshot.manager, graph.snapshot.set),
             )
         }
     }

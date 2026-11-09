@@ -25,11 +25,11 @@ impl Behavior {
     /// Optional main-thread refresh after a settings change or receiver replacement, outside the coordinator's
     /// lock. It is a presentation nicety; a game exception here does not undo or retry the confirmed field change.
     /// # Safety
-    /// Admitted attached main thread and retained runtime invocation API.
-    pub(crate) unsafe fn refresh(self, access: &RuntimeAccess, attached: &il2cpp_runtime::AttachedThread<'_>, api: raw::InvocationApi) {
+    /// Admitted attached main thread of the retained runtime.
+    pub(crate) unsafe fn refresh(self, access: &RuntimeAccess, attached: &il2cpp_runtime::AttachedThread<'_>) {
         if matches!(self, Self::Camera) {
             // SAFETY: caller admits the rooted main-thread camera operation; the feature validates the exact method.
-            let _ = unsafe { access.refresh_camera(attached, api) };
+            let _ = unsafe { access.refresh_camera(attached) };
         }
     }
 }

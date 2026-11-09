@@ -1,8 +1,8 @@
 //! What a Unity player adds to the runtime, through its managed classes: whether a wrapper's native object still exists,
 //! and whether this is Unity's main thread.
 
-use crate::metadata::{Class, Exports, MetadataError, MethodError, MethodQuery, Others, Returns, target, unsupported};
-use crate::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, StrongRoot, raw};
+use crate::metadata::{Class, MetadataError, MethodError, MethodQuery, Others, Returns, target, unsupported};
+use crate::{AttachedThread, Exports, InvocationContext, InvocationOutcome, ReturnValue, Scalar, StrongRoot};
 use std::ptr::NonNull;
 
 impl Exports {
@@ -27,10 +27,10 @@ impl Exports {
     /// any contract failure's text.
     ///
     /// # Safety
-    /// An attached thread of an initialized Unity runtime, with its code and metadata resident, and `api` of that runtime.
+    /// An attached thread of an initialized Unity runtime, with its code and metadata resident.
     /// `Object.CurrentThreadIsMainThread` is an internal call that compares the caller's OS identity with Unity's native
     /// main-thread identity; the caller permits its cold icall resolution and Object's class initialization.
-    pub unsafe fn current_thread_is_main(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, owner: Class, label: &str) -> Result<bool, MetadataError> {
+    pub unsafe fn current_thread_is_main(&self, attached: &AttachedThread<'_>, owner: Class, label: &str) -> Result<bool, MetadataError> {
         // SAFETY: The checked, thread-safe engine predicate observes only caller identity.
         unsafe {
             let query = MethodQuery {
@@ -47,7 +47,7 @@ impl Exports {
                 MethodError::Untyped | MethodError::Twice | MethodError::Signature | MethodError::Parameters => unsupported(format!("{label} predicate signature")),
             })?;
             let method = NonNull::new(method.cast_mut()).ok_or_else(|| unsupported(format!("{label} predicate missing")))?;
-            let calls = InvocationContext::new(attached, api);
+            let calls = InvocationContext::new(attached);
             let predicate = calls.bind(method).map_err(|e| unsupported(e.to_string()))?;
             match predicate.invoke(None, &mut []).map_err(|e| unsupported(e.to_string()))? {
                 InvocationOutcome::Returned(ReturnValue::Scalar { value: Scalar::Boolean(main), .. }) => Ok(main),

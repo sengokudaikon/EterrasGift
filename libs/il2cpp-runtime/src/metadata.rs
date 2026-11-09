@@ -1,7 +1,7 @@
 //! Metadata lookups over the runtime's public exports: assemblies and their images, classes, fields and methods, each
 //! checked against the contract its caller states, plus the two layout adapters the queries rely on (modern x64
-//! object/array/string headers, and `MethodInfo.methodPointer` at offset 0). Nothing here invokes a managed method.
-//! Export signatures follow Unity 6000.4.8f1's `il2cpp-api-functions.h`.
+//! object/array/string headers, and `MethodInfo.methodPointer` at offset 0), as methods on the one export table,
+//! [`Exports`]. Nothing here invokes a managed method.
 //!
 //! The lookup contract, which every unsafe lookup here states as its own: the caller is attached to the live runtime
 //! the table was resolved from, its metadata stays loaded and immutable for the call (assembly loading and shutdown
@@ -10,7 +10,7 @@
 // Entry-point contracts cover the shared runtime assumptions. Keep local notes
 // for bounds, ownership and ABI details rather than repeating those contracts.
 
-use crate::{AttachedThread, RuntimeError, StrongRoot, raw};
+use crate::{AttachedThread, Exports, RuntimeError, StrongRoot, raw};
 use std::{
     ffi::{CStr, c_char, c_void},
     ptr::NonNull,
@@ -87,14 +87,6 @@ macro_rules! primitives {
 }
 primitives!(u8 => c"Byte", u16 => c"UInt16", u32 => c"UInt32", i32 => c"Int32", f32 => c"Single", usize => c"IntPtr");
 
-// Field descriptors belong to immutable metadata in the retained runtime. Only descriptor lookup is cached; object
-// values and native liveness are always read afresh.
-#[derive(Default)]
-struct FieldCache {
-    // Keyed by class, then name: a hit borrows the caller's name and allocates nothing.
-    fields: std::sync::Mutex<std::collections::HashMap<usize, std::collections::HashMap<std::ffi::CString, usize>>>,
-}
-
 /// # Safety
 /// The pointer is readable for one initialized T. T's representation matches the
 /// metadata-validated field/adapter; its owner remains rooted or is pinned code/metadata.
@@ -153,158 +145,7 @@ pub fn instance_offset(offset: usize) -> bool {
     (16..=MAX_FIELD_OFFSET).contains(&offset)
 }
 
-macro_rules! exports {
-    ($($field:ident: $name:literal => $signature:ty),+ $(,)?) => {
-        /// The metadata, allocation and status exports. Resolution alone invokes neither managed bodies nor class
-        /// initializers. Each field is the named export; calling one is the caller's unsafe contract.
-        #[derive(Clone, Copy)]
-        pub struct Exports { $(pub $field: $signature),+, cache: Option<&'static FieldCache> }
-        impl Exports {
-            /// Every export a stub that panics when reached, and no cache: a test sets the exports it expects.
-            #[cfg(any(test, feature = "test-stubs"))]
-            pub fn test_stubs() -> Self { Self { $($field: <$signature as TestExportStub>::test_stub()),+, cache: None } }
-            /// Resolve the complete metadata/status export table.
-            ///
-            /// # Safety
-            /// Every address must be the named Unity 6000.4 public export with the declared ABI.
-            /// Runtime code and immutable metadata must remain loaded for every subsequent use. GC handles
-            /// use the modern pointer-valued ABI. The resolver must not substitute other functions.
-            pub unsafe fn resolve(mut resolver: impl FnMut(&'static CStr) -> Option<NonNull<c_void>>) -> Result<Self, MetadataError> {
-                Ok(Self { $($field: {
-                    let name = CStr::from_bytes_with_nul(concat!($name, "\0").as_bytes()).expect("static symbol");
-                    let address = resolver(name).ok_or(MetadataError::MissingExport(raw::MissingExport(name)))?;
-                    // SAFETY: the caller establishes export identity, ABI and lifetime.
-                    unsafe { std::mem::transmute::<*mut c_void, $signature>(address.as_ptr()) }
-                }),+, cache: Some(Box::leak(Box::new(FieldCache::default()))) })
-            }
-        }
-    };
-}
-
-// Every test stub has its field's actual ABI/signature and fails if an unexpected export is
-// reached. Unlike casting one catch-all address, this does not manufacture mismatched functions.
-#[cfg(any(test, feature = "test-stubs"))]
-pub trait TestExportStub {
-    fn test_stub() -> Self;
-}
-#[cfg(any(test, feature = "test-stubs"))]
-macro_rules! test_export_stubs {
-    ($($argument:ident),*) => {
-        impl<$($argument,)* R> TestExportStub for unsafe extern "C-unwind" fn($($argument),*) -> R {
-            fn test_stub() -> Self {
-                unsafe extern "C-unwind" fn unexpected<$($argument,)* R>($(_: $argument),*) -> R { panic!("unexpected metadata export"); }
-                unexpected::<$($argument,)* R>
-            }
-        }
-    };
-}
-#[cfg(any(test, feature = "test-stubs"))]
-test_export_stubs!();
-#[cfg(any(test, feature = "test-stubs"))]
-test_export_stubs!(A);
-#[cfg(any(test, feature = "test-stubs"))]
-test_export_stubs!(A, B);
-#[cfg(any(test, feature = "test-stubs"))]
-test_export_stubs!(A, B, C);
-
-exports! {
-    domain_get: "il2cpp_domain_get" => raw::DomainGet,
-    assemblies: "il2cpp_domain_get_assemblies" => unsafe extern "C-unwind" fn(*const raw::Domain, *mut usize) -> *const Ptr,
-    assembly_image: "il2cpp_assembly_get_image" => unsafe extern "C-unwind" fn(Ptr) -> Ptr,
-    class_from_name: "il2cpp_class_from_name" => raw::ClassFromName,
-    class_parent: "il2cpp_class_get_parent" => unsafe extern "C-unwind" fn(Class) -> Class,
-    class_nested: "il2cpp_class_get_nested_types" => unsafe extern "C-unwind" fn(Class, *mut Ptr) -> Class,
-    class_name: "il2cpp_class_get_name" => unsafe extern "C-unwind" fn(Class) -> *const c_char,
-    class_namespace: "il2cpp_class_get_namespace" => unsafe extern "C-unwind" fn(Class) -> *const c_char,
-    class_image: "il2cpp_class_get_image" => unsafe extern "C-unwind" fn(Class) -> Ptr,
-    class_field: "il2cpp_class_get_field_from_name" => unsafe extern "C-unwind" fn(Class, *const c_char) -> Ptr,
-    field_type: "il2cpp_field_get_type" => unsafe extern "C-unwind" fn(Ptr) -> Type,
-    field_parent: "il2cpp_field_get_parent" => unsafe extern "C-unwind" fn(Ptr) -> Class,
-    field_flags: "il2cpp_field_get_flags" => unsafe extern "C-unwind" fn(Ptr) -> i32,
-    field_offset: "il2cpp_field_get_offset" => unsafe extern "C-unwind" fn(Ptr) -> usize,
-    static_get: "il2cpp_field_static_get_value" => unsafe extern "C-unwind" fn(Ptr, Ptr),
-    field_get: "il2cpp_field_get_value" => unsafe extern "C-unwind" fn(*mut raw::Object, Ptr, Ptr),
-    field_get_object: "il2cpp_field_get_value_object" => unsafe extern "C-unwind" fn(Ptr, *mut raw::Object) -> *mut raw::Object,
-    type_name: "il2cpp_type_get_name" => unsafe extern "C-unwind" fn(Type) -> *mut c_char,
-    runtime_free: "il2cpp_free" => unsafe extern "C-unwind" fn(Ptr),
-    type_class: "il2cpp_class_from_il2cpp_type" => raw::ClassFromType,
-    type_code: "il2cpp_type_get_type" => raw::TypeGetType,
-    type_byref: "il2cpp_type_is_byref" => raw::TypeIsByref,
-    class_type: "il2cpp_class_get_type" => unsafe extern "C-unwind" fn(Class) -> Type,
-    class_element: "il2cpp_class_get_element_class" => unsafe extern "C-unwind" fn(Class) -> Class,
-    class_rank: "il2cpp_class_get_rank" => unsafe extern "C-unwind" fn(*const raw::Class) -> i32,
-    class_static_data: "il2cpp_class_get_static_field_data" => unsafe extern "C-unwind" fn(Class) -> Ptr,
-    class_value: "il2cpp_class_is_valuetype" => raw::ClassIsValueType,
-    class_enum: "il2cpp_class_is_enum" => unsafe extern "C-unwind" fn(*const raw::Class) -> bool,
-    enum_base: "il2cpp_class_enum_basetype" => unsafe extern "C-unwind" fn(Class) -> Type,
-    class_methods: "il2cpp_class_get_methods" => unsafe extern "C-unwind" fn(Class, *mut Ptr) -> Method,
-    method_name: "il2cpp_method_get_name" => unsafe extern "C-unwind" fn(Method) -> *const c_char,
-    method_params: "il2cpp_method_get_param_count" => raw::MethodGetParamCount,
-    method_param: "il2cpp_method_get_param" => raw::MethodGetParam,
-    method_return: "il2cpp_method_get_return_type" => raw::MethodGetReturnType,
-    method_instance: "il2cpp_method_is_instance" => raw::MethodIsInstance,
-    method_generic: "il2cpp_method_is_generic" => raw::MethodIsGeneric,
-    method_inflated: "il2cpp_method_is_inflated" => raw::MethodIsInflated,
-    method_flags: "il2cpp_method_get_flags" => raw::MethodGetFlags,
-    method_class: "il2cpp_method_get_class" => raw::MethodGetClass,
-    corlib: "il2cpp_get_corlib" => raw::GetCorlib,
-    object_new: "il2cpp_object_new" => unsafe extern "C-unwind" fn(Class) -> *mut raw::Object,
-    array_new: "il2cpp_array_new" => unsafe extern "C-unwind" fn(Class, usize) -> *mut raw::Object,
-    array_length: "il2cpp_array_length" => unsafe extern "C-unwind" fn(*mut raw::Object) -> u32,
-    string_new: "il2cpp_string_new" => unsafe extern "C-unwind" fn(*const c_char) -> *mut raw::Object,
-    string_length: "il2cpp_string_length" => unsafe extern "C-unwind" fn(*mut raw::Object) -> i32,
-    string_chars: "il2cpp_string_chars" => unsafe extern "C-unwind" fn(*mut raw::Object) -> *mut u16,
-    object_header_size: "il2cpp_object_header_size" => unsafe extern "C-unwind" fn() -> u32,
-    array_header_size: "il2cpp_array_object_header_size" => unsafe extern "C-unwind" fn() -> u32,
-    array_length_offset: "il2cpp_offset_of_array_length_in_array_object_header" => unsafe extern "C-unwind" fn() -> u32,
-    array_bounds_offset: "il2cpp_offset_of_array_bounds_in_array_object_header" => unsafe extern "C-unwind" fn() -> u32,
-    object_class: "il2cpp_object_get_class" => raw::ObjectGetClass,
-    assignable: "il2cpp_class_is_assignable_from" => raw::ClassIsAssignableFrom,
-}
-
 impl Exports {
-    /// The invocation table for this runtime: the exports this table already holds, plus the seven only invocation
-    /// uses, resolved without calling any of them.
-    ///
-    /// # Safety
-    /// As [`Self::resolve`], with `resolver` resolving from the same runtime as this table. Resolution proves no
-    /// permission or safety to execute a particular managed method.
-    pub unsafe fn invocation(&self, mut resolver: impl FnMut(&'static CStr) -> Option<NonNull<c_void>>) -> Result<raw::InvocationApi, raw::MissingExport> {
-        macro_rules! load {
-            ($name:expr, $ty:ty) => {{
-                let address = resolver($name).ok_or(raw::MissingExport($name))?;
-                // SAFETY: the caller establishes the named export's ABI and code lifetime.
-                unsafe { std::mem::transmute::<*mut c_void, $ty>(address.as_ptr()) }
-            }};
-        }
-        Ok(raw::InvocationApi {
-            runtime_invoke: load!(c"il2cpp_runtime_invoke", raw::RuntimeInvoke),
-            class_is_generic: load!(c"il2cpp_class_is_generic", raw::ClassIsGeneric),
-            class_is_inflated: load!(c"il2cpp_class_is_inflated", raw::ClassIsInflated),
-            object_unbox: load!(c"il2cpp_object_unbox", raw::ObjectUnbox),
-            object_get_virtual_method: load!(c"il2cpp_object_get_virtual_method", raw::ObjectGetVirtualMethod),
-            class_value_size: load!(c"il2cpp_class_value_size", raw::ClassValueSize),
-            method_get_return_type: self.method_return,
-            method_is_generic: self.method_generic,
-            method_is_inflated: self.method_inflated,
-            method_is_instance: self.method_instance,
-            method_get_param_count: self.method_params,
-            method_get_param: self.method_param,
-            method_get_flags: self.method_flags,
-            method_get_class: self.method_class,
-            type_get_type: self.type_code,
-            type_is_byref: self.type_byref,
-            class_from_type: self.type_class,
-            class_is_valuetype: self.class_value,
-            class_is_assignable_from: self.assignable,
-            object_get_class: self.object_class,
-            get_corlib: self.corlib,
-            class_from_name: self.class_from_name,
-            class_is_enum: self.class_enum,
-            class_enum_basetype: self.enum_base,
-        })
-    }
-
     /// Every loaded assembly's image, bounded and checked; a runtime without a domain yet is not ready.
     ///
     /// # Safety
@@ -789,7 +630,7 @@ mod tests {
         }
         let mut access = Exports::test_stubs();
         access.class_field = lookup;
-        access.cache = Some(Box::leak(Box::new(FieldCache::default())));
+        access.cache = Some(Box::leak(Box::new(crate::exports::FieldCache::default())));
         let (mut first, mut second) = (0_u8, 0_u8);
         let first = (&raw mut first).cast();
         let second = (&raw mut second).cast();
@@ -870,12 +711,6 @@ mod tests {
             let result = unsafe { access.method((&mut flags as *mut u32).cast(), c"RebuildID", &[], true) };
             assert_eq!(result.is_ok(), flags == 0);
         }
-    }
-    #[test]
-    fn resolution_fails_before_invoking_any_missing_export() {
-        // SAFETY: no address is returned, so no ABI/lifetime promises are exercised.
-        let result = unsafe { Exports::resolve(|_| None) };
-        assert!(matches!(result, Err(MetadataError::MissingExport(raw::MissingExport(name))) if name == c"il2cpp_domain_get"));
     }
     #[test]
     fn forwarded_class_identity_is_unique_across_images() {

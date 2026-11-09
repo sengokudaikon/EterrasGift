@@ -32,7 +32,7 @@ impl RuntimeAccess {
             Ok(Some(camera))
         }
     }
-    pub(crate) unsafe fn bind_camera(&self, attached: &AttachedThread<'_>, ownership: raw::Api) -> Result<ScalarBinding, GameError> {
+    pub(crate) unsafe fn bind_camera(&self, attached: &AttachedThread<'_>) -> Result<ScalarBinding, GameError> {
         // SAFETY: rooted current camera; validate the mutable field and pin its managed storage before publishing.
         unsafe {
             let camera = self.zoom_camera(attached)?.ok_or(GameError::NotReady("camera unavailable"))?;
@@ -43,20 +43,20 @@ impl RuntimeAccess {
             let offset = self.hook_field(owner, c"zoomDefault", "System.Single", 4)?;
             let baseline = self.single_bits(&camera, field.as_ptr().cast())?;
             let online = self.hook_online_storage(&self.images()?)?.as_ptr() as usize;
-            ScalarBinding::pin(ownership, target(&camera)?.as_ptr() as usize, offset, baseline, online)
+            ScalarBinding::pin(self, target(&camera)?.as_ptr() as usize, offset, baseline, online)
         }
     }
     pub(crate) unsafe fn current_camera(&self, attached: &AttachedThread<'_>) -> Result<usize, GameError> {
         // SAFETY: main-thread read; the temporary root spans the identity read.
         unsafe { self.zoom_camera(attached)?.as_ref().map_or(Ok(0), |root| Ok(target(root)?.as_ptr() as usize)) }
     }
-    pub(crate) unsafe fn refresh_camera(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi) -> Result<(), GameError> {
+    pub(crate) unsafe fn refresh_camera(&self, attached: &AttachedThread<'_>) -> Result<(), GameError> {
         // SAFETY: admitted main thread and rooted live camera; exact validated void method, no arguments or retries.
         unsafe {
             let Some(camera) = self.zoom_camera(attached)? else { return Ok(()) };
             let owner = self.class(&self.images()?, c"", c"CameraManager")?;
             let method = self.hook_method_contract(owner, &SPEC)?;
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let call = context.bind(NonNull::new(method.cast_mut()).unwrap()).map_err(|e| unsupported(e.to_string()))?;
             match call.invoke(Some(&camera), &mut []) {
                 Ok(InvocationOutcome::Returned(ReturnValue::Void)) => Ok(()),

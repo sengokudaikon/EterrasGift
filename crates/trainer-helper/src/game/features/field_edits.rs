@@ -25,21 +25,21 @@ pub(crate) struct FieldGraph<'a, 'r> {
 impl RuntimeAccess {
     /// # Safety
     /// Admitted attached main thread, initialized runtime and exclusive synchronous player graph, as read_forge.
-    pub(crate) unsafe fn read_field_set(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, manager: u64, set: FieldSet) -> Result<Snapshot, WriteError> {
+    pub(crate) unsafe fn read_field_set(&self, attached: &AttachedThread<'_>, manager: u64, set: FieldSet) -> Result<Snapshot, WriteError> {
         // SAFETY: caller retains runtime and excludes graph mutation throughout the rooted read and final gate.
         unsafe {
-            let graph = self.field_graph(attached, api, manager, set)?;
+            let graph = self.field_graph(attached, manager, set)?;
             self.field_gate(attached, manager)?;
             Ok(graph.snapshot)
         }
     }
     /// # Safety
     /// read_field_set contract plus permission for the feature's declared setters, field stores, saves and events.
-    pub(crate) unsafe fn apply_field_set(&self, attached: &AttachedThread<'_>, writes: raw::FieldWriteApi, api: raw::InvocationApi, edit: &Edit) -> Result<Snapshot, WriteError> {
+    pub(crate) unsafe fn apply_field_set(&self, attached: &AttachedThread<'_>, writes: raw::FieldWriteApi, edit: &Edit) -> Result<Snapshot, WriteError> {
         // SAFETY: all destinations are prepared before the store boundary; rooted graph retained through each call.
         unsafe {
             edit.validate().map_err(|e| WriteError::Refused(e.to_string()))?;
-            let graph = self.field_graph(attached, api, edit.expected.manager, edit.expected.set)?;
+            let graph = self.field_graph(attached, edit.expected.manager, edit.expected.set)?;
             if !graph.snapshot.same_values(&edit.expected) {
                 return Err(WriteError::Stale("The game holds something else now; read again".into()));
             }
@@ -47,11 +47,11 @@ impl RuntimeAccess {
                 return Ok(graph.snapshot);
             }
             match edit.expected.set {
-                FieldSet::Currency => self.apply_currency(attached, api, &graph, &edit.values),
-                FieldSet::Keys | FieldSet::WovenEchoes => self.apply_stash(attached, api, &graph, &edit.values),
-                FieldSet::PointsEarned => self.apply_points(attached, api, &graph, &edit.values),
-                FieldSet::MonolithRun => self.apply_run(attached, writes, api, &graph, &edit.values),
-                FieldSet::FactionStanding => self.apply_standing(attached, api, &graph, &edit.values),
+                FieldSet::Currency => self.apply_currency(attached, &graph, &edit.values),
+                FieldSet::Keys | FieldSet::WovenEchoes => self.apply_stash(attached, &graph, &edit.values),
+                FieldSet::PointsEarned => self.apply_points(attached, &graph, &edit.values),
+                FieldSet::MonolithRun => self.apply_run(attached, writes, &graph, &edit.values),
+                FieldSet::FactionStanding => self.apply_standing(attached, &graph, &edit.values),
             }
         }
     }
@@ -68,7 +68,7 @@ impl RuntimeAccess {
             Ok(())
         }
     }
-    unsafe fn field_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>, api: raw::InvocationApi, manager: u64, set: FieldSet) -> Result<FieldGraph<'a, 'r>, WriteError> {
+    unsafe fn field_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>, manager: u64, set: FieldSet) -> Result<FieldGraph<'a, 'r>, WriteError> {
         // SAFETY: checked offline/live manager, then root its current static reference, never a caller-supplied address.
         unsafe {
             self.field_gate(attached, manager)?;
@@ -82,11 +82,11 @@ impl RuntimeAccess {
                 return Err(WriteError::Stale("Character changed; read again".into()));
             }
             match set {
-                FieldSet::Currency => self.currency_graph(attached, api, root),
-                FieldSet::Keys | FieldSet::WovenEchoes => self.stash_graph(attached, api, root, set),
-                FieldSet::PointsEarned => self.points_graph(attached, api, root),
-                FieldSet::MonolithRun => self.run_graph(attached, api, root),
-                FieldSet::FactionStanding => self.standing_graph(attached, api, root),
+                FieldSet::Currency => self.currency_graph(attached, root),
+                FieldSet::Keys | FieldSet::WovenEchoes => self.stash_graph(attached, root, set),
+                FieldSet::PointsEarned => self.points_graph(attached, root),
+                FieldSet::MonolithRun => self.run_graph(attached, root),
+                FieldSet::FactionStanding => self.standing_graph(attached, root),
             }
         }
     }
@@ -116,7 +116,6 @@ impl RuntimeAccess {
     unsafe fn field_call<'c, 'a, 'r>(
         &self,
         context: &'c InvocationContext<'a, 'r>,
-        api: raw::InvocationApi,
         object: &Root<'_, '_>,
         name: &CStr,
         arity: usize,
@@ -125,8 +124,8 @@ impl RuntimeAccess {
         unsafe {
             let owner = (self.object_class)(target(object)?.as_ptr());
             let method = self.field_method(owner, name, arity)?;
-            let declaring = (api.method_get_class)(method.as_ptr());
-            let closed = if (api.class_is_inflated)(declaring) {
+            let declaring = (self.method_class)(method.as_ptr());
+            let closed = if (self.class_inflated)(declaring) {
                 vec![NonNull::new(declaring).ok_or_else(|| WriteError::Refused("Missing declaring class".into()))?]
             } else {
                 vec![]
@@ -135,17 +134,11 @@ impl RuntimeAccess {
         }
     }
     /// Bind an operation's complete expected signature before its first mutation.
-    unsafe fn field_exact<'c, 'a, 'r>(
-        &self,
-        context: &'c InvocationContext<'a, 'r>,
-        api: raw::InvocationApi,
-        object: &Root<'_, '_>,
-        spec: &MethodSpec,
-    ) -> Result<CheckedMethod<'c, 'a, 'r>, WriteError> {
+    unsafe fn field_exact<'c, 'a, 'r>(&self, context: &'c InvocationContext<'a, 'r>, object: &Root<'_, '_>, spec: &MethodSpec) -> Result<CheckedMethod<'c, 'a, 'r>, WriteError> {
         // SAFETY: rooted current receiver and immutable metadata; select its nearest implementation, then check every type.
         unsafe {
             let method = self.field_method((self.object_class)(target(object)?.as_ptr()), spec.method, spec.params.len())?;
-            self.hook_method_contract((api.method_get_class)(method.as_ptr()), spec)?;
+            self.hook_method_contract((self.method_class)(method.as_ptr()), spec)?;
             context.bind(method).map_err(|e| WriteError::Refused(e.to_string()))
         }
     }
@@ -156,7 +149,6 @@ impl RuntimeAccess {
     unsafe fn field_lookup<'a, 'r>(
         &self,
         attached: &'a AttachedThread<'r>,
-        api: raw::InvocationApi,
         source: &Root<'_, '_>,
         spec: &MethodSpec,
         inputs: &mut [*mut c_void],
@@ -168,7 +160,7 @@ impl RuntimeAccess {
                 return Err(WriteError::Refused("Invalid reference lookup contract".into()));
             }
             let method = self.field_method((self.object_class)(target(source)?.as_ptr()), spec.method, spec.params.len())?;
-            self.hook_method_contract((api.method_get_class)(method.as_ptr()), spec)?;
+            self.hook_method_contract((self.method_class)(method.as_ptr()), spec)?;
             let output = (self.method_param)(method.as_ptr(), inputs.len() as u32);
             let class = (self.type_class)(output);
             if !(self.type_byref)(output) || class.is_null() || (self.class_value)(class) {
@@ -178,7 +170,7 @@ impl RuntimeAccess {
             let mut args = inputs.to_vec();
             args.push((&raw mut result).cast());
             let mut exception = std::ptr::null_mut();
-            let returned = (api.runtime_invoke)(method.as_ptr(), target(source)?.as_ptr().cast(), args.as_mut_ptr(), &raw mut exception);
+            let returned = (self.runtime_invoke)(method.as_ptr(), target(source)?.as_ptr().cast(), args.as_mut_ptr(), &raw mut exception);
             if let Some(exception) = NonNull::new(exception) {
                 let _exception = attached.root(exception.cast()).map_err(GameError::from)?;
                 return Err(WriteError::Refused("The game's lookup raised an exception".into()));
@@ -189,7 +181,7 @@ impl RuntimeAccess {
                 .map_err(GameError::from)?;
             let result = NonNull::new(result).map(|p| attached.root(p)).transpose().map_err(GameError::from)?;
             self.exact(&answer, self.system_class(c"Boolean")?)?;
-            let payload = NonNull::new((api.object_unbox)(target(&answer)?.as_ptr())).ok_or_else(|| WriteError::Refused("Missing lookup Boolean".into()))?;
+            let payload = NonNull::new((self.object_unbox)(target(&answer)?.as_ptr())).ok_or_else(|| WriteError::Refused("Missing lookup Boolean".into()))?;
             if payload.cast::<u8>().as_ptr().read_unaligned() == 0 {
                 return Ok(None);
             }

@@ -1,4 +1,5 @@
-use super::raw::{Api, Object, Thread};
+use super::raw::{Object, Thread};
+use crate::Exports;
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::marker::PhantomData;
@@ -46,7 +47,7 @@ thread_local! {
 /// Multiple leases share ownership: dropping the first lease cannot detach the remaining ones.
 /// A context and all its leases/roots are deliberately neither Send nor Sync.
 pub struct ThreadContext {
-    api: Api,
+    exports: Exports,
     _thread_affinity: PhantomData<Rc<()>>,
 }
 
@@ -54,7 +55,7 @@ impl ThreadContext {
     /// Establish the external lifetime and ownership contract for subsequent safe operations.
     ///
     /// # Safety
-    /// The table must match a live runtime using pointer-valued GC handles. Its functions must
+    /// The table must be of a live runtime using pointer-valued GC handles. Its functions must
     /// obey IL2CPP attachment/rooting semantics and remain callable until this context and every
     /// lease/root are finished. They must not reenter this context during attachment transitions.
     /// External code must not detach a thread borrowed by this context or free its handles.
@@ -62,9 +63,9 @@ impl ThreadContext {
     /// The engine may own an existing attachment provided it outlives every lease.
     /// Runtime shutdown must be coordinated externally. Attachment transitions must not
     /// reenter another ThreadContext on this OS thread either.
-    pub unsafe fn new(api: Api) -> Self {
+    pub unsafe fn new(exports: &Exports) -> Self {
         Self {
-            api,
+            exports: *exports,
             _thread_affinity: PhantomData,
         }
     }
@@ -79,14 +80,14 @@ impl ThreadContext {
             let slot = attachments.iter_mut().find(|slot| slot.is_none()).ok_or(RuntimeError::TooManyAttachments)?;
             // SAFETY: new's contract keeps the runtime alive on this thread. current/domain/attach
             // are the bootstrap APIs that may be called before registering a native thread.
-            let current = unsafe { (self.api.thread_current)() };
+            let current = unsafe { (self.exports.thread_current)() };
             let (thread, owned) = if let Some(thread) = NonNull::new(current) {
                 (thread, false)
             } else {
                 // SAFETY: same bootstrap contract.
-                let domain = NonNull::new(unsafe { (self.api.domain_get)() }).ok_or(RuntimeError::DomainUnavailable)?;
+                let domain = NonNull::new(unsafe { (self.exports.domain_get)() }).ok_or(RuntimeError::DomainUnavailable)?;
                 // SAFETY: domain is returned by the live runtime; this is the current OS thread.
-                let thread = NonNull::new(unsafe { (self.api.thread_attach)(domain.as_ptr()) }).ok_or(RuntimeError::AttachFailed)?;
+                let thread = NonNull::new(unsafe { (self.exports.thread_attach)(domain.as_ptr()) }).ok_or(RuntimeError::AttachFailed)?;
                 (thread, true)
             };
             *slot = Some(Attachment {
@@ -101,13 +102,13 @@ impl ThreadContext {
 
     fn runtime_key(&self) -> [usize; 7] {
         [
-            self.api.domain_get as usize,
-            self.api.thread_current as usize,
-            self.api.thread_attach as usize,
-            self.api.thread_detach as usize,
-            self.api.gchandle_new as usize,
-            self.api.gchandle_free as usize,
-            self.api.gchandle_get_target as usize,
+            self.exports.domain_get as usize,
+            self.exports.thread_current as usize,
+            self.exports.thread_attach as usize,
+            self.exports.thread_detach as usize,
+            self.exports.gchandle_new as usize,
+            self.exports.gchandle_free as usize,
+            self.exports.gchandle_target as usize,
         ]
     }
 
@@ -124,7 +125,7 @@ impl ThreadContext {
                 if active.owned {
                     // SAFETY: this is the final lease for our attachment, on its creating OS thread.
                     // Roots borrow their lease, so none can still be used through that lease.
-                    unsafe { (self.api.thread_detach)(active.thread.as_ptr()) };
+                    unsafe { (self.exports.thread_detach)(active.thread.as_ptr()) };
                 }
             }
         });
@@ -137,6 +138,12 @@ pub struct AttachedThread<'runtime> {
 }
 
 impl<'runtime> AttachedThread<'runtime> {
+    /// The export table this attachment's runtime was resolved into: every view on this thread reads it, so none can
+    /// mix in another runtime's.
+    pub(crate) fn exports(&self) -> &'runtime Exports {
+        &self.context.exports
+    }
+
     /// Keep a managed object alive without pinning it or claiming exclusive access to it.
     ///
     /// # Safety
@@ -144,7 +151,7 @@ impl<'runtime> AttachedThread<'runtime> {
     /// this thread. The caller must not manufacture it from an unvalidated or stale game address.
     pub unsafe fn root(&self, object: NonNull<Object>) -> Result<StrongRoot<'_, 'runtime>, RuntimeError> {
         // SAFETY: caller validates the object, and this lease keeps the thread attached.
-        let handle = NonNull::new(unsafe { (self.context.api.gchandle_new)(object.as_ptr(), false) }).ok_or(RuntimeError::RootFailed)?;
+        let handle = NonNull::new(unsafe { (self.context.exports.gchandle_new)(object.as_ptr(), false) }).ok_or(RuntimeError::RootFailed)?;
         Ok(StrongRoot { attachment: self, handle })
     }
 }
@@ -160,10 +167,10 @@ impl Drop for AttachedThread<'_> {
 ///
 /// The attachment cannot be released while a root can still be used:
 /// ```compile_fail
-/// use il2cpp_runtime::{ThreadContext, raw};
+/// use il2cpp_runtime::{Exports, ThreadContext, raw};
 /// use std::ptr::NonNull;
-/// fn invalid(api: raw::Api, object: NonNull<raw::Object>) {
-///     let runtime = unsafe { ThreadContext::new(api) };
+/// fn invalid(exports: &Exports, object: NonNull<raw::Object>) {
+///     let runtime = unsafe { ThreadContext::new(exports) };
 ///     let attached = runtime.attach().unwrap();
 ///     let root = unsafe { attached.root(object) }.unwrap();
 ///     drop(attached);
@@ -183,14 +190,14 @@ impl StrongRoot<'_, '_> {
 
     pub fn target(&self) -> Option<NonNull<Object>> {
         // SAFETY: this live handle belongs to the runtime; its lease is still attached.
-        NonNull::new(unsafe { (self.attachment.context.api.gchandle_get_target)(self.handle.as_ptr()) })
+        NonNull::new(unsafe { (self.attachment.context.exports.gchandle_target)(self.handle.as_ptr()) })
     }
 }
 
 impl Drop for StrongRoot<'_, '_> {
     fn drop(&mut self) {
         // SAFETY: the handle is freed exactly once, before the borrowed attachment can drop.
-        unsafe { (self.attachment.context.api.gchandle_free)(self.handle.as_ptr()) };
+        unsafe { (self.attachment.context.exports.gchandle_free)(self.handle.as_ptr()) };
     }
 }
 

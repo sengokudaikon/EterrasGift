@@ -33,15 +33,14 @@ impl RuntimeAccess {
     pub(super) unsafe fn description_call<'a, 'r>(
         &self,
         attached: &'a AttachedThread<'r>,
-        api: raw::InvocationApi,
         method: Method,
         receiver: Option<&Root<'_, '_>>,
         args: &mut [Argument<'_, 'a, 'r>],
     ) -> Result<Option<Root<'a, 'r>>, GameError> {
         // SAFETY: The method was signature-checked; the call roots the receiver, arguments and returned reference.
-        unsafe { call(attached, api, method, receiver, args, "tooltip method", "tooltip invocation failed or threw") }
+        unsafe { call(attached, method, receiver, args, "tooltip method", "tooltip invocation failed or threw") }
     }
-    pub(super) unsafe fn description_text(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, info: &Root<'_, '_>, name: &CStr) -> Result<String, GameError> {
+    pub(super) unsafe fn description_text(&self, attached: &AttachedThread<'_>, info: &Root<'_, '_>, name: &CStr) -> Result<String, GameError> {
         // SAFETY: The rooted receiver and checked getter stay live until its rooted string result is copied.
         unsafe {
             let string = self.system_class(c"String")?;
@@ -54,8 +53,8 @@ impl RuntimeAccess {
                 _ => unsupported("tooltip formatter unavailable"),
             })?;
             let method = self.description_method(owner, name, &[self.system_class(c"Boolean")?], Some(string), true)?;
-            let method = api.dispatched(receiver, method).ok_or_else(|| unsupported("tooltip virtual formatter unavailable"))?;
-            let text = self.description_call(attached, api, method, Some(info), &mut [Argument::Scalar(Scalar::Boolean(false))])?;
+            let method = self.dispatched(receiver, method).ok_or_else(|| unsupported("tooltip virtual formatter unavailable"))?;
+            let text = self.description_call(attached, method, Some(info), &mut [Argument::Scalar(Scalar::Boolean(false))])?;
             self.description_string(text.as_ref())
         }
     }
@@ -74,7 +73,7 @@ impl RuntimeAccess {
     /// supported game methods may allocate, GC and initialize tooltip/localization
     /// caches; their selected item and culture remain stable during this synchronous
     /// call. Roots retain every returned object. No parsing or value mapping is inferred.
-    pub unsafe fn describe_implicits(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, request: &ForgeDescriptionRequest) -> Result<Vec<ModifierSnapshot>, GameError> {
+    pub unsafe fn describe_implicits(&self, attached: &AttachedThread<'_>, request: &ForgeDescriptionRequest) -> Result<Vec<ModifierSnapshot>, GameError> {
         // SAFETY: The caller supplies the main-thread immutable graph span; selected and detached items stay rooted across tooltip calls.
         unsafe {
             let graph = self.forge_graph(attached)?.ok_or(GameError::NotReady("forge item absent"))?;
@@ -82,11 +81,11 @@ impl RuntimeAccess {
                 return Err(unsupported("forge changed before implicit description"));
             }
             let mut modifiers = Vec::new();
-            for line in self.implicit_lines(attached, api, &graph.images, &graph.item, request.expected())? {
+            for line in self.implicit_lines(attached, &graph.images, &graph.item, request.expected())? {
                 modifiers.push(ModifierSnapshot {
                     index: line.slot as u32,
-                    text: self.description_text(attached, api, &line.info, c"ToModifierString")?,
-                    range: self.description_text(attached, api, &line.info, c"ToRangeString")?,
+                    text: self.description_text(attached, &line.info, c"ToModifierString")?,
+                    range: self.description_text(attached, &line.info, c"ToRangeString")?,
                     roll_ids: if line.slot < request.expected().implicit_rolls.len() && line.minimum != line.maximum {
                         vec![line.slot as u8]
                     } else {
@@ -113,7 +112,6 @@ impl RuntimeAccess {
     pub(super) unsafe fn implicit_lines<'a, 'r>(
         &self,
         attached: &'a AttachedThread<'r>,
-        api: raw::InvocationApi,
         images: &Images,
         item: &Root<'a, 'r>,
         snapshot: &eg_trainer_wire::forge::ForgeSnapshot,
@@ -121,7 +119,7 @@ impl RuntimeAccess {
         // SAFETY: Checked signatures; the item, list, definitions and every tooltip result stay rooted.
         unsafe {
             let unpacked = self.class(images, c"", c"ItemDataUnpacked")?;
-            let getter = self.mapping_method(api, item, c"get_Implicits", &[], None)?;
+            let getter = self.mapping_method(item, c"get_Implicits", &[], None)?;
             let list_class = (self.type_class)((self.method_return)(getter));
             self.list_class(list_class)?;
             let array_class = self.field_class(self.field(list_class, c"_items")?, "description")?;
@@ -130,7 +128,7 @@ impl RuntimeAccess {
                 return Err(unsupported("implicit getter game reference element"));
             }
             self.array_class(array_class, element)?;
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let getter = context
                 .bind_with_closed_references(
                     NonNull::new(getter.cast_mut()).ok_or_else(|| unsupported("implicit getter"))?,
@@ -146,14 +144,13 @@ impl RuntimeAccess {
                 self.exact(&list, list_class)?;
                 let implicits = self.list(attached, &list, element, eg_trainer_wire::forge::MAX_IMPLICITS as u32)?;
                 if !implicits.is_empty() {
-                    let base = self.implicit_definitions(attached, api, images)?;
+                    let base = self.implicit_definitions(attached, images)?;
                     let builder = self.class(images, c"LE.UI.Tooltips", c"ItemTooltipContentBuilder")?;
                     let build = self.description_method(builder, c"GetItemImplicitInfo", &[unpacked, element, base.data_class], None, false)?;
                     for (slot, implicit) in implicits.iter().enumerate() {
-                        let (data, minimum, maximum) = self.implicit_range(attached, api, &base, snapshot, slot)?;
+                        let (data, minimum, maximum) = self.implicit_range(attached, &base, snapshot, slot)?;
                         let info = self.description_call(
                             attached,
-                            api,
                             build,
                             None,
                             &mut [Argument::Reference(Some(item)), Argument::Reference(Some(implicit)), Argument::Reference(Some(&data))],
@@ -171,19 +168,14 @@ impl RuntimeAccess {
     /// The game's implicit registry (`ItemList.get`) and its per-base lookup, `GetItemImplicit(Int32, Int32, Int32)`.
     /// # Safety
     /// The describe_implicits runtime/main-thread conditions apply; the registry stays rooted in the result.
-    pub(super) unsafe fn implicit_definitions<'a, 'r>(
-        &self,
-        attached: &'a AttachedThread<'r>,
-        api: raw::InvocationApi,
-        images: &Images,
-    ) -> Result<ImplicitDefinitions<'a, 'r>, GameError> {
+    pub(super) unsafe fn implicit_definitions<'a, 'r>(&self, attached: &'a AttachedThread<'r>, images: &Images) -> Result<ImplicitDefinitions<'a, 'r>, GameError> {
         // SAFETY: Checked signatures only; the registry is rooted and checked live before any lookup.
         unsafe {
             let item_list = self.class(images, c"", c"ItemList")?;
             let data_class = self.nested(item_list, c"EquipmentImplicit")?;
             let singleton = self.description_method(item_list, c"get", &[], Some(item_list), false)?;
             let registry = self
-                .description_call(attached, api, singleton, None, &mut [])?
+                .description_call(attached, singleton, None, &mut [])?
                 .ok_or(GameError::NotReady("implicit definitions absent"))?;
             if !self.is_live(attached, images, &registry)? {
                 return Err(GameError::NotReady("implicit definitions destroyed"));
@@ -201,7 +193,6 @@ impl RuntimeAccess {
     pub(super) unsafe fn implicit_range<'a, 'r>(
         &self,
         attached: &'a AttachedThread<'r>,
-        api: raw::InvocationApi,
         base: &ImplicitDefinitions<'_, '_>,
         item: &eg_trainer_wire::forge::ForgeSnapshot,
         slot: usize,
@@ -211,7 +202,6 @@ impl RuntimeAccess {
             let data = self
                 .description_call(
                     attached,
-                    api,
                     base.lookup,
                     Some(&base.registry),
                     &mut [

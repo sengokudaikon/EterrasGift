@@ -132,14 +132,7 @@ impl RuntimeAccess {
     ///
     /// # Safety
     /// The Forge write's main-thread runtime, graph and exclusive-write contract applies.
-    pub unsafe fn register_affixes(
-        &self,
-        attached: &AttachedThread<'_>,
-        writes: raw::FieldWriteApi,
-        api: raw::InvocationApi,
-        expected_manager: u64,
-        affixes: &[NewAffix],
-    ) -> Result<(), WriteError> {
+    pub unsafe fn register_affixes(&self, attached: &AttachedThread<'_>, writes: raw::FieldWriteApi, expected_manager: u64, affixes: &[NewAffix]) -> Result<(), WriteError> {
         // SAFETY: as the function's contract says; every new object is rooted, and the live list is touched only by the last stores.
         unsafe {
             let status = self.status(attached)?;
@@ -172,7 +165,7 @@ impl RuntimeAccess {
                 if ours.contains(&id) {
                     continue;
                 }
-                let object = self.new_affix(attached, writes, api, &classes, affix)?;
+                let object = self.new_affix(attached, writes, &classes, affix)?;
                 if affix.properties.len() == 1 {
                     new_singles.push(object)
                 } else {
@@ -225,21 +218,14 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn new_affix<'a, 'r>(
-        &self,
-        attached: &'a AttachedThread<'r>,
-        writes: raw::FieldWriteApi,
-        api: raw::InvocationApi,
-        classes: &Classes,
-        affix: &NewAffix,
-    ) -> Result<Root<'a, 'r>, WriteError> {
+    unsafe fn new_affix<'a, 'r>(&self, attached: &'a AttachedThread<'r>, writes: raw::FieldWriteApi, classes: &Classes, affix: &NewAffix) -> Result<Root<'a, 'r>, WriteError> {
         // SAFETY: the object is rooted and unreachable from the game until the caller stores it; each destination is checked by name and type.
         unsafe {
             let [first, rest @ ..] = affix.properties.as_slice() else {
                 return Err(refused("An affix needs a property"));
             };
             let single = rest.is_empty();
-            let object = self.constructed(attached, api, if single { classes.single } else { classes.multi })?;
+            let object = self.constructed(attached, if single { classes.single } else { classes.multi })?;
             let owner = classes.affix;
             writes.set_i32(target(&object)?, self.mutable_field(owner, c"affixId", INT32.0, INT32.1)?, i32::from(affix.id));
             writes.set_i32(target(&object)?, self.enum_field(owner, c"specialAffixType", INT32)?, FAKE_UNIQUE_MOD);
@@ -255,14 +241,14 @@ impl RuntimeAccess {
             self.store_text(attached, writes, &object, c"affixLootFilterOverrideName", &affix.display_name)?;
             self.store_text(attached, writes, &object, c"affixTitle", "")?;
             for name in [c"canRollOn", c"specificRerollChances"] {
-                let list = self.new_list(attached, api, self.field_class(self.field(owner, name)?, "affix")?)?;
+                let list = self.new_list(attached, self.field_class(self.field(owner, name)?, "affix")?)?;
                 self.set_reference(&writes, attached, &object, name, &list)?;
             }
-            let tiers = self.new_list(attached, api, self.field_class(self.field(owner, c"tiers")?, "affix")?)?;
+            let tiers = self.new_list(attached, self.field_class(self.field(owner, c"tiers")?, "affix")?)?;
             let add = self.list_add(&tiers, classes.tier)?;
             for _ in 0..TIERS {
-                let tier = self.new_tier(attached, writes, api, classes, first, rest)?;
-                self.add_to_list(attached, api, &tiers, add, &tier)?;
+                let tier = self.new_tier(attached, writes, classes, first, rest)?;
+                self.add_to_list(attached, &tiers, add, &tier)?;
             }
             self.set_reference(&writes, attached, &object, c"tiers", &tiers)?;
             if single {
@@ -273,13 +259,13 @@ impl RuntimeAccess {
                     u8::from(affix.display_name.is_empty()),
                 );
             } else {
-                let properties = self.new_list(attached, api, self.field_class(self.field(classes.multi, c"affixProperties")?, "affix")?)?;
+                let properties = self.new_list(attached, self.field_class(self.field(classes.multi, c"affixProperties")?, "affix")?)?;
                 let add = self.list_add(&properties, classes.property)?;
                 for line in &affix.properties {
-                    let property = self.constructed(attached, api, classes.property)?;
+                    let property = self.constructed(attached, classes.property)?;
                     self.store_line(writes, &property, classes.property, line)?;
                     self.store_text(attached, writes, &property, c"modDisplayName", &affix.display_name)?;
-                    self.add_to_list(attached, api, &properties, add, &property)?;
+                    self.add_to_list(attached, &properties, add, &property)?;
                 }
                 self.set_reference(&writes, attached, &object, c"affixProperties", &properties)?;
             }
@@ -291,22 +277,21 @@ impl RuntimeAccess {
         &self,
         attached: &'a AttachedThread<'r>,
         writes: raw::FieldWriteApi,
-        api: raw::InvocationApi,
         classes: &Classes,
         first: &StatLine,
         rest: &[StatLine],
     ) -> Result<Root<'a, 'r>, WriteError> {
         // SAFETY: as new_affix: rooted objects the game cannot reach yet.
         unsafe {
-            let tier = self.constructed(attached, api, classes.tier)?;
+            let tier = self.constructed(attached, classes.tier)?;
             writes.set_f32(target(&tier)?, self.mutable_field(classes.tier, c"minRoll", SINGLE.0, SINGLE.1)?, first.minimum);
             writes.set_f32(target(&tier)?, self.mutable_field(classes.tier, c"maxRoll", SINGLE.0, SINGLE.1)?, first.maximum);
             if !rest.is_empty() {
-                let rolls = self.new_list(attached, api, self.field_class(self.field(classes.tier, c"extraRolls")?, "affix")?)?;
+                let rolls = self.new_list(attached, self.field_class(self.field(classes.tier, c"extraRolls")?, "affix")?)?;
                 let add = self.list_add(&rolls, classes.pair)?;
                 for line in rest {
-                    let pair = self.constructed_pair(attached, api, classes.pair, line.minimum, line.maximum)?;
-                    self.add_to_list(attached, api, &rolls, add, &pair)?;
+                    let pair = self.constructed_pair(attached, classes.pair, line.minimum, line.maximum)?;
+                    self.add_to_list(attached, &rolls, add, &pair)?;
                 }
                 self.set_reference(&writes, attached, &tier, c"extraRolls", &rolls)?;
             }
@@ -362,12 +347,12 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn constructed<'a, 'r>(&self, attached: &'a AttachedThread<'r>, api: raw::InvocationApi, class: Class) -> Result<Root<'a, 'r>, WriteError> {
+    unsafe fn constructed<'a, 'r>(&self, attached: &'a AttachedThread<'r>, class: Class) -> Result<Root<'a, 'r>, WriteError> {
         // SAFETY: the parameterless constructor of an exact game class runs on a new rooted object.
         unsafe {
             let constructor = self.method(class, c".ctor", &[], true)?;
             let object = self.allocated(attached, class)?;
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let constructor = context
                 .bind(NonNull::new(constructor.cast_mut()).ok_or_else(|| refused("Missing constructor"))?)
                 .map_err(refused)?;
@@ -378,19 +363,12 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn constructed_pair<'a, 'r>(
-        &self,
-        attached: &'a AttachedThread<'r>,
-        api: raw::InvocationApi,
-        class: Class,
-        minimum: f32,
-        maximum: f32,
-    ) -> Result<Root<'a, 'r>, WriteError> {
+    unsafe fn constructed_pair<'a, 'r>(&self, attached: &'a AttachedThread<'r>, class: Class, minimum: f32, maximum: f32) -> Result<Root<'a, 'r>, WriteError> {
         // SAFETY: as constructed, with the two exact Single arguments.
         unsafe {
             let constructor = self.method(class, c".ctor", &["System.Single", "System.Single"], true)?;
             let object = self.allocated(attached, class)?;
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let constructor = context
                 .bind(NonNull::new(constructor.cast_mut()).ok_or_else(|| refused("Missing constructor"))?)
                 .map_err(refused)?;
@@ -405,7 +383,7 @@ impl RuntimeAccess {
     }
 
     /// A new empty closed `List<T>`, of the class its field declares.
-    unsafe fn new_list<'a, 'r>(&self, attached: &'a AttachedThread<'r>, api: raw::InvocationApi, class: Class) -> Result<Root<'a, 'r>, WriteError> {
+    unsafe fn new_list<'a, 'r>(&self, attached: &'a AttachedThread<'r>, class: Class) -> Result<Root<'a, 'r>, WriteError> {
         // SAFETY: the exact corlib closed List's parameterless constructor runs on a new rooted object.
         unsafe {
             self.list_class(class)?;
@@ -415,7 +393,7 @@ impl RuntimeAccess {
             })?;
             let closed = NonNull::new(class).ok_or_else(|| refused("Missing list class"))?;
             let object = self.allocated(attached, class)?;
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let constructor = context
                 .bind_with_closed_references(NonNull::new(constructor.cast_mut()).ok_or_else(|| refused("Missing constructor"))?, &[closed])
                 .map_err(refused)?;
@@ -431,11 +409,11 @@ impl RuntimeAccess {
         unsafe { self.affix_list_method((self.object_class)(target(list)?.as_ptr()), element, c"Add", true) }
     }
 
-    unsafe fn add_to_list(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, list: &Root<'_, '_>, add: Method, value: &Root<'_, '_>) -> Result<(), WriteError> {
+    unsafe fn add_to_list(&self, attached: &AttachedThread<'_>, list: &Root<'_, '_>, add: Method, value: &Root<'_, '_>) -> Result<(), WriteError> {
         // SAFETY: Add's barrier stores the rooted value in the rooted, still private list.
         unsafe {
             let class = NonNull::new((self.object_class)(target(list)?.as_ptr())).ok_or_else(|| refused("Missing list class"))?;
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let add = context
                 .bind_with_closed_references(NonNull::new(add.cast_mut()).ok_or_else(|| refused("Missing Add"))?, &[class])
                 .map_err(refused)?;

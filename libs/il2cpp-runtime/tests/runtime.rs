@@ -1,6 +1,6 @@
 //! A fake export table. Tests ownership and ABI-width assumptions, not Unity compatibility.
-use il2cpp_runtime::raw::{self, Api};
-use il2cpp_runtime::{AttachedThread, RuntimeError, StrongRoot, ThreadContext};
+use il2cpp_runtime::raw;
+use il2cpp_runtime::{AttachedThread, Exports, MetadataError, RuntimeError, StrongRoot, ThreadContext};
 use static_assertions::assert_not_impl_any;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -100,12 +100,23 @@ fn symbol(name: &CStr) -> Option<NonNull<c_void>> {
     NonNull::new(pointer.cast_mut().cast())
 }
 
+/// The table with the fake attachment and roots, and every other export a stub that panics.
+fn exports() -> Exports {
+    let mut exports = Exports::test_stubs();
+    exports.domain_get = domain;
+    exports.thread_current = current;
+    exports.thread_attach = attach;
+    exports.thread_detach = detach;
+    exports.gchandle_new = root;
+    exports.gchandle_free = free;
+    exports.gchandle_target = target;
+    exports
+}
+
 fn context(fake: Fake) -> ThreadContext {
     FAKE.with_borrow_mut(|state| *state = fake);
-    // SAFETY: all fake functions have the exact declared ABI and static code lifetime.
-    let api = unsafe { Api::resolve(symbol) }.unwrap();
     // SAFETY: each test owns its thread-local fake runtime; it outlives the context and all leases.
-    unsafe { ThreadContext::new(api) }
+    unsafe { ThreadContext::new(&exports()) }
 }
 
 fn events() -> Vec<&'static str> {
@@ -116,8 +127,8 @@ fn events() -> Vec<&'static str> {
 fn resolves_without_executing_and_reports_the_exact_missing_export() {
     FAKE.with_borrow_mut(|f| *f = Fake::default());
     // SAFETY: every supplied address is a correctly typed static fake export.
-    let result = unsafe { Api::resolve(|name| if name == c"il2cpp_thread_detach" { None } else { symbol(name) }) };
-    assert_eq!(result.err().unwrap(), raw::MissingExport(c"il2cpp_thread_detach"));
+    let result = unsafe { Exports::resolve(|name| if name == c"il2cpp_thread_detach" { None } else { symbol(name) }) };
+    assert!(matches!(result.err().unwrap(), MetadataError::MissingExport(raw::MissingExport(name)) if name == c"il2cpp_thread_detach"));
     assert!(events().is_empty());
 }
 
@@ -139,7 +150,7 @@ fn separate_contexts_share_owned_attachment_until_the_last_root_and_lease_drop()
     let root;
     {
         // SAFETY: same exact fake runtime, without resetting its live thread state.
-        let first_context = unsafe { ThreadContext::new(Api::resolve(symbol).unwrap()) };
+        let first_context = unsafe { ThreadContext::new(&exports()) };
         let first = first_context.attach().unwrap();
         second = second_context.attach().unwrap();
         // SAFETY: fake live object, never dereferenced.
@@ -160,7 +171,7 @@ fn separate_contexts_never_detach_an_engine_attachment() {
         ..Fake::default()
     });
     // SAFETY: same live fake runtime, with an externally owned attachment.
-    let second_context = unsafe { ThreadContext::new(Api::resolve(symbol).unwrap()) };
+    let second_context = unsafe { ThreadContext::new(&exports()) };
     let first = first_context.attach().unwrap();
     let second = second_context.attach().unwrap();
     drop(second);

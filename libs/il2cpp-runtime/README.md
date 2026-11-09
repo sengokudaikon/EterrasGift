@@ -1,9 +1,18 @@
 # il2cpp-runtime
 
-A live IL2CPP runtime through its public exports. Modules: `raw` (declarations, export tables, type codes), `thread` (attachments,
-strong roots), `metadata` (lookups, typed reads of objects and collections, method and field contracts, each checked against what
-its caller states), `invoke` (bounded invocation), `module` (the loaded module, its exports and size; Windows), `test_fakes` (the
-fake thread for tests, behind `test-stubs`). In-game code only: nothing else may link it.
+A live IL2CPP runtime through its public exports. Modules: `exports` (the one export table), `raw` (opaque types, attribute bits,
+type codes, the store capability), `thread` (attachments, strong roots), `metadata` (lookups, typed reads of objects and
+collections, method and field contracts, each checked against what its caller states), `invoke` (bounded invocation), `module`
+(the loaded module, its exports and size; Windows), `test_fakes` (the fake thread for tests, behind `test-stubs`). In-game code
+only: nothing else may link it.
+
+## One export table
+
+`Exports::resolve` resolves every export once, from one resolver, into one table: attachment and roots, metadata, allocation,
+status and invocation. `ThreadContext` takes the table, and an `InvocationContext` reads it through its attachment, so the views
+on a thread cannot mix two runtimes' exports. The two exports that store into the managed graph are resolved in the same pass but
+returned apart, as `raw::FieldWriteApi`: code handed only the table cannot write. `Exports::test_stubs` (behind `test-stubs`) is
+a table whose every export panics when reached, for tests to set the ones they expect.
 
 ## What it assumes
 
@@ -15,7 +24,7 @@ refuses the operation.
 
 ## Attachment and roots
 
-- Raw unsafe table constructors exist for authored runtimes; their caller must supply valid ABI and export provenance.
+- The unsafe table constructor serves authored runtimes too; its caller must supply valid ABI and export provenance.
 - A thread-local attachment registry shares ownership across contexts for the same export table, so dropping one context's last
   lease cannot detach another context's live leases or roots. Engine-owned attachments are never detached. External runtime
   shutdown or detach is an unsafe caller obligation.
@@ -35,4 +44,4 @@ refuses the operation.
 - Every method lookup is a `MethodQuery` for `find_method`: its name and parameters choose the candidates, and the rest is a
   contract the one chosen must meet. What another method of the name does is the query's: it fails the lookup, or one of
   another count is passed over, or any overload is. `nearest_declaring` finds the parent that declares a method, and
-  `InvocationApi::dispatched` the override a receiver runs.
+  `Exports::dispatched` the override a receiver runs.

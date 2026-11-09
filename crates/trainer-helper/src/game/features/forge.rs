@@ -36,13 +36,7 @@ impl RuntimeAccess {
     // Look up one definition through UniqueList.getUnique(UInt16): validate its exact
     // static signature, root the return across GC, then read only its identity
     // and LegendaryType. Never walk the full catalog during an edit.
-    pub(crate) unsafe fn unique_definition<'a, 'r>(
-        &self,
-        attached: &'a AttachedThread<'r>,
-        graph: &ForgeGraph<'_, '_>,
-        api: raw::InvocationApi,
-        id: u16,
-    ) -> Result<Root<'a, 'r>, WriteError> {
+    pub(crate) unsafe fn unique_definition<'a, 'r>(&self, attached: &'a AttachedThread<'r>, graph: &ForgeGraph<'_, '_>, id: u16) -> Result<Root<'a, 'r>, WriteError> {
         // SAFETY: The registry metadata and exact lookup signature are checked; the returned definition is rooted before identity validation.
         unsafe {
             let owner = self.class(&graph.images, c"", c"UniqueList")?;
@@ -63,7 +57,7 @@ impl RuntimeAccess {
                 }
             })?;
             let method = NonNull::new(method.cast_mut()).ok_or_else(|| WriteError::Refused("Missing getUnique(UInt16)".into()))?;
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let method = context.bind(method).map_err(|e| WriteError::Refused(e.to_string()))?;
             let definition = match method
                 .invoke(None, &mut [Argument::Scalar(Scalar::U16(id))])
@@ -83,11 +77,11 @@ impl RuntimeAccess {
 
     // Only the base registry (ItemList.get) is acquired. Every
     // returned object and collection is rooted across the managed getter/GC.
-    unsafe fn validate_base(&self, attached: &AttachedThread<'_>, graph: &ForgeGraph<'_, '_>, api: raw::InvocationApi, item_type: u8, sub_type: u16) -> Result<(), WriteError> {
+    unsafe fn validate_base(&self, attached: &AttachedThread<'_>, graph: &ForgeGraph<'_, '_>, item_type: u8, sub_type: u16) -> Result<(), WriteError> {
         // SAFETY: The selected graph and registry entries remain rooted while exact destination identity and compatibility are checked.
         unsafe {
             let owner = self.class(&graph.images, c"", c"ItemList")?;
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let method = context
                 .bind(self.zero_arg_method(owner, c"get", owner, false)?)
                 .map_err(|e| WriteError::Refused(e.to_string()))?;
@@ -164,11 +158,11 @@ impl RuntimeAccess {
     /// `ItemData`'s): those are resolved for the item's class, as the game's own call dispatches, and the body bound is
     /// the game's.
     // Internal caller supplies edit_forge's full live-runtime/exclusive-write contract.
-    unsafe fn item_refresh(&self, api: raw::InvocationApi, graph: &ForgeGraph<'_, '_>, owner: Class, name: &CStr) -> Result<crate::game::Method, WriteError> {
+    unsafe fn item_refresh(&self, graph: &ForgeGraph<'_, '_>, owner: Class, name: &CStr) -> Result<crate::game::Method, WriteError> {
         // SAFETY: The signature is checked against retained metadata; the item stays rooted while its override is resolved.
         unsafe {
             let method = self.description_method(owner, name, &[], Some(self.system_class(c"Void")?), true)?;
-            self.game_body(api, graph.images.game, target(&graph.item)?, method)
+            self.game_body(graph.images.game, target(&graph.item)?, method)
                 .ok_or_else(|| WriteError::Refused(format!("The game's {} override is unavailable", name.to_string_lossy())))
         }
     }
@@ -225,11 +219,10 @@ impl RuntimeAccess {
     /// All `read_forge` runtime/main-thread/nonmoving-GC conditions apply, with exclusive WRITE
     /// access to the entire rooted graph and all relevant statics until completion. The caller
     /// must authorize this exact mutation and exclude callbacks, reentrancy, other writers,
-    /// runtime shutdown, native destruction and graph replacement throughout. Both export tables
-    /// and attachment must belong to the same initialized source-bound Unity 6000.4 runtime.
+    /// runtime shutdown, native destruction and graph replacement throughout. The export table,
+    /// its store exports and the attachment must belong to the same initialized source-bound Unity 6000.4 runtime.
     /// `Field::SetValue` must implement the direct, metadata-validated scalar assignment.
-    /// For rebuilding edits, `invoke` must describe this same runtime and the
-    /// refresh methods must be callable synchronously; roots survive managed
+    /// For rebuilding edits, the refresh methods must be callable synchronously; roots survive managed
     /// calls, exceptions and GC. Refresh failures are uncertain and never retried.
     /// Affix construction authorizes object_new, the exact ItemAffix constructor and
     /// closed corlib List<ItemAffix>.Clear/Add. The constructor may allocate/GC and
@@ -243,7 +236,6 @@ impl RuntimeAccess {
         &self,
         attached: &AttachedThread<'_>,
         write_api: raw::FieldWriteApi,
-        invoke: Option<raw::InvocationApi>,
         expected_manager: u64,
         expected: &ForgeSnapshot,
         mutation: ForgeMutation,
@@ -293,13 +285,7 @@ impl RuntimeAccess {
             let mut replacement = None;
             match mutation {
                 ForgeMutation::Affix { .. } | ForgeMutation::AddAffix { .. } | ForgeMutation::RemoveAffix { .. } => {
-                    replacement = Some(self.prepare_affix(
-                        attached,
-                        &graph,
-                        invoke.ok_or_else(|| WriteError::Refused("Missing invocation API".into()))?,
-                        expected,
-                        mutation,
-                    )?);
+                    replacement = Some(self.prepare_affix(attached, &graph, expected, mutation)?);
                     // The game's rarity method covers normal to rare. On unique-backed items these stores do what the game's
                     // crafting does beside the list (`affix_list_outcome`): a unique that gains an affix becomes legendary and
                     // spends its legendary potential, a legendary that loses its last becomes a unique, and a legendary that
@@ -346,8 +332,7 @@ impl RuntimeAccess {
                     }
                 }
                 ForgeMutation::ModifierRolls { array, rolls, .. } => {
-                    let api = invoke.ok_or_else(|| WriteError::Refused("Missing invocation API".into()))?;
-                    let (storage, length) = self.modifier_rolls(attached, &graph, api, expected, array, rolls)?;
+                    let (storage, length) = self.modifier_rolls(attached, &graph, expected, array, rolls)?;
                     let base = array_data(target(&storage)?.as_ptr());
                     for change in rolls.changes() {
                         if usize::from(change.slot) >= length {
@@ -361,7 +346,7 @@ impl RuntimeAccess {
                     let limits = self.read_item_limits(attached)?;
                     let legendary_type = if field.requires_definition(expected) {
                         let id = expected.identity.as_ref().ok_or_else(|| WriteError::Refused("Unique identity missing".into()))?.id;
-                        let definition = self.unique_definition(attached, &graph, invoke.ok_or_else(|| WriteError::Refused("Missing invocation API".into()))?, id)?;
+                        let definition = self.unique_definition(attached, &graph, id)?;
                         Some(self.enumeration(&definition, c"legendaryType", c"LegendaryType")?)
                     } else {
                         None
@@ -386,13 +371,7 @@ impl RuntimeAccess {
                     {
                         return Err(WriteError::Refused("Base changes require a non-unique item and compatible type".into()));
                     }
-                    self.validate_base(
-                        attached,
-                        &graph,
-                        invoke.ok_or_else(|| WriteError::Refused("Missing invocation API".into()))?,
-                        item_type,
-                        sub_type,
-                    )?;
+                    self.validate_base(attached, &graph, item_type, sub_type)?;
                     stores.push((self.mutable_field(item_data, c"subType", c"UInt16", raw::type_code::U2)?, Scalar::U16(sub_type)));
                     if changed_type {
                         stores.push((self.mutable_field(item_data, c"itemType", c"Byte", raw::type_code::U1)?, Scalar::U8(item_type)));
@@ -407,7 +386,7 @@ impl RuntimeAccess {
                     if !matches!(expected.rarity, 7..=9) || expected.identity.as_ref().is_none_or(|old| old.id == id) || !matches!(rarity, 7..=9) {
                         return Err(WriteError::Refused("Identity changes require a different unique/set identity".into()));
                     }
-                    let definition = self.unique_definition(attached, &graph, invoke.ok_or_else(|| WriteError::Refused("Missing invocation API".into()))?, id)?;
+                    let definition = self.unique_definition(attached, &graph, id)?;
                     let subs = self
                         .child(attached, &definition, c"subTypes")?
                         .ok_or_else(|| WriteError::Refused("Missing unique subtypes".into()))?;
@@ -442,10 +421,9 @@ impl RuntimeAccess {
                     stores.push((self.mutable_field(item_data, c"rarity", c"Byte", raw::type_code::U1)?, Scalar::U8(rarity)));
                 }
             }
-            let context = invoke.map(|api| InvocationContext::new(attached, api));
+            let context = InvocationContext::new(attached);
             let mut refresh = Vec::new();
             if !level {
-                let context = context.as_ref().ok_or_else(|| WriteError::Refused("Missing refresh invocation API".into()))?;
                 let mut methods = Vec::new();
                 if matches!(mutation, ForgeMutation::Base { .. } | ForgeMutation::Identity { .. }) {
                     methods.push((unpacked, c"AfterIDChange", false));
@@ -462,7 +440,7 @@ impl RuntimeAccess {
                     let method = if entry {
                         self.method(owner, name, &[], true)?
                     } else {
-                        self.item_refresh(invoke.expect("checked invocation API"), &graph, owner, name)?
+                        self.item_refresh(&graph, owner, name)?
                     };
                     let method = context
                         .bind(NonNull::new(method.cast_mut()).ok_or_else(|| WriteError::Refused("Missing refresh method".into()))?)
@@ -502,7 +480,7 @@ impl RuntimeAccess {
             let result = stored(
                 || {
                     if let Some(replacement) = &replacement {
-                        replacement.apply(attached, write_api, invoke.expect("validated invocation API"), object)?;
+                        replacement.apply(attached, write_api, object)?;
                     }
                     for (field, value) in stores {
                         match value {
@@ -536,7 +514,6 @@ impl RuntimeAccess {
         &self,
         attached: &'a AttachedThread<'r>,
         graph: &ForgeGraph<'_, '_>,
-        api: raw::InvocationApi,
         expected: &ForgeSnapshot,
         array: RollArray,
         rolls: AffixRolls,
@@ -550,8 +527,8 @@ impl RuntimeAccess {
                         .as_ref()
                         .filter(|_| matches!(expected.rarity, 7..=9))
                         .ok_or_else(|| WriteError::Refused("This item has no unique rolls".into()))?;
-                    let definition = self.unique_definition(attached, graph, api, identity.id)?;
-                    let lines = self.unique_modifiers(attached, api, &graph.images, &graph.item, &definition, identity.rolls.len())?;
+                    let definition = self.unique_definition(attached, graph, identity.id)?;
+                    let lines = self.unique_modifiers(attached, &graph.images, &graph.item, &definition, identity.rolls.len())?;
                     if rolls
                         .changes()
                         .iter()
@@ -562,12 +539,12 @@ impl RuntimeAccess {
                     (c"uniqueRolls", identity.rolls.len())
                 }
                 RollArray::Implicit => {
-                    let base = self.implicit_definitions(attached, api, &graph.images)?;
+                    let base = self.implicit_definitions(attached, &graph.images)?;
                     for change in rolls.changes() {
                         if usize::from(change.slot) >= expected.implicit_rolls.len() {
                             return Err(WriteError::Refused("Invalid implicit roll index".into()));
                         }
-                        let (_, minimum, maximum) = self.implicit_range(attached, api, &base, expected, usize::from(change.slot))?;
+                        let (_, minimum, maximum) = self.implicit_range(attached, &base, expected, usize::from(change.slot))?;
                         if minimum == maximum {
                             return Err(WriteError::Refused("This implicit does not roll".into()));
                         }
@@ -797,7 +774,6 @@ mod tests {
                     a.edit_forge(
                         &attached,
                         raw::FieldWriteApi::test_export(set),
-                        None,
                         manager,
                         e,
                         ForgeMutation::Status {

@@ -28,14 +28,7 @@ impl RuntimeAccess {
     // These helpers inherit read_affix_mapping's single attached-runtime and private-copy span.
     /// `object`'s instance method `name`, from the nearest class that declares one with these parameters, checked as
     /// [`Self::description_method`] checks, and the body `object` runs for it.
-    pub(super) unsafe fn mapping_method(
-        &self,
-        api: raw::InvocationApi,
-        object: &Root<'_, '_>,
-        name: &CStr,
-        parameters: &[Class],
-        returns: Option<Class>,
-    ) -> Result<Method, GameError> {
+    pub(super) unsafe fn mapping_method(&self, object: &Root<'_, '_>, name: &CStr, parameters: &[Class], returns: Option<Class>) -> Result<Method, GameError> {
         // SAFETY: the retained owner metadata is checked with exact parameter/return classes before its body is chosen.
         unsafe {
             let receiver = target(object)?;
@@ -47,16 +40,15 @@ impl RuntimeAccess {
                     _ => unsupported("mapping method missing"),
                 })?;
             let method = self.description_method(owner, name, parameters, returns, true)?;
-            api.dispatched(receiver, method).ok_or_else(|| unsupported("mapping virtual method"))
+            self.dispatched(receiver, method).ok_or_else(|| unsupported("mapping virtual method"))
         }
     }
-    unsafe fn mapping_float(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, object: &Root<'_, '_>, name: &CStr) -> Result<f32, GameError> {
+    unsafe fn mapping_float(&self, attached: &AttachedThread<'_>, object: &Root<'_, '_>, name: &CStr) -> Result<f32, GameError> {
         // SAFETY: The checked method and rooted receiver remain live while the exact scalar result is unboxed.
         unsafe {
-            let method = self.mapping_method(api, object, name, &[], Some(self.system_class(c"Single")?))?;
+            let method = self.mapping_method(object, name, &[], Some(self.system_class(c"Single")?))?;
             call(
                 attached,
-                api,
                 method,
                 Some(object),
                 &mut [],
@@ -65,26 +57,9 @@ impl RuntimeAccess {
             )
         }
     }
-    unsafe fn mapping_void(
-        &self,
-        attached: &AttachedThread<'_>,
-        api: raw::InvocationApi,
-        object: &Root<'_, '_>,
-        method: Method,
-        args: &mut [Argument<'_, '_, '_>],
-    ) -> Result<(), GameError> {
+    unsafe fn mapping_void(&self, attached: &AttachedThread<'_>, object: &Root<'_, '_>, method: Method, args: &mut [Argument<'_, '_, '_>]) -> Result<(), GameError> {
         // SAFETY: The method was signature-checked and the rooted receiver remains live throughout this synchronous invocation.
-        unsafe {
-            call(
-                attached,
-                api,
-                method,
-                Some(object),
-                args,
-                "mapping void method",
-                "detached constructor/refresh failed or threw",
-            )
-        }
+        unsafe { call(attached, method, Some(object), args, "mapping void method", "detached constructor/refresh failed or threw") }
     }
     unsafe fn mapping_bytes(&self, array: &Root<'_, '_>, maximum: u32) -> Result<Vec<u8>, GameError> {
         // SAFETY: The caller supplies the main-thread copy span; array allocation uses the exact retained Byte class and is immediately rooted.
@@ -107,13 +82,7 @@ impl RuntimeAccess {
             Ok(array)
         }
     }
-    pub(super) unsafe fn mapping_copy<'a, 'r>(
-        &self,
-        attached: &'a AttachedThread<'r>,
-        writes: raw::FieldWriteApi,
-        api: raw::InvocationApi,
-        graph: &ForgeGraph<'_, '_>,
-    ) -> Result<Root<'a, 'r>, GameError> {
+    pub(super) unsafe fn mapping_copy<'a, 'r>(&self, attached: &'a AttachedThread<'r>, writes: raw::FieldWriteApi, graph: &ForgeGraph<'_, '_>) -> Result<Root<'a, 'r>, GameError> {
         // SAFETY: The selected graph stays rooted; constructor/copy methods are checked and every mutable array is independently cloned.
         unsafe {
             let serial = self.child(attached, &graph.item, c"id")?.ok_or_else(|| unsupported("item serialization absent"))?;
@@ -128,7 +97,7 @@ impl RuntimeAccess {
             )?;
             let object = NonNull::new((self.object_new)(unpacked)).ok_or_else(|| unsupported("detached item allocation"))?;
             let copy = attached.root(object)?;
-            self.mapping_void(attached, api, &copy, constructor, &mut [Argument::Reference(Some(&serial))])?;
+            self.mapping_void(attached, &copy, constructor, &mut [Argument::Reference(Some(&serial))])?;
             if target(&copy)? == target(&graph.item)? {
                 return Err(unsupported("detached receiver aliases live item"));
             }
@@ -164,7 +133,7 @@ impl RuntimeAccess {
             Ok(copy)
         }
     }
-    unsafe fn mapping_effects(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, images: &Images, item: &Root<'_, '_>, slot: u8) -> Result<Vec<Effect>, GameError> {
+    unsafe fn mapping_effects(&self, attached: &AttachedThread<'_>, images: &Images, item: &Root<'_, '_>, slot: u8) -> Result<Vec<Effect>, GameError> {
         // SAFETY: The detached item, builder and resulting tooltip objects remain rooted throughout checked invocations and owned copying.
         unsafe {
             let affix_class = self.class(images, c"", c"ItemAffix")?;
@@ -185,7 +154,7 @@ impl RuntimeAccess {
                 None,
                 false,
             )?;
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let method = context
                 .bind_with_value_types(
                     NonNull::new(method.cast_mut()).ok_or_else(|| unsupported("affix tooltip method"))?,
@@ -208,44 +177,38 @@ impl RuntimeAccess {
             };
             let mut effects = Vec::new();
             for getter in [c"get_Modifier1", c"get_Modifier2"] {
-                let method = self.mapping_method(api, &info, getter, &[], None)?;
-                let modifier = self.description_call(attached, api, method, Some(&info), &mut [])?;
+                let method = self.mapping_method(&info, getter, &[], None)?;
+                let modifier = self.description_call(attached, method, Some(&info), &mut [])?;
                 let Some(modifier) = modifier else {
                     continue;
                 };
-                effects.push(self.property_effect(attached, api, &modifier)?);
+                effects.push(self.property_effect(attached, &modifier)?);
             }
             primary_first(effects, "no visible numeric effect maps to this affix")
         }
     }
     /// One tooltip modifier's number through its own getters: its value, the game's display of it and its line. Its range
     /// says whether it varies; a modifier without range getters is taken to vary.
-    unsafe fn property_effect(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, modifier: &Root<'_, '_>) -> Result<Effect, GameError> {
+    unsafe fn property_effect(&self, attached: &AttachedThread<'_>, modifier: &Root<'_, '_>) -> Result<Effect, GameError> {
         // SAFETY: The rooted modifier and checked getters stay live while scalars and strings are copied.
         unsafe {
-            let value = self.mapping_float(attached, api, modifier, c"get_Value")?;
+            let value = self.mapping_float(attached, modifier, c"get_Value")?;
             let varying = match (
-                self.mapping_float(attached, api, modifier, c"get_MinValue"),
-                self.mapping_float(attached, api, modifier, c"get_MaxValue"),
+                self.mapping_float(attached, modifier, c"get_MinValue"),
+                self.mapping_float(attached, modifier, c"get_MaxValue"),
             ) {
                 (Ok(minimum), Ok(maximum)) => minimum != maximum,
                 _ => true,
             };
-            let convert = self.mapping_method(
-                api,
-                modifier,
-                c"ConvertValueToString",
-                &[self.system_class(c"Single")?],
-                Some(self.system_class(c"String")?),
-            )?;
-            let display = self.description_call(attached, api, convert, Some(modifier), &mut [Argument::Scalar(Scalar::F32(value))])?;
+            let convert = self.mapping_method(modifier, c"ConvertValueToString", &[self.system_class(c"Single")?], Some(self.system_class(c"String")?))?;
+            let display = self.description_call(attached, convert, Some(modifier), &mut [Argument::Scalar(Scalar::F32(value))])?;
             let display = self.description_string(display.as_ref())?;
             let unit = if display.ends_with('%') { "%" } else { "" }.to_owned();
             Ok(Effect {
                 value: f64::from(value),
                 unit,
                 display,
-                text: self.description_text(attached, api, modifier, c"ToModifierString")?,
+                text: self.description_text(attached, modifier, c"ToModifierString")?,
                 varying,
             })
         }
@@ -256,7 +219,6 @@ impl RuntimeAccess {
     unsafe fn modifier_effects<'a, 'r>(
         &self,
         attached: &'a AttachedThread<'r>,
-        api: raw::InvocationApi,
         images: &Images,
         item: &Root<'a, 'r>,
         source: Source<'_, 'a, 'r>,
@@ -268,15 +230,15 @@ impl RuntimeAccess {
             let definition = match source {
                 Source::Unique(definition) => definition,
                 Source::Implicit(snapshot) => {
-                    let lines = self.implicit_lines(attached, api, images, item, snapshot)?;
+                    let lines = self.implicit_lines(attached, images, item, snapshot)?;
                     if let Some(line) = lines.iter().find(|line| line.slot == usize::from(address.index)) {
-                        effects.push(self.property_effect(attached, api, &line.info)?);
+                        effects.push(self.property_effect(attached, &line.info)?);
                     }
                     return primary_first(effects, "no visible numeric effect maps to this implicit roll");
                 }
             };
             let index = i32::from(address.index);
-            let lines = self.unique_lines(attached, api, images, item, definition)?;
+            let lines = self.unique_lines(attached, images, item, definition)?;
             for (line, (entry, info)) in lines.entries.iter().zip(&lines.infos).enumerate() {
                 let Some(info) = info else {
                     continue;
@@ -293,28 +255,28 @@ impl RuntimeAccess {
                     let parsed = self
                         .child(attached, info, c"_parsedUniqueMod")?
                         .ok_or_else(|| unsupported("parsed unique modifier absent"))?;
-                    for replacement in self.unique_replacements(attached, api, images, &parsed)? {
+                    for replacement in self.unique_replacements(attached, images, &parsed)? {
                         let class = (self.object_class)(target(&replacement)?.as_ptr());
                         let name = (self.class_name)(class);
                         if name.is_null() {
                             return Err(unsupported("unique replacement runtime class"));
                         }
-                        if metadata_text(name) != c"UniqueModRollRangeReplacement" || self.unique_int(attached, api, &replacement, c"get_RollId")? != index {
+                        if metadata_text(name) != c"UniqueModRollRangeReplacement" || self.unique_int(attached, &replacement, c"get_RollId")? != index {
                             continue;
                         }
-                        let value = self.unique_int(attached, api, &replacement, c"get_Value")?;
-                        let percent = match self.unique_scalar(attached, api, &replacement, c"get_IsPercent", c"Boolean")? {
+                        let value = self.unique_int(attached, &replacement, c"get_Value")?;
+                        let percent = match self.unique_scalar(attached, &replacement, c"get_IsPercent", c"Boolean")? {
                             Scalar::Boolean(percent) => percent,
                             _ => return Err(unsupported("unique percent getter")),
                         };
-                        let format = self.mapping_method(api, &replacement, c"FormatString", &[self.system_class(c"Boolean")?], Some(self.system_class(c"String")?))?;
-                        let display = self.description_call(attached, api, format, Some(&replacement), &mut [Argument::Scalar(Scalar::Boolean(false))])?;
+                        let format = self.mapping_method(&replacement, c"FormatString", &[self.system_class(c"Boolean")?], Some(self.system_class(c"String")?))?;
+                        let display = self.description_call(attached, format, Some(&replacement), &mut [Argument::Scalar(Scalar::Boolean(false))])?;
                         effects.push(Effect {
                             value: f64::from(value),
                             display: self.description_string(display.as_ref())?,
                             unit: if percent { "%" } else { "" }.to_owned(),
-                            text: self.description_text(attached, api, info, c"ToModifierString")?,
-                            varying: self.unique_int(attached, api, &replacement, c"get_MinRoll")? != self.unique_int(attached, api, &replacement, c"get_MaxRoll")?,
+                            text: self.description_text(attached, info, c"ToModifierString")?,
+                            varying: self.unique_int(attached, &replacement, c"get_MinRoll")? != self.unique_int(attached, &replacement, c"get_MaxRoll")?,
                         });
                     }
                 } else {
@@ -323,16 +285,16 @@ impl RuntimeAccess {
                         && self.boolean(modifier, c"canRoll")?
                         && i32::from(self.primitive::<u8>(modifier, c"rollID")?) == index
                     {
-                        effects.push(self.property_effect(attached, api, info)?);
+                        effects.push(self.property_effect(attached, info)?);
                     }
                 }
             }
             primary_first(effects, "no visible numeric effect maps to this unique roll")
         }
     }
-    unsafe fn unique_int(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, object: &Root<'_, '_>, name: &CStr) -> Result<i32, GameError> {
+    unsafe fn unique_int(&self, attached: &AttachedThread<'_>, object: &Root<'_, '_>, name: &CStr) -> Result<i32, GameError> {
         // SAFETY: As for unique_scalar.
-        match unsafe { self.unique_scalar(attached, api, object, name, c"Int32")? } {
+        match unsafe { self.unique_scalar(attached, object, name, c"Int32")? } {
             Scalar::I32(value) => Ok(value),
             _ => Err(unsupported("unique Int32 getter")),
         }
@@ -342,7 +304,6 @@ impl RuntimeAccess {
     unsafe fn modifier_store_rolls(
         &self,
         attached: &AttachedThread<'_>,
-        api: raw::InvocationApi,
         graph: &ForgeGraph<'_, '_>,
         copy: &Root<'_, '_>,
         target_kind: MappingTarget,
@@ -369,12 +330,12 @@ impl RuntimeAccess {
                 crate::game::write_bytes(array_data(target(&array)?.as_ptr()).add(usize::from(index)), &[roll]);
             }
             if target_kind == MappingTarget::Implicit {
-                self.mapping_refresh_implicits(attached, api, &graph.images, copy)?;
+                self.mapping_refresh_implicits(attached, &graph.images, copy)?;
             }
             Ok(())
         }
     }
-    unsafe fn mapping_refresh_implicits(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, images: &Images, copy: &Root<'_, '_>) -> Result<(), GameError> {
+    unsafe fn mapping_refresh_implicits(&self, attached: &AttachedThread<'_>, images: &Images, copy: &Root<'_, '_>) -> Result<(), GameError> {
         // SAFETY: The refresh is signature-checked and, if an override, resolved for the copy's class; only the copy is refreshed.
         unsafe {
             let unpacked = self.class(images, c"", c"ItemDataUnpacked")?;
@@ -382,10 +343,8 @@ impl RuntimeAccess {
             let method = self
                 .description_method(unpacked, c"UpdateItemImplicitData", &[], Some(void), true)
                 .or_else(|_| self.description_method(unpacked, c"AfterIDChange", &[], Some(void), true))?;
-            let method = self
-                .game_body(api, images.game, target(copy)?, method)
-                .ok_or_else(|| unsupported("implicit refresh override"))?;
-            self.mapping_void(attached, api, copy, method, &mut [])
+            let method = self.game_body(images.game, target(copy)?, method).ok_or_else(|| unsupported("implicit refresh override"))?;
+            self.mapping_void(attached, copy, method, &mut [])
         }
     }
     unsafe fn mapping_assign_roll(
@@ -412,7 +371,6 @@ impl RuntimeAccess {
         &self,
         attached: &AttachedThread<'_>,
         writes: raw::FieldWriteApi,
-        api: raw::InvocationApi,
         graph: &ForgeGraph<'_, '_>,
         copy: &Root<'_, '_>,
         query: &AffixMappingQuery,
@@ -432,7 +390,7 @@ impl RuntimeAccess {
             let original = self.list(attached, &list, class, 32)?;
             let constructor = self.method(class, c".ctor", &["System.UInt16", "System.Byte", "System.Byte", "System.Byte", "SealedAffixType"], true)?;
             let seal = NonNull::new(self.field_class(self.field(class, c"sealedAffixType")?, "mapping")?).ok_or_else(|| unsupported("seal enum absent"))?;
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let constructor = context
                 .bind_with_value_types(
                     NonNull::new(constructor.cast_mut()).ok_or_else(|| unsupported("affix constructor"))?,
@@ -525,28 +483,22 @@ impl RuntimeAccess {
     /// other threads must not change the graph or active culture during sampling.
     /// The nonmoving runtime owns all arrays; Field::SetValue performs reference
     /// barriers. No pointer token from the request is dereferenced.
-    pub unsafe fn read_affix_mapping(
-        &self,
-        attached: &AttachedThread<'_>,
-        writes: raw::FieldWriteApi,
-        api: raw::InvocationApi,
-        query: &AffixMappingQuery,
-    ) -> Result<RawMappingPage, GameError> {
+    pub unsafe fn read_affix_mapping(&self, attached: &AttachedThread<'_>, writes: raw::FieldWriteApi, query: &AffixMappingQuery) -> Result<RawMappingPage, GameError> {
         // SAFETY: The caller supplies the main-thread immutable graph span; selected and detached items stay rooted across each sampled call.
         unsafe {
             let graph = self.forge_graph(attached)?.ok_or(GameError::NotReady("forge item absent"))?;
             if !self.forge_unchanged(attached, &graph, query.manager(), query.expected())? {
                 return Err(unsupported("forge changed before mapping"));
             }
-            let locale = self.read_game_locale(attached, api)?;
-            let copy = self.mapping_copy(attached, writes, api, &graph)?;
-            if self.mapping_effects(attached, api, &graph.images, &graph.item, query.slot())? != self.mapping_effects(attached, api, &graph.images, &copy, query.slot())? {
+            let locale = self.read_game_locale(attached)?;
+            let copy = self.mapping_copy(attached, writes, &graph)?;
+            if self.mapping_effects(attached, &graph.images, &graph.item, query.slot())? != self.mapping_effects(attached, &graph.images, &copy, query.slot())? {
                 return Err(unsupported("detached tooltip context differs from live item"));
             }
-            self.mapping_project(attached, writes, api, &graph, &copy, query)?;
+            self.mapping_project(attached, writes, &graph, &copy, query)?;
             self.mapping_assign_roll(attached, writes, &graph.images, &copy, query.slot(), 0)?;
             let rebuild = self.method(self.class(&graph.images, c"", c"ItemData")?, c"RebuildID", &[], true)?;
-            self.mapping_void(attached, api, &copy, rebuild, &mut [])?;
+            self.mapping_void(attached, &copy, rebuild, &mut [])?;
             let serial = self
                 .child(attached, &copy, c"id")?
                 .ok_or_else(|| unsupported("detached serialization absent after refresh"))?;
@@ -556,7 +508,7 @@ impl RuntimeAccess {
             opaque.extend(serial);
             for endpoint in [0, 255] {
                 self.mapping_assign_roll(attached, writes, &graph.images, &copy, query.slot(), endpoint)?;
-                let effects = self.mapping_effects(attached, api, &graph.images, &copy, query.slot())?;
+                let effects = self.mapping_effects(attached, &graph.images, &copy, query.slot())?;
                 opaque.extend_from_slice(&(effects.len() as u32).to_le_bytes());
                 for effect in effects {
                     opaque.extend_from_slice(&effect.value.to_le_bytes());
@@ -572,7 +524,7 @@ impl RuntimeAccess {
             if let MappingStart::Samples(start) = query.start() {
                 for roll in usize::from(start)..(usize::from(start) + 16).min(256) {
                     self.mapping_assign_roll(attached, writes, &graph.images, &copy, query.slot(), roll as u8)?;
-                    let effects = self.mapping_effects(attached, api, &graph.images, &copy, query.slot())?;
+                    let effects = self.mapping_effects(attached, &graph.images, &copy, query.slot())?;
                     samples.push(RawValueSample {
                         raw_quantity: effects[0].value,
                         display: effects[0].display.clone(),
@@ -582,7 +534,7 @@ impl RuntimeAccess {
                 }
             }
             let current = self.forge_graph(attached)?.ok_or(GameError::NotReady("forge removed during mapping"))?;
-            if !self.forge_unchanged(attached, &current, query.manager(), query.expected())? || self.read_game_locale(attached, api)? != locale {
+            if !self.forge_unchanged(attached, &current, query.manager(), query.expected())? || self.read_game_locale(attached)? != locale {
                 return Err(unsupported("forge or locale changed during mapping"));
             }
             let page = RawMappingPage {
@@ -608,7 +560,6 @@ impl RuntimeAccess {
         &self,
         attached: &'a AttachedThread<'r>,
         writes: raw::FieldWriteApi,
-        api: raw::InvocationApi,
         query: &ModifierMappingQuery,
     ) -> Result<RawMappingPage, GameError> {
         // SAFETY: The caller supplies the main-thread immutable graph span; selected and detached items stay rooted across each sampled call.
@@ -619,33 +570,33 @@ impl RuntimeAccess {
             }
             let address = query.address();
             let expected = query.expected();
-            let locale = self.read_game_locale(attached, api)?;
+            let locale = self.read_game_locale(attached)?;
             let definition = match address.target {
                 MappingTarget::Unique => {
                     let id = expected.identity.as_ref().ok_or_else(|| unsupported("unique identity absent"))?.id;
-                    Some(self.unique_definition(attached, &graph, api, id).map_err(|e| unsupported(e.to_string()))?)
+                    Some(self.unique_definition(attached, &graph, id).map_err(|e| unsupported(e.to_string()))?)
                 }
                 _ => None,
             };
-            let copy = self.mapping_copy(attached, writes, api, &graph)?;
+            let copy = self.mapping_copy(attached, writes, &graph)?;
             if address.target == MappingTarget::Implicit {
                 // The copy's implicit values follow its own cloned rolls.
-                self.mapping_refresh_implicits(attached, api, &graph.images, &copy)?;
+                self.mapping_refresh_implicits(attached, &graph.images, &copy)?;
             }
             let source = match &definition {
                 Some(definition) => Source::Unique(definition),
                 None => Source::Implicit(expected),
             };
-            let effects = |item: &Root<'a, 'r>| self.modifier_effects(attached, api, &graph.images, item, source, address);
+            let effects = |item: &Root<'a, 'r>| self.modifier_effects(attached, &graph.images, item, source, address);
             if effects(&graph.item)? != effects(&copy)? {
                 return Err(unsupported("detached modifier context differs from live item"));
             }
             let draft: Vec<(u8, u8)> = query.draft().iter().map(|change| (change.index, change.value)).collect();
-            self.modifier_store_rolls(attached, api, &graph, &copy, address.target, &draft)?;
-            let store = |roll: u8| self.modifier_store_rolls(attached, api, &graph, &copy, address.target, &[(address.index, roll)]);
+            self.modifier_store_rolls(attached, &graph, &copy, address.target, &draft)?;
+            let store = |roll: u8| self.modifier_store_rolls(attached, &graph, &copy, address.target, &[(address.index, roll)]);
             store(0)?;
             let rebuild = self.method(self.class(&graph.images, c"", c"ItemData")?, c"RebuildID", &[], true)?;
-            self.mapping_void(attached, api, &copy, rebuild, &mut [])?;
+            self.mapping_void(attached, &copy, rebuild, &mut [])?;
             let serial = self
                 .child(attached, &copy, c"id")?
                 .ok_or_else(|| unsupported("detached serialization absent after refresh"))?;
@@ -681,7 +632,7 @@ impl RuntimeAccess {
                 }
             }
             let current = self.forge_graph(attached)?.ok_or(GameError::NotReady("forge removed during mapping"))?;
-            if !self.forge_unchanged(attached, &current, query.manager(), query.expected())? || self.read_game_locale(attached, api)? != locale {
+            if !self.forge_unchanged(attached, &current, query.manager(), query.expected())? || self.read_game_locale(attached)? != locale {
                 return Err(unsupported("forge or locale changed during mapping"));
             }
             let page = RawMappingPage {

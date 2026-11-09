@@ -52,7 +52,7 @@ impl RuntimeAccess {
     /// # Safety
     /// Attached main thread, initialized game statics and exclusive player read span as `player`. The caller keeps
     /// this binding until all gateways using it close and drain, and drops it on an attached runtime thread.
-    pub(crate) unsafe fn bind_stat(&self, attached: &AttachedThread<'_>, ownership: raw::Api, manager: u64, feature: &StatFeature) -> Result<ScalarBinding, WriteError> {
+    pub(crate) unsafe fn bind_stat(&self, attached: &AttachedThread<'_>, manager: u64, feature: &StatFeature) -> Result<ScalarBinding, WriteError> {
         // SAFETY: the selected accessor alone is resolved over a rooted, checked current player.
         unsafe {
             let SelectedStat { player, stat, bits: baseline } = self.selected_stat(attached, manager, feature)?;
@@ -67,7 +67,7 @@ impl RuntimeAccess {
             }
             let online = self.hook_online_storage(&self.images()?)?.as_ptr() as usize;
             self.player_unchanged(&player)?;
-            Ok(ScalarBinding::pin(ownership, object.as_ptr() as usize, offset as u32, baseline, online)?)
+            Ok(ScalarBinding::pin(self, object.as_ptr() as usize, offset as u32, baseline, online)?)
         }
     }
 }

@@ -67,12 +67,10 @@ unsafe fn module() -> Result<NonNull<u8>, String> {
     // SAFETY: read-only already-loaded module lookup; caller guarantees initialized runtime lifetime.
     unsafe { il2cpp_runtime::module::loaded("GameAssembly.dll") }.ok_or_else(|| "GameAssembly is not loaded".into())
 }
-// One resolver binds every table to the same retained GameAssembly. Keep the
-// tables private: operation closures receive this bundle, never re-resolve them.
+// One resolution binds the export table and the store exports to the same retained GameAssembly. Keep them
+// private: operation closures receive this bundle, never re-resolve them.
 struct Runtime {
-    ownership: raw::Api,
     access: RuntimeAccess,
-    invocation: raw::InvocationApi,
     writes: raw::FieldWriteApi,
 }
 impl Runtime {
@@ -90,19 +88,13 @@ impl Runtime {
     unsafe fn resolve(module: NonNull<u8>) -> Result<Self, String> {
         // SAFETY: caller retains this exact module and establishes its supported ABI.
         unsafe {
-            let mut symbol = |name| export(module, name);
-            let access = RuntimeAccess::resolve(&mut symbol).map_err(|e| e.to_string())?;
-            Ok(Self {
-                ownership: raw::Api::resolve(&mut symbol).map_err(|e| e.to_string())?,
-                invocation: access.invocation(&mut symbol).map_err(|e| e.to_string())?,
-                access,
-                writes: raw::FieldWriteApi::resolve(&mut symbol).map_err(|e| e.to_string())?,
-            })
+            let (access, writes) = RuntimeAccess::resolve(|name| export(module, name)).map_err(|e| e.to_string())?;
+            Ok(Self { access, writes })
         }
     }
     fn thread(&self) -> ThreadContext {
         // SAFETY: resolve's caller retains the module through every operation and lease.
-        unsafe { ThreadContext::new(self.ownership) }
+        unsafe { ThreadContext::new(&self.access) }
     }
 }
 // All failures here precede the operation body, including every possible store.
@@ -128,9 +120,7 @@ unsafe fn runtime_operation(operation: impl FnOnce(&Runtime, RuntimeAccess, &Att
                 // Every operation that observes lost admission closes gameplay
                 // effects, including Forge/field requests between watchdog ticks.
                 gameplay_hooks::observe(0).map_err(|e| server::failure(ResponseCode::Failed, e))?;
-                if runtime.access.play_presence(&attached, runtime.invocation).ok() == Some(PlayPresence::InGame)
-                    && runtime.access.status(&attached).is_ok_and(|status| awaiting_manager(&status))
-                {
+                if runtime.access.play_presence(&attached).ok() == Some(PlayPresence::InGame) && runtime.access.status(&attached).is_ok_and(|status| awaiting_manager(&status)) {
                     return Err(changing_area());
                 }
             }
@@ -176,12 +166,12 @@ unsafe fn read_status() -> Response {
     // SAFETY: captured engine thread after original; initialized modules/metadata
     // remain retained and the status reader rechecks the current offline graph.
     unsafe {
-        runtime_operation(|runtime, access, attached| {
+        runtime_operation(|_, access, attached| {
             let status_result = access.status(attached);
             gameplay_hooks::observe(status_result.as_ref().map_or(0, |s| if s.online { 0 } else { s.manager })).map_err(|e| server::failure(ResponseCode::Failed, e))?;
             let mut status = status_result.map_err(game_failure)?;
             status.features_on = gameplay_hooks::count();
-            if awaiting_manager(&status) && access.play_presence(attached, runtime.invocation).ok() == Some(PlayPresence::InGame) {
+            if awaiting_manager(&status) && access.play_presence(attached).ok() == Some(PlayPresence::InGame) {
                 return Err(changing_area());
             }
             done(status.encode().map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?.to_vec())
@@ -198,9 +188,8 @@ unsafe fn edit_forge(write: &ForgeWrite) -> Response {
     unsafe {
         runtime_operation(|runtime, access, attached| {
             let writer = runtime.writes;
-            let invoke = runtime.invocation;
             let snapshot = access
-                .edit_forge(attached, writer, Some(invoke), write.expected_manager(), write.expected(), write.mutation())
+                .edit_forge(attached, writer, write.expected_manager(), write.expected(), write.mutation())
                 .map_err(write_failure)?;
             encoded(eg_trainer_wire::forge::encode(Some(&snapshot)))
         })
@@ -212,9 +201,7 @@ unsafe fn register_affixes(expected_manager: u64, affixes: &[eg_trainer_wire::ne
     // SAFETY: only the established main thread calls this after original returns, under the start contract edit_forge relies on.
     unsafe {
         runtime_operation(|runtime, access, attached| {
-            access
-                .register_affixes(attached, runtime.writes, runtime.invocation, expected_manager, affixes)
-                .map_err(write_failure)?;
+            access.register_affixes(attached, runtime.writes, expected_manager, affixes).map_err(write_failure)?;
             done(Vec::new())
         })
     }
@@ -238,10 +225,10 @@ unsafe fn count_fields(manager: u64, set: eg_trainer_wire::field_edits::FieldSet
     unsafe {
         runtime_operation(|runtime, access, attached| {
             if let Some(edit) = edit {
-                access.apply_field_set(attached, runtime.writes, runtime.invocation, edit).map_err(write_failure)?;
+                access.apply_field_set(attached, runtime.writes, edit).map_err(write_failure)?;
                 done(Vec::new())
             } else {
-                let snapshot = access.read_field_set(attached, runtime.invocation, manager, set).map_err(write_failure)?;
+                let snapshot = access.read_field_set(attached, manager, set).map_err(write_failure)?;
                 encoded(snapshot.encode())
             }
         })
@@ -252,9 +239,8 @@ unsafe fn describe_implicits(query: &eg_trainer_wire::mapping::ForgeDescriptionR
     // SAFETY: the scheduler supplies the same supported main-thread runtime and
     // synchronous rooted graph span as read_forge, including tooltip allocations.
     unsafe {
-        runtime_operation(|runtime, access, attached| {
-            let invoke = runtime.invocation;
-            let descriptions = access.describe_implicits(attached, invoke, query).map_err(game_failure)?;
+        runtime_operation(|_, access, attached| {
+            let descriptions = access.describe_implicits(attached, query).map_err(game_failure)?;
             encoded(eg_trainer_wire::mapping::encode_modifiers(&descriptions))
         })
     }
@@ -265,12 +251,11 @@ unsafe fn unique_presentation(query: &eg_trainer_wire::mapping::ForgeDescription
     // span as implicit descriptions; private-copy stores never target the forge.
     unsafe {
         runtime_operation(|runtime, access, attached| {
-            let invoke = runtime.invocation;
             let descriptions = if let Some(preview) = preview {
                 let writes = runtime.writes;
-                access.preview_unique(attached, writes, invoke, preview)
+                access.preview_unique(attached, writes, preview)
             } else {
-                access.describe_unique(attached, invoke, query)
+                access.describe_unique(attached, query)
             }
             .map_err(game_failure)?;
             encoded(eg_trainer_wire::mapping::encode_modifiers(&descriptions))
@@ -283,9 +268,8 @@ unsafe fn read_affix_mapping(query: &eg_trainer_wire::mapping::AffixMappingQuery
     // rooted graph span. Only independent detached objects are mutated for sampling.
     unsafe {
         runtime_operation(|runtime, access, attached| {
-            let invoke = runtime.invocation;
             let writes = runtime.writes;
-            let page = access.read_affix_mapping(attached, writes, invoke, query).map_err(game_failure)?;
+            let page = access.read_affix_mapping(attached, writes, query).map_err(game_failure)?;
             encoded(eg_trainer_wire::mapping::encode_mapping(&page))
         })
     }
@@ -296,7 +280,7 @@ unsafe fn read_modifier_mapping(query: &eg_trainer_wire::mapping::ModifierMappin
     // independent detached copies are mutated for sampling.
     unsafe {
         runtime_operation(|runtime, access, attached| {
-            let page = access.read_modifier_mapping(attached, runtime.writes, runtime.invocation, query).map_err(game_failure)?;
+            let page = access.read_modifier_mapping(attached, runtime.writes, query).map_err(game_failure)?;
             encoded(eg_trainer_wire::mapping::encode_mapping(&page))
         })
     }
@@ -311,9 +295,8 @@ unsafe fn read_locale() -> Response {
     // version internal-call cache and native return-buffer allocation/disposal are
     // permitted. Read-only here means no gameplay mutation, not zero side effects.
     unsafe {
-        runtime_operation(|runtime, access, attached| {
-            let invocation = runtime.invocation;
-            let locale = access.read_game_locale(attached, invocation).map_err(game_failure)?;
+        runtime_operation(|_, access, attached| {
+            let locale = access.read_game_locale(attached).map_err(game_failure)?;
             encoded(eg_trainer_wire::locale::encode(&locale))
         })
     }
@@ -349,10 +332,9 @@ unsafe fn check_dispatch_thread() -> Result<bool, String> {
         let module = module()?;
         let runtime = Runtime::retained(module)?;
         let access = runtime.access;
-        let invocation = runtime.invocation;
         let thread = runtime.thread();
         let attached = thread.attach().map_err(|e| e.to_string())?;
-        access.is_dispatcher_thread(&attached, invocation).map_err(|e| e.to_string())
+        access.is_dispatcher_thread(&attached).map_err(|e| e.to_string())
     }
 }
 
@@ -386,7 +368,7 @@ fn after_original(state: &Shared) {
                 let runtime = Runtime::retained(module()?)?;
                 let thread = runtime.thread();
                 let attached = thread.attach().map_err(|e| e.to_string())?;
-                let presence = runtime.access.play_presence(&attached, runtime.invocation).map_err(|e| e.to_string())?;
+                let presence = runtime.access.play_presence(&attached).map_err(|e| e.to_string())?;
                 let manager = if presence == PlayPresence::InGame {
                     runtime.access.status(&attached).ok().filter(|s| !s.online).map_or(0, |s| s.manager)
                 } else {

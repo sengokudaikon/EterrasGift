@@ -33,12 +33,12 @@ fn validate(rank: i32, reputation: i32, member: bool, maximum: i32, next: Option
     Ok(())
 }
 impl RuntimeAccess {
-    pub(super) unsafe fn standing_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>, api: raw::InvocationApi, manager: Root<'a, 'r>) -> Result<FieldGraph<'a, 'r>, WriteError> {
+    pub(super) unsafe fn standing_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>, manager: Root<'a, 'r>) -> Result<FieldGraph<'a, 'r>, WriteError> {
         // SAFETY: offline current manager; provider owns the existing faction references returned by these lookups.
         unsafe {
             let images = self.images()?;
             self.enum_storage(self.class(&images, c"LE.Factions", c"FactionID")?, c"Byte", raw::type_code::U1)?;
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let finder = self.class(&images, c"", c"PlayerFinder")?;
             let getter = context
                 .bind(self.field_method(finder, c"GetFactionInfoProviderInSingleplayerOrOnClient", 0)?)
@@ -47,7 +47,7 @@ impl RuntimeAccess {
             let mut entries = Vec::new();
             let mut values = Vec::new();
             for mut id in 0..4u8 {
-                let faction = self.field_lookup(attached, api, &provider, &LOOKUP, &mut [(&raw mut id).cast()])?;
+                let faction = self.field_lookup(attached, &provider, &LOOKUP, &mut [(&raw mut id).cast()])?;
                 let identity = faction.as_ref().map(target).transpose()?.map_or(0, |p| p.as_ptr() as u64);
                 for name in [c"<Rank>k__BackingField", c"<Favor>k__BackingField", c"<Reputation>k__BackingField"] {
                     let value = if let Some(faction) = &faction { self.primitive::<i32>(faction, name)? } else { 0 };
@@ -66,16 +66,10 @@ impl RuntimeAccess {
             })
         }
     }
-    pub(super) unsafe fn apply_standing(
-        &self,
-        attached: &AttachedThread<'_>,
-        api: raw::InvocationApi,
-        graph: &FieldGraph<'_, '_>,
-        values: &[Option<i32>],
-    ) -> Result<Snapshot, WriteError> {
+    pub(super) unsafe fn apply_standing(&self, attached: &AttachedThread<'_>, graph: &FieldGraph<'_, '_>, values: &[Option<i32>]) -> Result<Snapshot, WriteError> {
         // SAFETY: source retains every faction; all dynamic limits and method signatures are checked before stores.
         unsafe {
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let mut changes = Vec::new();
             for id in 0..4 {
                 let before: [i32; 3] = std::array::from_fn(|field| graph.snapshot.fields[id * 3 + field].value);
@@ -94,19 +88,19 @@ impl RuntimeAccess {
                     return Err(WriteError::Refused("Join this faction in the game first".into()));
                 }
                 let data = self.field_child(attached, faction, c"<Data>k__BackingField")?;
-                let maximum = integer(returned(self.field_call(&context, api, &data, c"get_MaxRank", 0)?.invoke(Some(&data), &mut []))?)?;
+                let maximum = integer(returned(self.field_call(&context, &data, c"get_MaxRank", 0)?.invoke(Some(&data), &mut []))?)?;
                 let next = if wanted[0] < maximum {
                     Some(integer(returned(
-                        self.field_call(&context, api, &data, c"ReputationRequiredForNextRank", 1)?
+                        self.field_call(&context, &data, c"ReputationRequiredForNextRank", 1)?
                             .invoke(Some(&data), &mut [Argument::Scalar(Scalar::I32(wanted[0]))]),
                     )?)?)
                 } else {
                     None
                 };
                 validate(wanted[0], wanted[2], member, maximum, next)?;
-                let rank = self.field_exact(&context, api, faction, &method(c"SetRank", &["System.Int32", "System.Boolean"], "System.Void"))?;
-                let standing = self.field_exact(&context, api, faction, &method(c"SetFavorAndReputation", &["System.Int32", "System.Int32"], "System.Void"))?;
-                let save = self.field_exact(&context, api, faction, &method(c"SaveAndSync", &["System.Boolean"], "System.Void"))?;
+                let rank = self.field_exact(&context, faction, &method(c"SetRank", &["System.Int32", "System.Boolean"], "System.Void"))?;
+                let standing = self.field_exact(&context, faction, &method(c"SetFavorAndReputation", &["System.Int32", "System.Int32"], "System.Void"))?;
+                let save = self.field_exact(&context, faction, &method(c"SaveAndSync", &["System.Boolean"], "System.Void"))?;
                 changes.push((faction, before[0] != wanted[0], wanted, rank, standing, save));
             }
             self.field_gate(attached, graph.snapshot.manager)?;
@@ -130,7 +124,7 @@ impl RuntimeAccess {
                     }
                     Ok(())
                 },
-                || self.read_field_set(attached, api, graph.snapshot.manager, graph.snapshot.set),
+                || self.read_field_set(attached, graph.snapshot.manager, graph.snapshot.set),
             )
         }
     }

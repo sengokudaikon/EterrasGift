@@ -95,10 +95,9 @@ impl RuntimeAccess {
     /// Gameplay scene transitions remain InGame, including missing player wrappers.
     ///
     /// # Safety
-    /// All status runtime/main-thread assumptions apply. `api` belongs to the same
-    /// runtime; the zero-argument state getter and its runtime callbacks must be
+    /// All status runtime/main-thread assumptions apply; the zero-argument state getter and its runtime callbacks must be
     /// trusted, initialized, and non-reentrant through this synchronous invocation.
-    pub unsafe fn play_presence(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi) -> Result<PlayPresence, GameError> {
+    pub unsafe fn play_presence(&self, attached: &AttachedThread<'_>) -> Result<PlayPresence, GameError> {
         // SAFETY: caller retains initialized runtime metadata and authorizes only
         // the checked static state getter; enum boxes remain rooted until copied.
         unsafe {
@@ -111,7 +110,7 @@ impl RuntimeAccess {
             if online != 0 {
                 return Ok(PlayPresence::Online);
             }
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let method = context
                 .bind_with_value_types(
                     NonNull::new(bindings.getter as *mut raw::MethodInfo).unwrap(),

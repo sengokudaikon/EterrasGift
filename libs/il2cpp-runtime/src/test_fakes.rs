@@ -1,7 +1,7 @@
 //! The fake thread unit tests of code on this crate share: an attachment the engine already owns, and Box-backed GC handles that
 //! record which objects they hold. Object tokens are identities only; nothing behind them is read.
 
-use crate::{ThreadContext, metadata::Ptr, raw};
+use crate::{Exports, ThreadContext, metadata::Ptr, raw};
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
@@ -95,25 +95,38 @@ unsafe extern "C-unwind" fn root_free(handle: Ptr) {
     FREES.set(FREES.get() + 1);
 }
 
-/// The thread table, for a second context on the same fakes.
-pub fn api() -> raw::Api {
-    raw::Api {
+/// `exports` with the attachment and root fakes set.
+pub fn with_thread(exports: &Exports) -> Exports {
+    Exports {
         domain_get: domain,
         thread_current: current,
         thread_attach: attach,
         thread_detach: detach,
         gchandle_new: root,
         gchandle_free: root_free,
-        gchandle_get_target: root_target,
+        gchandle_target: root_target,
+        ..*exports
     }
 }
 
-/// A context on [`api`], once every handle of the last test is freed. Clears the free count and the failures.
+/// The export table with the attachment and root fakes set and every other export a stub, for a second context on the
+/// same fakes.
+pub fn api() -> Exports {
+    with_thread(&Exports::test_stubs())
+}
+
+/// A context on [`api`]'s fakes, once every handle of the last test is freed. Clears the free count and the failures.
 pub fn thread() -> ThreadContext {
+    thread_on(&Exports::test_stubs())
+}
+
+/// A context on `exports` with the attachment and root fakes set, so that what is invoked through it reaches the fakes
+/// `exports` holds, once every handle of the last test is freed. Clears the free count and the failures.
+pub fn thread_on(exports: &Exports) -> ThreadContext {
     assert_eq!(roots(), 0, "a handle outlived its test");
     FREES.set(0);
     FAIL_ROOT.set(0);
     LOST_TARGET.set(0);
     // SAFETY: the table borrows this test thread's existing attachment; its handles are Box allocations freed once.
-    unsafe { ThreadContext::new(api()) }
+    unsafe { ThreadContext::new(&with_thread(exports)) }
 }

@@ -564,6 +564,7 @@ dependencies = [
 name = "il2cpp-runtime"
 version = "0.1.0"
 dependencies = [
+ "il2cpp-runtime",
  "static_assertions",
  "windows-sys",
 ]

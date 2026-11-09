@@ -5,7 +5,7 @@ use crate::game::{
     RuntimeAccess, ScalarBinding,
     registry::{Behavior, HookFeature, TargetEffect},
 };
-use il2cpp_runtime::{AttachedThread, raw};
+use il2cpp_runtime::AttachedThread;
 use native_hooks::{gate::Gate, leaf::LeafGate, postfix::PostfixGate, scalar::ScalarGate};
 
 pub(super) struct FeatureBinding {
@@ -16,16 +16,16 @@ impl FeatureBinding {
     /// # Safety
     /// Admitted attached main thread, initialized statics and exclusive player graph span. The returned binding
     /// must remain owned until every prepared gateway closes, drains and restores its receiver.
-    pub(super) unsafe fn resolve(access: &RuntimeAccess, attached: &AttachedThread<'_>, ownership: raw::Api, manager: u64, hook: GameplayHook, on: bool) -> Result<Self, Response> {
+    pub(super) unsafe fn resolve(access: &RuntimeAccess, attached: &AttachedThread<'_>, manager: u64, hook: GameplayHook, on: bool) -> Result<Self, Response> {
         let feature = definition(hook);
         let binding = if matches!(feature.behavior, Behavior::Camera) && on {
             // SAFETY: caller admits this synchronous camera graph read and retains the returned pin.
-            Some(unsafe { access.bind_camera(attached, ownership) }.map_err(game_failure)?)
+            Some(unsafe { access.bind_camera(attached) }.map_err(game_failure)?)
         } else if let Behavior::Scalar(stat) = feature.behavior
             && on
         {
             // SAFETY: caller holds the synchronous player graph and attachment contract.
-            Some(unsafe { access.bind_stat(attached, ownership, manager, stat) }.map_err(|e| server::failure(e.code(), e.to_string()))?)
+            Some(unsafe { access.bind_stat(attached, manager, stat) }.map_err(|e| server::failure(e.code(), e.to_string()))?)
         } else {
             None
         };

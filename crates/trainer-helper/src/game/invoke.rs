@@ -48,7 +48,6 @@ impl<'a, 'r> FromReturn<'a, 'r> for Option<Root<'a, 'r>> {
 /// permits running the game's method on this attached thread.
 pub(crate) unsafe fn call<'a, 'r, T: FromReturn<'a, 'r>>(
     attached: &'a AttachedThread<'r>,
-    api: raw::InvocationApi,
     method: Method,
     receiver: Option<&Root<'_, '_>>,
     args: &mut [Argument<'_, '_, '_>],
@@ -57,7 +56,7 @@ pub(crate) unsafe fn call<'a, 'r, T: FromReturn<'a, 'r>>(
 ) -> Result<T, GameError> {
     // SAFETY: as this function's; the context roots the receiver, arguments and a returned reference across the call.
     unsafe {
-        let context = InvocationContext::new(attached, api);
+        let context = InvocationContext::new(attached);
         let method = context
             .bind(NonNull::new(method.cast_mut()).ok_or_else(|| unsupported(unbound))?)
             .map_err(|e| unsupported(e.to_string()))?;
@@ -66,16 +65,16 @@ pub(crate) unsafe fn call<'a, 'r, T: FromReturn<'a, 'r>>(
 }
 
 impl RuntimeAccess {
-    /// The body `receiver` runs for `method` (`InvocationApi::dispatched`), when it is the game's own: an override from
+    /// The body `receiver` runs for `method` (`Exports::dispatched`), when it is the game's own: an override from
     /// another image than `game`, a mod's, is none.
     ///
     /// # Safety
     /// An attached thread of this runtime, `receiver` live, and `method` a method of one of its classes.
-    pub(crate) unsafe fn game_body(&self, api: raw::InvocationApi, game: Ptr, receiver: NonNull<raw::Object>, method: Method) -> Option<Method> {
+    pub(crate) unsafe fn game_body(&self, game: Ptr, receiver: NonNull<raw::Object>, method: Method) -> Option<Method> {
         // SAFETY: as this function's; the override's descriptor is retained metadata.
         unsafe {
-            let body = api.dispatched(receiver, method)?;
-            (body == method || (self.class_image)((api.method_get_class)(body)) == game).then_some(body)
+            let body = self.dispatched(receiver, method)?;
+            (body == method || (self.class_image)((self.method_class)(body)) == game).then_some(body)
         }
     }
 }

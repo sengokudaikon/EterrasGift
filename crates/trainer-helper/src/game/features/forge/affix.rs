@@ -25,7 +25,6 @@ impl RuntimeAccess {
         &self,
         attached: &'a AttachedThread<'r>,
         graph: &ForgeGraph<'_, '_>,
-        api: raw::InvocationApi,
         expected: &ForgeSnapshot,
         mutation: ForgeMutation,
     ) -> Result<AffixRewrite<'a, 'r>, WriteError> {
@@ -65,7 +64,7 @@ impl RuntimeAccess {
             let clear = self.affix_list_method(list_class, class, c"Clear", false)?;
             let add = self.affix_list_method(list_class, class, c"Add", true)?;
             let list_class = NonNull::new(list_class).ok_or_else(|| WriteError::Refused("Missing affix-list class".into()))?;
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             // Finish checked binding before the live mutation boundary. Metadata
             // stays immutable through apply, which repeats binding before Clear.
             for method in [clear, add] {
@@ -86,7 +85,7 @@ impl RuntimeAccess {
                 let constructor = self.method(class, c".ctor", &["System.UInt16", "System.Byte", "System.Byte", "System.Byte", "SealedAffixType"], true)?;
                 let enum_class =
                     NonNull::new(self.field_class(self.field(class, c"sealedAffixType")?, "forge write")?).ok_or_else(|| WriteError::Refused("Missing seal enum".into()))?;
-                let context = InvocationContext::new(attached, api);
+                let context = InvocationContext::new(attached);
                 let constructor = context
                     .bind_with_value_types(
                         NonNull::new(constructor.cast_mut()).expect("resolved constructor"),
@@ -205,10 +204,10 @@ impl RuntimeAccess {
 
 impl AffixRewrite<'_, '_> {
     /// Caller crossed the mutation boundary: any error is uncertain, even from Clear.
-    pub(super) unsafe fn apply(&self, attached: &AttachedThread<'_>, writes: raw::FieldWriteApi, api: raw::InvocationApi, item: NonNull<raw::Object>) -> Result<(), WriteError> {
+    pub(super) unsafe fn apply(&self, attached: &AttachedThread<'_>, writes: raw::FieldWriteApi, item: NonNull<raw::Object>) -> Result<(), WriteError> {
         // SAFETY: Prepared metadata fixes every field and method signature; the caller retains exclusive rooted destinations through stores and refresh.
         unsafe {
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let failed = |e: il2cpp_runtime::InvokeError| WriteError::Failed(e.to_string());
             let clear = context
                 .bind_with_closed_references(NonNull::new(self.clear.cast_mut()).expect("prepared Clear"), &[self.list_class])

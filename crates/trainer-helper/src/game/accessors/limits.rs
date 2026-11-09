@@ -96,8 +96,8 @@ impl RuntimeAccess {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::{Ptr, TestExportStub, Type};
-    use il2cpp_runtime::{ThreadContext, raw, test_fakes::corlib};
+    use crate::game::{Ptr, Type};
+    use il2cpp_runtime::{Exports, ThreadContext, raw, test_fakes::corlib};
     use std::{
         cell::Cell,
         ffi::{CString, c_char},
@@ -315,18 +315,12 @@ mod tests {
         for online in [0, 1] {
             let api = fixture();
             ONLINE.set(online);
-            let ownership = raw::Api {
-                domain_get: domain,
-                thread_current: current,
-                thread_attach: <raw::ThreadAttach as TestExportStub>::test_stub(),
-                thread_detach: <raw::ThreadDetach as TestExportStub>::test_stub(),
-                gchandle_new: <raw::GcHandleNew as TestExportStub>::test_stub(),
-                gchandle_free: <raw::GcHandleFree as TestExportStub>::test_stub(),
-                gchandle_get_target: <raw::GcHandleTarget as TestExportStub>::test_stub(),
-            };
+            let mut ownership = Exports::test_stubs();
+            ownership.domain_get = domain;
+            ownership.thread_current = current;
             // SAFETY: the fake engine owns this test thread's existing attachment; status returns
             // null manager/master references, so no handle creation or object access is permitted.
-            let runtime = unsafe { ThreadContext::new(ownership) };
+            let runtime = unsafe { ThreadContext::new(&ownership) };
             let attached = runtime.attach().unwrap();
             // SAFETY: immutable authored status metadata supplies online or absent-manager admission.
             assert!(matches!(unsafe { api.read_item_limits(&attached) }, Err(GameError::OfflineRequired)));

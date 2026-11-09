@@ -6,32 +6,19 @@ use std::{collections::BTreeSet, ffi::CStr, ptr::NonNull};
 
 impl RuntimeAccess {
     // Inherits describe_unique's attached, synchronous supported-runtime span.
-    pub(super) unsafe fn unique_scalar(
-        &self,
-        attached: &AttachedThread<'_>,
-        api: raw::InvocationApi,
-        object: &Root<'_, '_>,
-        name: &CStr,
-        returns: &CStr,
-    ) -> Result<Scalar, GameError> {
+    pub(super) unsafe fn unique_scalar(&self, attached: &AttachedThread<'_>, object: &Root<'_, '_>, name: &CStr, returns: &CStr) -> Result<Scalar, GameError> {
         // SAFETY: The rooted modifier and checked zero-argument getter retain the exact boxed scalar class through unboxing.
         unsafe {
-            let method = self.mapping_method(api, object, name, &[], Some(self.system_class(returns)?))?;
-            call(attached, api, method, Some(object), &mut [], "unique scalar method", "unique scalar getter failed or threw")
+            let method = self.mapping_method(object, name, &[], Some(self.system_class(returns)?))?;
+            call(attached, method, Some(object), &mut [], "unique scalar method", "unique scalar getter failed or threw")
         }
     }
     // The preformatted producer returns a closed List<game reference>. Validate
     // its layout/element before opting this exact class into checked binding.
-    pub(super) unsafe fn unique_replacements<'a, 'r>(
-        &self,
-        attached: &'a AttachedThread<'r>,
-        api: raw::InvocationApi,
-        images: &Images,
-        parsed: &Root<'_, '_>,
-    ) -> Result<Vec<Root<'a, 'r>>, GameError> {
+    pub(super) unsafe fn unique_replacements<'a, 'r>(&self, attached: &'a AttachedThread<'r>, images: &Images, parsed: &Root<'_, '_>) -> Result<Vec<Root<'a, 'r>>, GameError> {
         // SAFETY: The validated property definition remains rooted while its exact List and boxed replacement entries are inspected.
         unsafe {
-            let method = self.mapping_method(api, parsed, c"get_Replacements", &[], None)?;
+            let method = self.mapping_method(parsed, c"get_Replacements", &[], None)?;
             let list_class = (self.type_class)((self.method_return)(method));
             self.list_class(list_class)?;
             let array = self.field_class(self.field(list_class, c"_items")?, "unique")?;
@@ -40,7 +27,7 @@ impl RuntimeAccess {
                 return Err(unsupported("unique replacement element"));
             }
             self.array_class(array, element)?;
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let method = context
                 .bind_with_closed_references(
                     NonNull::new(method.cast_mut()).ok_or_else(|| unsupported("unique replacement getter"))?,
@@ -62,7 +49,6 @@ impl RuntimeAccess {
     pub(super) unsafe fn unique_lines<'a, 'r>(
         &self,
         attached: &'a AttachedThread<'r>,
-        api: raw::InvocationApi,
         images: &Images,
         item: &Root<'a, 'r>,
         definition: &Root<'a, 'r>,
@@ -92,7 +78,7 @@ impl RuntimeAccess {
                 None,
                 false,
             )?;
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let builder = context
                 .bind_with_value_types(
                     NonNull::new(builder.cast_mut()).ok_or_else(|| unsupported("unique builder"))?,
@@ -125,7 +111,6 @@ impl RuntimeAccess {
     pub(super) unsafe fn unique_modifiers<'a, 'r>(
         &self,
         attached: &'a AttachedThread<'r>,
-        api: raw::InvocationApi,
         images: &Images,
         item: &Root<'a, 'r>,
         definition: &Root<'a, 'r>,
@@ -133,7 +118,7 @@ impl RuntimeAccess {
     ) -> Result<Vec<ModifierSnapshot>, GameError> {
         // SAFETY: The item, definition and every tooltip result stay rooted across calls; owned text is bounded.
         unsafe {
-            let lines = self.unique_lines(attached, api, images, item, definition)?;
+            let lines = self.unique_lines(attached, images, item, definition)?;
             let mut result = Vec::new();
             for (index, (entry, info)) in lines.entries.iter().zip(&lines.infos).enumerate() {
                 let Some(info) = info else {
@@ -150,7 +135,7 @@ impl RuntimeAccess {
                     let parsed = self
                         .child(attached, info, c"_parsedUniqueMod")?
                         .ok_or_else(|| unsupported("parsed unique modifier absent"))?;
-                    for replacement in self.unique_replacements(attached, api, images, &parsed)? {
+                    for replacement in self.unique_replacements(attached, images, &parsed)? {
                         let class = (self.object_class)(target(&replacement)?.as_ptr());
                         let name = (self.class_name)(class);
                         if name.is_null() {
@@ -159,9 +144,9 @@ impl RuntimeAccess {
                         if metadata_text(name) != c"UniqueModRollRangeReplacement" {
                             continue;
                         }
-                        match self.unique_scalar(attached, api, &replacement, c"get_HasRange", c"Boolean")? {
+                        match self.unique_scalar(attached, &replacement, c"get_HasRange", c"Boolean")? {
                             Scalar::Boolean(true) => {
-                                let Scalar::I32(id) = self.unique_scalar(attached, api, &replacement, c"get_RollId", c"Int32")? else {
+                                let Scalar::I32(id) = self.unique_scalar(attached, &replacement, c"get_RollId", c"Int32")? else {
                                     return Err(unsupported("unique roll ID getter"));
                                 };
                                 ids.insert(id);
@@ -190,8 +175,8 @@ impl RuntimeAccess {
                 }
                 result.push(ModifierSnapshot {
                     index: index as u32,
-                    text: self.description_text(attached, api, info, c"ToModifierString")?,
-                    range: self.description_text(attached, api, info, c"ToRangeString")?,
+                    text: self.description_text(attached, info, c"ToModifierString")?,
+                    range: self.description_text(attached, info, c"ToRangeString")?,
                     roll_ids: if editable { ids.into_iter().map(|id| id as u8).collect() } else { vec![] },
                     editable,
                 });
@@ -206,29 +191,22 @@ impl RuntimeAccess {
     /// apply to all producer, lookup, parsing-cache and virtual formatter calls.
     /// Game bodies and active culture must remain stable; roots cover GC, not
     /// concurrent external mutation or arbitrary producer side effects.
-    pub unsafe fn describe_unique(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, request: &ForgeDescriptionRequest) -> Result<Vec<ModifierSnapshot>, GameError> {
+    pub unsafe fn describe_unique(&self, attached: &AttachedThread<'_>, request: &ForgeDescriptionRequest) -> Result<Vec<ModifierSnapshot>, GameError> {
         // SAFETY: The caller supplies the documented main-thread tooltip span; this path performs no item stores.
-        unsafe { self.unique_presentation(attached, None, api, request, None) }
+        unsafe { self.unique_presentation(attached, None, request, None) }
     }
     /// Formats drafted rolls on an independent item copy. No live item store.
     /// # Safety
     /// describe_unique's conditions plus mapping_copy's constructor/barrier and
     /// detached graph assumptions apply throughout this synchronous operation.
-    pub unsafe fn preview_unique(
-        &self,
-        attached: &AttachedThread<'_>,
-        writes: raw::FieldWriteApi,
-        api: raw::InvocationApi,
-        request: &UniquePreviewRequest,
-    ) -> Result<Vec<ModifierSnapshot>, GameError> {
+    pub unsafe fn preview_unique(&self, attached: &AttachedThread<'_>, writes: raw::FieldWriteApi, request: &UniquePreviewRequest) -> Result<Vec<ModifierSnapshot>, GameError> {
         // SAFETY: The caller supplies the documented preview span; stores target only the validated independent copy.
-        unsafe { self.unique_presentation(attached, Some(writes), api, request.target(), Some(request)) }
+        unsafe { self.unique_presentation(attached, Some(writes), request.target(), Some(request)) }
     }
     unsafe fn unique_presentation(
         &self,
         attached: &AttachedThread<'_>,
         writes: Option<raw::FieldWriteApi>,
-        api: raw::InvocationApi,
         request: &ForgeDescriptionRequest,
         preview: Option<&UniquePreviewRequest>,
     ) -> Result<Vec<ModifierSnapshot>, GameError> {
@@ -242,9 +220,9 @@ impl RuntimeAccess {
                 return Err(unsupported("item has no supported unique modifiers"));
             }
             let identity = request.expected().identity.as_ref().ok_or_else(|| unsupported("unique identity absent"))?;
-            let locale = self.read_game_locale(attached, api)?;
-            let definition = self.unique_definition(attached, &graph, api, identity.id).map_err(|e| unsupported(e.to_string()))?;
-            let original = self.unique_modifiers(attached, api, &graph.images, &graph.item, &definition, identity.rolls.len())?;
+            let locale = self.read_game_locale(attached)?;
+            let definition = self.unique_definition(attached, &graph, identity.id).map_err(|e| unsupported(e.to_string()))?;
+            let original = self.unique_modifiers(attached, &graph.images, &graph.item, &definition, identity.rolls.len())?;
             let result = if let Some(preview) = preview {
                 if preview
                     .changes()
@@ -253,8 +231,8 @@ impl RuntimeAccess {
                 {
                     return Err(unsupported("unique roll has no editable tooltip evidence"));
                 }
-                let copy = self.mapping_copy(attached, writes.ok_or_else(|| unsupported("preview setter API"))?, api, &graph)?;
-                if self.unique_modifiers(attached, api, &graph.images, &copy, &definition, identity.rolls.len())? != original {
+                let copy = self.mapping_copy(attached, writes.ok_or_else(|| unsupported("preview setter API"))?, &graph)?;
+                if self.unique_modifiers(attached, &graph.images, &copy, &definition, identity.rolls.len())? != original {
                     return Err(unsupported("detached unique context differs from selected item"));
                 }
                 let rolls = self.child(attached, &copy, c"uniqueRolls")?.ok_or_else(|| unsupported("detached unique rolls absent"))?;
@@ -269,12 +247,12 @@ impl RuntimeAccess {
                 for change in preview.changes() {
                     crate::game::write_bytes(array_data(target(&rolls)?.as_ptr()).add(usize::from(change.index)), &[change.value]);
                 }
-                self.unique_modifiers(attached, api, &graph.images, &copy, &definition, identity.rolls.len())?
+                self.unique_modifiers(attached, &graph.images, &copy, &definition, identity.rolls.len())?
             } else {
                 original
             };
             let current = self.forge_graph(attached)?.ok_or(GameError::NotReady("forge removed during unique description"))?;
-            if !self.forge_unchanged(attached, &current, request.manager(), request.expected())? || self.read_game_locale(attached, api)? != locale {
+            if !self.forge_unchanged(attached, &current, request.manager(), request.expected())? || self.read_game_locale(attached)? != locale {
                 return Err(unsupported("forge or locale changed during unique description"));
             }
             Ok(result)

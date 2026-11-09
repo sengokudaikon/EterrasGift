@@ -152,14 +152,14 @@ pub(super) unsafe fn refresh_bindings(runtime: &Runtime, attached: &il2cpp_runti
     for (hook, value) in replacements {
         // SAFETY: admitted main thread, rooted receiver acquisition and complete method contracts before publication.
         unsafe {
-            let binding = FeatureBinding::resolve(access, attached, runtime.ownership, manager, hook, true).map_err(|e| String::from_utf8_lossy(&e.payload).into_owned())?;
+            let binding = FeatureBinding::resolve(access, attached, manager, hook, true).map_err(|e| String::from_utf8_lossy(&e.payload).into_owned())?;
             change(hook, true, value, binding, || {
                 let module = module().map_err(|e| server::failure(ResponseCode::Refused, e))?;
                 let size = image_size(module).map_err(|e| server::failure(ResponseCode::Refused, e))?;
                 definition(hook).targets(access, module, size).map_err(game_failure)
             })
             .map_err(|e| String::from_utf8_lossy(&e.payload).into_owned())?;
-            definition(hook).behavior.refresh(access, attached, runtime.invocation);
+            definition(hook).behavior.refresh(access, attached);
         }
     }
     Ok(())
@@ -303,16 +303,16 @@ pub(super) unsafe fn read_all(expected_manager: u64, hooks: &[GameplayHook]) -> 
 pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Option<(bool, eg_trainer_wire::hooks::HookValue)>) -> Response {
     // SAFETY: admitted main thread; same runtime/graph lifetime as status. The supplied manager is compared only.
     unsafe {
-        runtime_operation(|runtime, access, attached| {
+        runtime_operation(|_, access, attached| {
             admit_manager(&access, attached, expected_manager)?;
             if let Some((on, value)) = on {
-                let binding = FeatureBinding::resolve(&access, attached, runtime.ownership, expected_manager, hook, on)?;
+                let binding = FeatureBinding::resolve(&access, attached, expected_manager, hook, on)?;
                 change(hook, on, value, binding, || {
                     let module = module().map_err(|e| server::failure(ResponseCode::Refused, e))?;
                     let size = image_size(module).map_err(|e| server::failure(ResponseCode::Refused, e))?;
                     definition(hook).targets(&access, module, size).map_err(game_failure)
                 })?;
-                definition(hook).behavior.refresh(&access, attached, runtime.invocation);
+                definition(hook).behavior.refresh(&access, attached);
                 done(Vec::new())
             } else {
                 let mut hooks = HOOKS.lock().unwrap_or_else(|p| p.into_inner());

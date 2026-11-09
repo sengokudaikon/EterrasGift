@@ -563,7 +563,7 @@ mod tests {
             ASSIGNABLE.set(true);
             // A distinct context using the same fake exports is still a different
             // provenance boundary. Construct without resetting the active roots.
-            let other_runtime = ThreadContext::new(test_fakes::api());
+            let other_runtime = ThreadContext::new(&test_fakes::api());
             let other_attached = other_runtime.attach().unwrap();
             assert!(access.set_reference(&writes, &other_attached, &parent, c"child", &child).is_err());
             assert_eq!(STORES.get(), 0);

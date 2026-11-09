@@ -43,8 +43,7 @@ impl RuntimeAccess {
     /// This never invokes settings/selection/initialization getters or waits for asynchronous work.
     ///
     /// # Safety
-    /// All `status` live-runtime/attachment/main-thread conditions apply. `api` must belong to the
-    /// same runtime. Exclude concurrent graph/metadata mutation, pooled operation reuse, shutdown,
+    /// All `status` live-runtime/attachment/main-thread conditions apply. Exclude concurrent graph/metadata mutation, pooled operation reuse, shutdown,
     /// and native Settings/Locale destruction until this entire copy completes. Parent roots retain
     /// unchanged strong references until each child is rooted. Instance-field boxing and getters
     /// must obey the evaluated nonmoving-GC semantics. The caller independently authorizes only
@@ -55,7 +54,7 @@ impl RuntimeAccess {
     /// and runtime callbacks. This is read-only with respect to gameplay, not a zero-side-effect call.
     /// Metadata cannot establish those body permissions.
     /// Handle generic fields are boxed/read through public APIs; no Rust struct layout is copied.
-    pub unsafe fn read_game_locale(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi) -> Result<GameLocale, GameError> {
+    pub unsafe fn read_game_locale(&self, attached: &AttachedThread<'_>) -> Result<GameLocale, GameError> {
         // SAFETY: The caller supplies the immutable main-thread locale span; operation versions and readiness precede checked getter calls.
         unsafe {
             let status = self.status(attached)?;
@@ -82,7 +81,7 @@ impl RuntimeAccess {
                 return Err(unsupported("locale closed operation handle"));
             }
             let mut alignment = 0;
-            if (api.class_value_size)(handle_class, &mut alignment) != 24 || alignment != 8 {
+            if (self.value_size)(handle_class, &mut alignment) != 24 || alignment != 8 {
                 return Err(unsupported("locale operation handle layout"));
             }
             let handle = self.boxed_in(attached, &settings, settings_class, c"m_SelectedLocaleAsync", handle_class, "locale")?;
@@ -129,7 +128,7 @@ impl RuntimeAccess {
             let code_method = self.zero_arg_method(identifier_class, c"get_Code", string_class, true)?;
             let application = self.class(&images, c"UnityEngine", c"Application")?;
             let version_method = self.zero_arg_method(application, c"get_version", string_class, false)?;
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let contract = ValueTypeContract::BoxedReturn {
                 class: NonNull::new(identifier_class).ok_or_else(|| unsupported("locale identifier class"))?,
                 size: 16,

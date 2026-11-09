@@ -11,10 +11,10 @@
 // Entry-point contracts cover the shared runtime assumptions. Keep local notes
 // for bounds, ownership and ABI details rather than repeating those contracts.
 
+#[cfg(test)]
+use il2cpp_runtime::metadata::Type;
 use il2cpp_runtime::metadata::{Class, MetadataError, Method, Ptr, array_data, copy_values, instance_offset, metadata_text, read_value, target, write_bytes};
 pub(crate) use il2cpp_runtime::metadata::{MethodError, MethodQuery, Others, Params, Returns};
-#[cfg(test)]
-use il2cpp_runtime::metadata::{TestExportStub, Type};
 #[cfg(test)]
 use il2cpp_runtime::test_fakes;
 use il2cpp_runtime::{Exports, RuntimeError, StrongRoot, raw};
@@ -157,17 +157,21 @@ impl std::ops::DerefMut for RuntimeAccess {
 }
 
 impl RuntimeAccess {
-    /// Resolve the complete metadata/status export table.
+    /// Resolve the export table, and apart from it the exports that store.
     ///
     /// # Safety
     /// As [`Exports::resolve`].
-    pub unsafe fn resolve(resolver: impl FnMut(&'static CStr) -> Option<NonNull<c_void>>) -> Result<Self, GameError> {
-        Ok(Self {
-            // SAFETY: the caller establishes export identity, ABI and lifetime.
-            api: unsafe { Exports::resolve(resolver) }?,
-            // One per resolved runtime, kept for the process: the helper never frees what the game may still reach.
-            caches: Some(Box::leak(Box::default())),
-        })
+    pub unsafe fn resolve(resolver: impl FnMut(&'static CStr) -> Option<NonNull<c_void>>) -> Result<(Self, raw::FieldWriteApi), GameError> {
+        // SAFETY: the caller establishes export identity, ABI and lifetime.
+        let (api, writes) = unsafe { Exports::resolve(resolver) }?;
+        // One cache per resolved runtime, kept for the process: the helper never frees what the game may still reach.
+        Ok((
+            Self {
+                api,
+                caches: Some(Box::leak(Box::default())),
+            },
+            writes,
+        ))
     }
 
     /// Every export a stub that panics when reached, and nothing cached.

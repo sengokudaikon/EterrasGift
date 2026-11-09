@@ -101,7 +101,7 @@ unsafe extern "C-unwind" fn camera_entry(_: *const Camera, _: usize) {
 }
 #[test]
 fn world_camera_rebinds_through_shared_lifecycle_and_restores_before_pin_release() {
-    use il2cpp_runtime::{metadata::TestExportStub, raw};
+    use il2cpp_runtime::{Exports, raw};
     unsafe extern "C-unwind" fn pin(object: *mut raw::Object, pinned: bool) -> *mut c_void {
         assert!(pinned);
         // SAFETY: fixture's opaque object is a retained Camera, never a real runtime object.
@@ -112,15 +112,9 @@ fn world_camera_rebinds_through_shared_lifecycle_and_restores_before_pin_release
         // SAFETY: the fake handle is the same retained Camera pointer returned by pin.
         assert_eq!(unsafe { &*handle.cast::<Camera>() }.pins.fetch_sub(1, SeqCst), 1);
     }
-    let api = raw::Api {
-        domain_get: TestExportStub::test_stub(),
-        thread_current: TestExportStub::test_stub(),
-        thread_attach: TestExportStub::test_stub(),
-        thread_detach: TestExportStub::test_stub(),
-        gchandle_new: pin,
-        gchandle_free: free,
-        gchandle_get_target: TestExportStub::test_stub(),
-    };
+    let mut api = Exports::test_stubs();
+    api.gchandle_new = pin;
+    api.gchandle_free = free;
     let camera = Camera {
         distance: AtomicU32::new((-17.5f32).to_bits()),
         seen: AtomicU32::new(0),
@@ -135,7 +129,7 @@ fn world_camera_rebinds_through_shared_lifecycle_and_restores_before_pin_release
     let hook = GameplayHook::CameraDistance;
     let binding = |camera: &Camera| {
         // SAFETY: owned aligned stable test storage, fake pin API, and exact field baseline at acquisition.
-        let binding = unsafe { crate::game::ScalarBinding::pin(api, camera as *const _ as usize, 0, camera.distance.load(SeqCst), &online as *const _ as usize) }.unwrap();
+        let binding = unsafe { crate::game::ScalarBinding::pin(&api, camera as *const _ as usize, 0, camera.distance.load(SeqCst), &online as *const _ as usize) }.unwrap();
         FeatureBinding::fixture_bound(hook, binding)
     };
     let targets = || {

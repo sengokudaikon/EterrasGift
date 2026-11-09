@@ -3,15 +3,15 @@ use super::*;
 use il2cpp_runtime::Argument;
 
 impl RuntimeAccess {
-    pub(super) unsafe fn currency_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>, api: raw::InvocationApi, manager: Root<'a, 'r>) -> Result<FieldGraph<'a, 'r>, WriteError> {
+    pub(super) unsafe fn currency_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>, manager: Root<'a, 'r>) -> Result<FieldGraph<'a, 'r>, WriteError> {
         // SAFETY: the current manager and all returned components stay rooted throughout their metadata reads/getter.
         unsafe {
             let actor = self.field_child(attached, &manager, c"actor")?;
             let gold = self.field_child(attached, &actor, c"goldTracker")?;
             let dungeon = self.field_child(attached, &actor, c"dungeonRunManager")?;
             let bones = self.field_child(attached, &actor, c"ancientBonesTracker")?;
-            let context = InvocationContext::new(attached, api);
-            let get = self.field_call(&context, api, &dungeon, c"GetSoulEmbers", 0)?;
+            let context = InvocationContext::new(attached);
+            let get = self.field_call(&context, &dungeon, c"GetSoulEmbers", 0)?;
             let embers = match returned(get.invoke(Some(&dungeon), &mut []))? {
                 ReturnValue::Scalar { value: Scalar::I32(value), .. } => value,
                 _ => return Err(WriteError::Refused("Unexpected soul embers result".into())),
@@ -32,23 +32,17 @@ impl RuntimeAccess {
             })
         }
     }
-    pub(super) unsafe fn apply_currency(
-        &self,
-        attached: &AttachedThread<'_>,
-        api: raw::InvocationApi,
-        graph: &FieldGraph<'_, '_>,
-        values: &[Option<i32>],
-    ) -> Result<Snapshot, WriteError> {
+    pub(super) unsafe fn apply_currency(&self, attached: &AttachedThread<'_>, graph: &FieldGraph<'_, '_>, values: &[Option<i32>]) -> Result<Snapshot, WriteError> {
         // SAFETY: all exact method signatures are bound before the first mutation; each target stays rooted.
         unsafe {
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let names = [c"modifyGold", c"modifySoulEmberCountOnSingleplayerOrServer", c"modifyAncientBones"];
             let methods = graph
                 .entries
                 .iter()
                 .zip(names)
                 .enumerate()
-                .map(|(index, (root, name))| self.field_call(&context, api, root, name, if index == 1 { 2 } else { 1 }))
+                .map(|(index, (root, name))| self.field_call(&context, root, name, if index == 1 { 2 } else { 1 }))
                 .collect::<Result<Vec<_>, _>>()?;
             self.field_gate(attached, graph.snapshot.manager)?;
             stored(
@@ -77,7 +71,7 @@ impl RuntimeAccess {
                     }
                     Ok(())
                 },
-                || self.read_field_set(attached, api, graph.snapshot.manager, graph.snapshot.set),
+                || self.read_field_set(attached, graph.snapshot.manager, graph.snapshot.set),
             )
         }
     }

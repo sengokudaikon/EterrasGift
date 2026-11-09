@@ -5,21 +5,15 @@ use eg_trainer_wire::field_edits::{Field, MAX_FIELDS};
 use il2cpp_runtime::Argument;
 
 impl RuntimeAccess {
-    pub(super) unsafe fn stash_graph<'a, 'r>(
-        &self,
-        attached: &'a AttachedThread<'r>,
-        api: raw::InvocationApi,
-        manager: Root<'a, 'r>,
-        set: FieldSet,
-    ) -> Result<FieldGraph<'a, 'r>, WriteError> {
+    pub(super) unsafe fn stash_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>, manager: Root<'a, 'r>, set: FieldSet) -> Result<FieldGraph<'a, 'r>, WriteError> {
         // SAFETY: current rooted manager, inherited holder getter and exact current tab; all returned objects stay rooted.
         unsafe {
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let holder = self.field_child(attached, &manager, c"stash")?;
-            let active = self.field_call(&context, api, &holder, c"get_ActiveContainer", 0)?;
+            let active = self.field_call(&context, &holder, c"get_ActiveContainer", 0)?;
             let stash = reference(returned(active.invoke(Some(&holder), &mut []))?)?;
             let getter = if set == FieldSet::Keys { c"get_Keys" } else { c"get_WovenEchoes" };
-            let tab = reference(returned(self.field_call(&context, api, &stash, getter, 0)?.invoke(Some(&stash), &mut []))?)?;
+            let tab = reference(returned(self.field_call(&context, &stash, getter, 0)?.invoke(Some(&stash), &mut []))?)?;
             let images = self.images()?;
             let entry_class = self.class(&images, c"", c"ItemContainerEntry")?;
             let method = self.field_method((self.object_class)(target(&tab)?.as_ptr()), c"GetContent", 0)?;
@@ -27,8 +21,8 @@ impl RuntimeAccess {
             self.list_class(list_class)?;
             self.array_class(self.field_class(self.field(list_class, c"_items")?, "stash entries")?, entry_class)?;
             let mut closed = vec![NonNull::new(list_class).ok_or_else(|| WriteError::Refused("Missing entry List".into()))?];
-            let owner = (api.method_get_class)(method.as_ptr());
-            if (api.class_is_inflated)(owner) {
+            let owner = (self.method_class)(method.as_ptr());
+            if (self.class_inflated)(owner) {
                 closed.push(NonNull::new(owner).unwrap());
             }
             let content = context.bind_with_closed_references(method, &closed).map_err(|e| WriteError::Refused(e.to_string()))?;
@@ -37,7 +31,7 @@ impl RuntimeAccess {
             let item_list = self.class(&images, c"", c"ItemList")?;
             let get_items = context.bind(self.field_method(item_list, c"get", 0)?).map_err(|e| WriteError::Refused(e.to_string()))?;
             let items = reference(returned(get_items.invoke(None, &mut []))?)?;
-            let display = self.field_call(&context, api, &items, c"GetItemDisplayName", 2)?;
+            let display = self.field_call(&context, &items, c"GetItemDisplayName", 2)?;
             let string = self.system_class(c"String")?;
             let mut rows = Vec::new();
             for entry in entries {
@@ -95,25 +89,19 @@ impl RuntimeAccess {
             })
         }
     }
-    pub(super) unsafe fn apply_stash(
-        &self,
-        attached: &AttachedThread<'_>,
-        api: raw::InvocationApi,
-        graph: &FieldGraph<'_, '_>,
-        values: &[Option<i32>],
-    ) -> Result<Snapshot, WriteError> {
+    pub(super) unsafe fn apply_stash(&self, attached: &AttachedThread<'_>, graph: &FieldGraph<'_, '_>, values: &[Option<i32>]) -> Result<Snapshot, WriteError> {
         // SAFETY: retained entries and tab; every setter/removal signature and permission is checked before stores.
         unsafe {
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let setters = graph
                 .entries
                 .iter()
-                .map(|entry| self.field_call(&context, api, entry, c"set_Quantity", 1))
+                .map(|entry| self.field_call(&context, entry, c"set_Quantity", 1))
                 .collect::<Result<Vec<_>, _>>()?;
             let removing = values.contains(&Some(0));
             let remove = if removing {
                 if !boolean(returned(
-                    self.field_call(&context, api, &graph.container, c"get_PlayerCanRemove", 0)?
+                    self.field_call(&context, &graph.container, c"get_PlayerCanRemove", 0)?
                         .invoke(Some(&graph.container), &mut []),
                 )?)? {
                     return Err(WriteError::Refused("The game would not take anything out of this stash tab".into()));
@@ -160,7 +148,7 @@ impl RuntimeAccess {
                     }
                     Ok(())
                 },
-                || self.read_field_set(attached, api, graph.snapshot.manager, graph.snapshot.set),
+                || self.read_field_set(attached, graph.snapshot.manager, graph.snapshot.set),
             )
         }
     }

@@ -1,6 +1,6 @@
 //! Fake metadata/runtime tests for rejection, storage and rooting; not Unity compatibility evidence.
-use il2cpp_runtime::raw::{self, Api, InvocationApi};
-use il2cpp_runtime::{Argument, CheckedMethod, InvocationContext, InvocationOutcome, InvokeError, ReturnValue, RuntimeError, Scalar, ThreadContext, ValueTypeContract};
+use il2cpp_runtime::raw;
+use il2cpp_runtime::{Argument, CheckedMethod, Exports, InvocationContext, InvocationOutcome, InvokeError, ReturnValue, RuntimeError, Scalar, ThreadContext, ValueTypeContract};
 use static_assertions::assert_not_impl_any;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -242,44 +242,41 @@ unsafe extern "C-unwind" fn invoke(method: *const raw::MethodInfo, receiver: *mu
     })
 }
 
-fn api() -> Api {
-    Api {
-        domain_get: domain,
-        thread_current: current,
-        thread_attach: attach,
-        thread_detach: detach,
-        gchandle_new: root,
-        gchandle_free: free,
-        gchandle_get_target: target,
-    }
-}
-fn invocation_api() -> InvocationApi {
-    InvocationApi {
-        runtime_invoke: invoke,
-        method_get_return_type: method_return,
-        method_get_class: method_class,
-        method_is_generic: method_generic,
-        method_is_inflated: method_inflated,
-        method_is_instance: method_instance,
-        method_get_param_count: parameter_count,
-        method_get_param: parameter,
-        method_get_flags: method_flags,
-        type_get_type: type_code,
-        type_is_byref: type_by_ref,
-        class_from_type,
-        class_is_valuetype: class_value,
-        class_is_generic: class_generic,
-        class_is_inflated: class_inflated,
-        class_is_assignable_from: assignable,
-        object_get_class: object_class,
-        object_unbox: unbox,
-        object_get_virtual_method: virtual_method,
-        get_corlib,
-        class_from_name,
-        class_is_enum: class_enum,
-        class_enum_basetype: enum_base,
-        class_value_size: value_size,
-    }
+/// The table with every fake this file has, and every other export a stub that panics.
+fn exports() -> Exports {
+    let mut exports = Exports::test_stubs();
+    exports.domain_get = domain;
+    exports.thread_current = current;
+    exports.thread_attach = attach;
+    exports.thread_detach = detach;
+    exports.gchandle_new = root;
+    exports.gchandle_free = free;
+    exports.gchandle_target = target;
+    exports.runtime_invoke = invoke;
+    exports.method_return = method_return;
+    exports.method_class = method_class;
+    exports.method_generic = method_generic;
+    exports.method_inflated = method_inflated;
+    exports.method_instance = method_instance;
+    exports.method_params = parameter_count;
+    exports.method_param = parameter;
+    exports.method_flags = method_flags;
+    exports.type_code = type_code;
+    exports.type_byref = type_by_ref;
+    exports.type_class = class_from_type;
+    exports.class_value = class_value;
+    exports.class_generic = class_generic;
+    exports.class_inflated = class_inflated;
+    exports.assignable = assignable;
+    exports.object_class = object_class;
+    exports.object_unbox = unbox;
+    exports.virtual_method = virtual_method;
+    exports.corlib = get_corlib;
+    exports.class_from_name = class_from_name;
+    exports.class_enum = class_enum;
+    exports.enum_base = enum_base;
+    exports.value_size = value_size;
+    exports
 }
 fn context() -> ThreadContext {
     FAKE.with_borrow_mut(|f| {
@@ -330,7 +327,7 @@ fn context() -> ThreadContext {
         f.classes.get_mut(&8).unwrap().alignment = 4;
     });
     // SAFETY: thread-local fake engine attachment and correctly typed exports remain valid throughout the test.
-    unsafe { ThreadContext::new(api()) }
+    unsafe { ThreadContext::new(&exports()) }
 }
 fn method(params: &[(i32, bool)], returns: (i32, bool)) -> NonNull<raw::MethodInfo> {
     FAKE.with_borrow_mut(|f| {
@@ -401,7 +398,7 @@ fn closed_list_calls_check_receiver_argument_and_runtime_origin_before_invocatio
     });
     // SAFETY: exact fake closed class and registered reference-only method body.
     unsafe {
-        let context = InvocationContext::new(&attached, invocation_api());
+        let context = InvocationContext::new(&attached);
         assert!(matches!(context.bind(metadata), Err(InvokeError::GenericMethod)));
         let method = context.bind_with_closed_references(metadata, &[NonNull::new(pointer(OWNER)).unwrap()]).unwrap();
         let receiver = attached.root(object(OWNER, 0)).unwrap();
@@ -415,7 +412,7 @@ fn closed_list_calls_check_receiver_argument_and_runtime_origin_before_invocatio
             method.invoke(Some(&receiver), &mut [Argument::Reference(Some(&wrong))]),
             Err(InvokeError::ObjectTypeMismatch)
         ));
-        let other_runtime = ThreadContext::new(api());
+        let other_runtime = ThreadContext::new(&exports());
         let other_attached = other_runtime.attach().unwrap();
         let foreign = other_attached.root(object(ELEMENT, 0)).unwrap();
         assert!(matches!(
@@ -454,7 +451,7 @@ fn closed_reference_returns_are_rooted_and_checked_against_the_exact_allowlist()
     }
     // SAFETY: fake closed reference return identities and no-op bodies; no payload layouts.
     unsafe {
-        let context = InvocationContext::new(&attached, invocation_api());
+        let context = InvocationContext::new(&attached);
         assert!(matches!(context.bind(good), Err(InvokeError::UnsupportedType { .. })));
         assert!(matches!(context.bind_with_closed_references(good, &[]), Err(InvokeError::UnsupportedType { .. })));
         let allowed = [NonNull::new(pointer(OTHER)).unwrap()];
@@ -488,7 +485,7 @@ fn closed_reference_opt_in_rejects_open_generics_values_and_reference_byrefs() {
     });
     // SAFETY: live fake metadata and queried-only no-op bodies.
     unsafe {
-        let context = InvocationContext::new(&attached, invocation_api());
+        let context = InvocationContext::new(&attached);
         for class in [OTHER, STRUCT, ELEMENT] {
             assert!(matches!(
                 context.bind_with_closed_references(metadata, &[NonNull::new(pointer(class)).unwrap()]),
@@ -508,7 +505,7 @@ fn rejects_unsupported_metadata_before_invocation() {
     let runtime = context();
     let attached = runtime.attach().unwrap();
     // SAFETY: same thread-local fake runtime; fixture metadata/bodies obey the bounded contract.
-    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let context = unsafe { InvocationContext::new(&attached) };
     for (code, by_ref) in [
         (0x11, false),
         (0x55, false),
@@ -551,7 +548,7 @@ fn rejects_wrong_width_arity_byref_receiver_and_context_before_calling() {
     let runtime = context();
     let attached = runtime.attach().unwrap();
     // SAFETY: same valid thread-local fake runtime.
-    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let context = unsafe { InvocationContext::new(&attached) };
     // SAFETY: live fake method with no-op body safe for all accepted arguments.
     let method = unsafe { context.bind(method(&[(8, false)], (1, false))) }.unwrap();
     assert!(matches!(method.invoke(None, &mut []), Err(InvokeError::ArgumentCount { .. })));
@@ -571,7 +568,7 @@ fn rejects_wrong_width_arity_byref_receiver_and_context_before_calling() {
         Err(InvokeError::UnexpectedReceiver)
     ));
     // SAFETY: independent context borrows the same permanent fake engine attachment and cannot detach it.
-    let other_runtime = unsafe { ThreadContext::new(api()) };
+    let other_runtime = unsafe { ThreadContext::new(&exports()) };
     let other_attached = other_runtime.attach().unwrap();
     // SAFETY: registered live fake object; intentionally rooted through a different context.
     let foreign_root = unsafe { other_attached.root(object(OWNER, 0)) }.unwrap();
@@ -590,7 +587,7 @@ fn byref_boolean_uses_byte_storage_and_normalizes_noncanonical_foreign_value() {
     let runtime = context();
     let attached = runtime.attach().unwrap();
     // SAFETY: valid fake context and method, whose body writes a byte to Boolean storage.
-    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let context = unsafe { InvocationContext::new(&attached) };
     let metadata = method(&[(2, true)], (2, false));
     let result = object(2, 3);
     change_method(metadata, |m| {
@@ -613,7 +610,7 @@ fn managed_exception_is_rooted_and_scalar_writes_are_copied_back_even_when_rooti
     let runtime = context();
     let attached = runtime.attach().unwrap();
     // SAFETY: valid thread-local runtime.
-    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let context = unsafe { InvocationContext::new(&attached) };
     let metadata = method(&[(8, true)], (1, false));
     let exception = object(OWNER, 0);
     change_method(metadata, |m| {
@@ -645,7 +642,7 @@ fn returned_primitive_box_is_rooted_before_validation_and_wrong_class_is_rejecte
     let runtime = context();
     let attached = runtime.attach().unwrap();
     // SAFETY: valid thread-local runtime.
-    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let context = unsafe { InvocationContext::new(&attached) };
     let metadata = method(&[], (8, false));
     let wrong = object(9, 42);
     change_method(metadata, |m| m.result = wrong.as_ptr().addr());
@@ -665,7 +662,7 @@ fn reference_arguments_are_objects_or_null_and_arrays_use_array_class_not_elemen
     let runtime = context();
     let attached = runtime.attach().unwrap();
     // SAFETY: valid thread-local runtime.
-    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let context = unsafe { InvocationContext::new(&attached) };
     let metadata = method(&[(0x12, false)], (1, false));
     let child = object(DERIVED, 0);
     // SAFETY: registered live fake object.
@@ -699,7 +696,7 @@ fn instance_receivers_check_assignability_and_exact_value_box_before_unboxing() 
     let runtime = context();
     let attached = runtime.attach().unwrap();
     // SAFETY: valid thread-local runtime.
-    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let context = unsafe { InvocationContext::new(&attached) };
     let metadata = method(&[], (1, false));
     change_method(metadata, |m| m.instance = true);
     // SAFETY: no-op instance method, valid for all compatible receivers.
@@ -762,7 +759,7 @@ fn opaque_boxed_return_is_rooted_without_copying_payload_then_usable_as_exact_re
     let runtime = context();
     let attached = runtime.attach().unwrap();
     // SAFETY: valid fake runtime; opaque box payloads remain in fake managed storage.
-    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let context = unsafe { InvocationContext::new(&attached) };
     let text = object(OWNER, 0);
     let boxed = object(STRUCT, text.as_ptr().addr() as u64);
     let payload = FAKE.with_borrow(|f| std::ptr::from_ref(f.objects[&boxed.as_ptr().addr()].payload.as_ref()).addr());
@@ -801,7 +798,7 @@ fn boxed_result_rejects_null_wrong_class_and_failed_root_without_unboxing() {
     let runtime = context();
     let attached = runtime.attach().unwrap();
     // SAFETY: immutable fake metadata and registered result objects.
-    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let context = unsafe { InvocationContext::new(&attached) };
     let metadata = method(&[], (0x11, false));
     // SAFETY: authored method/result contract; intentional malformed results exercise validation.
     let getter = unsafe { context.bind_with_value_types(metadata, &[boxed_contract()]) }.unwrap();
@@ -823,7 +820,7 @@ fn explicit_box_contracts_reject_bad_size_alignment_class_and_duplicates_before_
     let runtime = context();
     let attached = runtime.attach().unwrap();
     // SAFETY: fake immutable runtime, no malformed contract is invoked.
-    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let context = unsafe { InvocationContext::new(&attached) };
     let metadata = method(&[], (0x11, false));
     for (size, alignment) in [(0, 8), (-1, 8), (7, 8), (9, 8), (8, 0), (8, 3), (8, 4), (8, 16)] {
         let contract = ValueTypeContract::BoxedReturn {
@@ -866,7 +863,7 @@ fn struct_arguments_and_byrefs_remain_unsupported_even_with_explicit_return_cont
     let runtime = context();
     let attached = runtime.attach().unwrap();
     // SAFETY: this fake runtime only observes rejected metadata in this test.
-    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let context = unsafe { InvocationContext::new(&attached) };
     for metadata in [method(&[(0x11, false)], (1, false)), method(&[(0x11, true)], (1, false)), method(&[], (0x11, true))] {
         // SAFETY: registered metadata, body is never invoked for unsupported arguments/byref returns.
         assert!(unsafe { context.bind_with_value_types(metadata, &[boxed_contract()]) }.is_err());
@@ -886,7 +883,7 @@ fn enum_arguments_require_exact_class_tags_and_initialized_int32_storage() {
     let runtime = context();
     let attached = runtime.attach().unwrap();
     // SAFETY: fake runtime exports and enum metadata satisfy the exact Int32 contract.
-    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let context = unsafe { InvocationContext::new(&attached) };
     let metadata = enum_method(&[ENUM, OTHER_ENUM], Some(ENUM));
     let boxed = object(ENUM, u64::from((-12345_i32) as u32));
     change_method(metadata, |method| {
@@ -926,7 +923,7 @@ fn enum_result_requires_its_exact_box_class_and_keeps_managed_exceptions_rooted(
     let runtime = context();
     let attached = runtime.attach().unwrap();
     // SAFETY: registered fake enum metadata and live rooted results.
-    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let context = unsafe { InvocationContext::new(&attached) };
     let metadata = enum_method(&[], Some(ENUM));
     let wrong = object(OTHER_ENUM, 42);
     change_method(metadata, |method| method.result = wrong.as_ptr().addr());
@@ -953,7 +950,7 @@ fn enum_contract_checks_base_identity_flags_width_and_alignment_before_invocatio
         let runtime = context();
         let attached = runtime.attach().unwrap();
         // SAFETY: all fake pointers remain valid; individual invalid metadata is rejected below.
-        let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+        let context = unsafe { InvocationContext::new(&attached) };
         let metadata = enum_method(&[], Some(ENUM));
         FAKE.with_borrow_mut(|f| match invalid {
             0 => f.classes.get_mut(&ENUM).unwrap().enumeration = false,
@@ -983,7 +980,7 @@ fn default_bind_still_rejects_enums_and_explicit_contracts_do_not_enable_generic
     let runtime = context();
     let attached = runtime.attach().unwrap();
     // SAFETY: live authored fake metadata, no rejected method body is invoked.
-    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let context = unsafe { InvocationContext::new(&attached) };
     for metadata in [enum_method(&[ENUM], None), enum_method(&[], Some(ENUM))] {
         // SAFETY: checking metadata only; normal binding must retain its old unsupported boundary.
         assert!(matches!(unsafe { context.bind(metadata) }, Err(InvokeError::UnsupportedType { .. })));
@@ -1004,7 +1001,7 @@ fn nongeneric_object_return_keeps_a_closed_generic_value_box_rooted_without_payl
     let runtime = context();
     let attached = runtime.attach().unwrap();
     // SAFETY: authored nongeneric Array-like method returns Object; actual result is a generic box.
-    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let context = unsafe { InvocationContext::new(&attached) };
     FAKE.with_borrow_mut(|f| {
         f.classes.get_mut(&ARRAY).unwrap().parent = OWNER;
         let entry = f.classes.get_mut(&STRUCT).unwrap();

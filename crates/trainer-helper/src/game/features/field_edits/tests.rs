@@ -122,7 +122,7 @@ unsafe extern "C-unwind" fn invoke(method: Method, receiver: Ptr, args: *mut Ptr
     }
     token(ANSWER)
 }
-fn fixture() -> (RuntimeAccess, raw::InvocationApi) {
+fn fixture() -> RuntimeAccess {
     let mut access = RuntimeAccess::test_stubs();
     access.class_methods = methods;
     access.method_name = name;
@@ -142,41 +142,18 @@ fn fixture() -> (RuntimeAccess, raw::InvocationApi) {
     access.assignable = assignable;
     access.corlib = test_fakes::corlib;
     access.class_from_name = class_from_name;
-    let api = raw::InvocationApi {
-        runtime_invoke: invoke,
-        method_get_class: declaring,
-        object_unbox: unbox,
-        method_get_return_type: returns,
-        method_is_generic: no_method,
-        method_is_inflated: no_method,
-        method_is_instance: instance,
-        method_get_param_count: count,
-        method_get_param: parameter,
-        method_get_flags: flags,
-        type_is_byref: byref,
-        class_from_type: type_class,
-        class_is_valuetype: value,
-        class_is_assignable_from: assignable,
-        object_get_class: object_class,
-        get_corlib: test_fakes::corlib,
-        class_from_name,
-        type_get_type: TestExportStub::test_stub(),
-        class_is_generic: TestExportStub::test_stub(),
-        class_is_inflated: TestExportStub::test_stub(),
-        object_get_virtual_method: TestExportStub::test_stub(),
-        class_is_enum: TestExportStub::test_stub(),
-        class_enum_basetype: TestExportStub::test_stub(),
-        class_value_size: TestExportStub::test_stub(),
-    };
-    (access, api)
+    access.method_class = declaring;
+    access.runtime_invoke = invoke;
+    access.object_unbox = unbox;
+    access
 }
 #[test]
 fn lookup_checks_the_full_signature_preserves_scalar_widths_and_roots_or_refuses_each_result() {
-    let context = test_fakes::thread();
+    let access = fixture();
+    let context = test_fakes::thread_on(&access);
     let attached = context.attach().unwrap();
     // SAFETY: authored object tokens are handled only by the fake exports; no game memory is touched.
     let source = unsafe { attached.root(NonNull::new(token(SOURCE)).unwrap()) }.unwrap();
-    let (access, api) = fixture();
     for mode in 0..6 {
         MODE.set(mode);
         BOOL.set(u8::from(mode != 1));
@@ -184,7 +161,7 @@ fn lookup_checks_the_full_signature_preserves_scalar_widths_and_roots_or_refuses
         let mut integer = -10i32;
         let before = CALLS.get();
         // SAFETY: exact declared primitive inputs and the source-owned out reference, all retained synchronously.
-        let result = unsafe { access.field_lookup(&attached, api, &source, &SPEC, &mut [(&raw mut byte).cast(), (&raw mut integer).cast()]) };
+        let result = unsafe { access.field_lookup(&attached, &source, &SPEC, &mut [(&raw mut byte).cast(), (&raw mut integer).cast()]) };
         assert_eq!((byte, integer), (9, -10));
         match mode {
             0 => {

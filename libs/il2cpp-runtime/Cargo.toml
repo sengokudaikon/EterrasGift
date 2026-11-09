@@ -14,6 +14,8 @@ test-stubs = []
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_LibraryLoader"] }
 
 [dev-dependencies]
+# The integration tests build export tables from stubs, as code built on this crate does.
+il2cpp-runtime = { path = ".", features = ["test-stubs"] }
 static_assertions = "1.1.0"
 
 [lints]

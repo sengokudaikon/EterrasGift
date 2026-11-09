@@ -35,13 +35,13 @@ fn owns(selected: u64, saved: Option<u64>) -> Result<(), WriteError> {
     }
 }
 impl RuntimeAccess {
-    pub(super) unsafe fn run_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>, api: raw::InvocationApi, manager: Root<'a, 'r>) -> Result<FieldGraph<'a, 'r>, WriteError> {
+    pub(super) unsafe fn run_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>, manager: Root<'a, 'r>) -> Result<FieldGraph<'a, 'r>, WriteError> {
         // SAFETY: the rooted actor's runs manager retains its existing run/web throughout both checked lookups.
         unsafe {
             let actor = self.field_child(attached, &manager, c"actor")?;
             let runs = self.field_child(attached, &actor, c"monolithRunsManager")?;
             let run = self
-                .field_lookup(attached, api, &runs, &CURRENT, &mut [])?
+                .field_lookup(attached, &runs, &CURRENT, &mut [])?
                 .ok_or_else(|| WriteError::NotReady("No Monolith run selected; open a timeline and choose its difficulty".into()))?;
             if self.child(attached, &run, c"timeline")?.is_none() {
                 return Err(WriteError::NotReady("This echo is not part of a Monolith timeline".into()));
@@ -54,7 +54,7 @@ impl RuntimeAccess {
             let mut id = 0u8;
             (self.field_get)(target(&run)?.as_ptr(), field, (&raw mut id).cast());
             let mut difficulty = self.primitive::<i32>(&run, c"difficultyIndex")?;
-            let saved = self.field_lookup(attached, api, &runs, &SAVED, &mut [(&raw mut id).cast(), (&raw mut difficulty).cast()])?;
+            let saved = self.field_lookup(attached, &runs, &SAVED, &mut [(&raw mut id).cast(), (&raw mut difficulty).cast()])?;
             owns(target(&run)?.as_ptr() as u64, saved.as_ref().map(target).transpose()?.map(|p| p.as_ptr() as u64))?;
             let web = self.field_child(attached, &run, c"web")?;
             let values = [
@@ -75,21 +75,20 @@ impl RuntimeAccess {
         &self,
         attached: &AttachedThread<'_>,
         writes: raw::FieldWriteApi,
-        api: raw::InvocationApi,
         graph: &FieldGraph<'_, '_>,
         values: &[Option<i32>],
     ) -> Result<Snapshot, WriteError> {
         // SAFETY: all destinations and exact save/recalculation methods are prepared before the first store.
         unsafe {
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let (run, web) = (&graph.entries[0], &graph.entries[1]);
             let run_class = (self.object_class)(target(run)?.as_ptr());
             let web_class = (self.object_class)(target(web)?.as_ptr());
             let corruption = self.mutable_field(web_class, c"corruption", c"Int32", raw::type_code::I4)?;
             let rerolled = self.mutable_field(run_class, c"hasRerolledOptions", c"Boolean", raw::type_code::BOOLEAN)?;
-            let recalc = self.field_exact(&context, api, run, &method(c"MonolithRun", c"updateCorruptionMod", &[]))?;
-            let gaze = self.field_exact(&context, api, web, &method(c"EchoWeb", c"ModifyGazeOfOrobyss", &["System.Int32"]))?;
-            let save = self.field_exact(&context, api, &graph.container, &method(c"MonolithRunsManager", c"saveRuns", &[]))?;
+            let recalc = self.field_exact(&context, run, &method(c"MonolithRun", c"updateCorruptionMod", &[]))?;
+            let gaze = self.field_exact(&context, web, &method(c"EchoWeb", c"ModifyGazeOfOrobyss", &["System.Int32"]))?;
+            let save = self.field_exact(&context, &graph.container, &method(c"MonolithRunsManager", c"saveRuns", &[]))?;
             self.field_gate(attached, graph.snapshot.manager)?;
             stored(
                 || {
@@ -109,14 +108,14 @@ impl RuntimeAccess {
                     void(returned(save.invoke(Some(&graph.container), &mut []))?)?;
                     self.field_gate(attached, graph.snapshot.manager)?;
                     // Refresh is optional: an absent/loading UI or a redraw exception does not undo a successful save.
-                    let _ = self.refresh_run_panel(attached, api, run);
+                    let _ = self.refresh_run_panel(attached, run);
                     Ok(())
                 },
-                || self.read_field_set(attached, api, graph.snapshot.manager, graph.snapshot.set),
+                || self.read_field_set(attached, graph.snapshot.manager, graph.snapshot.set),
             )
         }
     }
-    unsafe fn refresh_run_panel(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, run: &Root<'_, '_>) -> Result<(), WriteError> {
+    unsafe fn refresh_run_panel(&self, attached: &AttachedThread<'_>, run: &Root<'_, '_>) -> Result<(), WriteError> {
         // SAFETY: admitted main thread, rooted UI graph, native pointers compared only. Never open or replace a panel.
         unsafe {
             let images = self.images()?;
@@ -136,7 +135,7 @@ impl RuntimeAccess {
             let length = self.array_count(&locations, location_class, 16)?;
             self.enum_storage(location_class, c"Int32", raw::type_code::I4)?;
             let values = copy_values::<i32>(array_data(target(&locations)?.as_ptr()).cast(), length as usize);
-            let context = InvocationContext::new(attached, api);
+            let context = InvocationContext::new(attached);
             let get = self.field_method((self.object_class)(target(&panels)?.as_ptr()), c"GetActivePanel", 1)?;
             let class = NonNull::new(location_class).unwrap();
             let get = context
@@ -162,11 +161,10 @@ impl RuntimeAccess {
                     return Ok(());
                 }
                 let can_place = boolean(returned(
-                    self.field_call(&context, api, &timeline, c"get_CanPlaceWovenEchoes", 0)?.invoke(Some(&timeline), &mut []),
+                    self.field_call(&context, &timeline, c"get_CanPlaceWovenEchoes", 0)?.invoke(Some(&timeline), &mut []),
                 )?)?;
                 let refresh = self.field_exact(
                     &context,
-                    api,
                     &timeline,
                     &method(
                         c"MonolithTimelinePanelManager",

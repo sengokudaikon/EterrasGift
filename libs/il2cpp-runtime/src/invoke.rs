@@ -1,5 +1,5 @@
 //! Metadata-checked, deliberately bounded invocation. Metadata is not a proof of method-body safety.
-use super::raw::{self, Class, InvocationApi, MethodInfo, Object, Type};
+use super::raw::{self, Class, MethodInfo, Object, Type};
 use super::{AttachedThread, RuntimeError, StrongRoot};
 use std::ffi::c_void;
 use std::ptr::{NonNull, null_mut};
@@ -174,41 +174,20 @@ struct SignatureType {
 /// This context and its methods inherit the attachment's non-Send/non-Sync lifetime.
 pub struct InvocationContext<'attachment, 'runtime> {
     attachment: &'attachment AttachedThread<'runtime>,
-    api: InvocationApi,
-}
-
-impl InvocationApi {
-    /// The body `object` runs for `method`: its class's override when `method` is virtual, `method` itself when it is
-    /// not, and none when the runtime has no override for it.
-    ///
-    /// # Safety
-    /// An attached thread of this table's runtime, `object` a live object of it, and `method` a method of one of the
-    /// object's classes.
-    pub unsafe fn dispatched(&self, object: NonNull<Object>, method: *const MethodInfo) -> Option<*const MethodInfo> {
-        // SAFETY: as this function's; the flags query reads only the method's descriptor.
-        unsafe {
-            if (self.method_get_flags)(method, null_mut()) & raw::METHOD_ATTRIBUTE_VIRTUAL == 0 {
-                return Some(method);
-            }
-            let body = (self.object_get_virtual_method)(object.as_ptr(), method);
-            (!body.is_null()).then_some(body)
-        }
-    }
 }
 
 impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
-    /// Bind this API table to the attachment's live runtime.
+    /// Invocation on the attachment's thread, through the export table its runtime was resolved into.
     ///
     /// # Safety
-    /// All exports must belong to the attachment's runtime, obey the declared Unity 6000.4 ABI,
-    /// and remain loaded and valid throughout this context. The runtime must use a nonmoving
-    /// collector (the evaluated Boehm configuration); roots alone do not stabilize interior pointers
-    /// with a moving collector. Metadata/classes must remain immutable and live. No concurrent
-    /// shutdown, metadata replacement or external thread detach is permitted. Runtime invocation
-    /// must follow the evaluated argument/boxing/exception conventions, including fresh primitive
-    /// return boxes. Method execution permissions are a separate unsafe `bind` obligation.
-    pub unsafe fn new(attachment: &'attachment AttachedThread<'runtime>, api: InvocationApi) -> Self {
-        Self { attachment, api }
+    /// The table's exports obey the declared Unity 6000.4 ABI and remain loaded and valid throughout this context. The
+    /// runtime must use a nonmoving collector (the evaluated Boehm configuration); roots alone do not stabilize interior
+    /// pointers with a moving collector. Metadata/classes must remain immutable and live. No concurrent shutdown,
+    /// metadata replacement or external thread detach is permitted. Runtime invocation must follow the evaluated
+    /// argument/boxing/exception conventions, including fresh primitive return boxes. Method execution permissions are a
+    /// separate unsafe `bind` obligation.
+    pub unsafe fn new(attachment: &'attachment AttachedThread<'runtime>) -> Self {
+        Self { attachment }
     }
 
     /// Check a directly invoked method's metadata. There is no implicit virtual/interface dispatch.
@@ -270,7 +249,10 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
         // SAFETY: caller supplies live metadata identities from this context's runtime.
         unsafe {
             for class in classes {
-                if (self.api.class_is_valuetype)(class.as_ptr()) || (self.api.class_is_generic)(class.as_ptr()) || !(self.api.class_is_inflated)(class.as_ptr()) {
+                if (self.attachment.exports().class_value)(class.as_ptr())
+                    || (self.attachment.exports().class_generic)(class.as_ptr())
+                    || !(self.attachment.exports().class_inflated)(class.as_ptr())
+                {
                     return Err(InvokeError::InvalidClosedReference);
                 }
             }
@@ -279,49 +261,49 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
     }
 
     unsafe fn validate_value_types(&self, contracts: &[ValueTypeContract]) -> Result<(), InvokeError> {
-        let api = &self.api;
+        let api = self.attachment.exports();
         // SAFETY: bind_with_value_types receives live class metadata from this context's runtime.
         unsafe {
             for (index, contract) in contracts.iter().copied().enumerate() {
                 let class = contract.class();
                 if contracts[..index].iter().any(|prior| prior.class() == class)
-                    || !(api.class_is_valuetype)(class.as_ptr())
-                    || (api.class_is_generic)(class.as_ptr())
-                    || (api.class_is_inflated)(class.as_ptr())
+                    || !(api.class_value)(class.as_ptr())
+                    || (api.class_generic)(class.as_ptr())
+                    || (api.class_inflated)(class.as_ptr())
                 {
                     return Err(InvokeError::InvalidValueTypeContract);
                 }
                 match contract {
                     ValueTypeContract::BoxedReturn { size, alignment, .. } => {
-                        if !(1..=65_536).contains(&size) || !alignment.is_power_of_two() || (api.class_is_enum)(class.as_ptr()) {
+                        if !(1..=65_536).contains(&size) || !alignment.is_power_of_two() || (api.class_enum)(class.as_ptr()) {
                             return Err(InvokeError::InvalidValueTypeContract);
                         }
                         let mut actual_alignment = 0;
-                        if (api.class_value_size)(class.as_ptr(), &mut actual_alignment) != size || actual_alignment != alignment {
+                        if (api.value_size)(class.as_ptr(), &mut actual_alignment) != size || actual_alignment != alignment {
                             return Err(InvokeError::InvalidValueTypeContract);
                         }
                     }
                     ValueTypeContract::I32Enum { .. } => {
-                        if !(api.class_is_enum)(class.as_ptr()) {
+                        if !(api.class_enum)(class.as_ptr()) {
                             return Err(InvokeError::InvalidValueTypeContract);
                         }
-                        let underlying = (api.class_enum_basetype)(class.as_ptr());
-                        if underlying.is_null() || (api.type_is_byref)(underlying) || (api.type_get_type)(underlying) != raw::type_code::I4 {
+                        let underlying = (api.enum_base)(class.as_ptr());
+                        if underlying.is_null() || (api.type_byref)(underlying) || (api.type_code)(underlying) != raw::type_code::I4 {
                             return Err(InvokeError::InvalidValueTypeContract);
                         }
-                        let corlib = (api.get_corlib)();
+                        let corlib = (api.corlib)();
                         if corlib.is_null() {
                             return Err(InvokeError::InvalidValueTypeContract);
                         }
                         let int32 = NonNull::new((api.class_from_name)(corlib, c"System".as_ptr(), c"Int32".as_ptr())).ok_or(InvokeError::InvalidValueTypeContract)?;
-                        if (api.class_from_type)(underlying) != int32.as_ptr() {
+                        if (api.type_class)(underlying) != int32.as_ptr() {
                             return Err(InvokeError::InvalidValueTypeContract);
                         }
                         let mut underlying_alignment = 0;
                         let mut enum_alignment = 0;
-                        if (api.class_value_size)(int32.as_ptr(), &mut underlying_alignment) != 4
+                        if (api.value_size)(int32.as_ptr(), &mut underlying_alignment) != 4
                             || !underlying_alignment.is_power_of_two()
-                            || (api.class_value_size)(class.as_ptr(), &mut enum_alignment) != 4
+                            || (api.value_size)(class.as_ptr(), &mut enum_alignment) != 4
                             || enum_alignment != underlying_alignment
                         {
                             return Err(InvokeError::InvalidValueTypeContract);
@@ -339,33 +321,33 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
         contracts: &[ValueTypeContract],
         closed_references: &[NonNull<Class>],
     ) -> Result<CheckedMethod<'_, 'attachment, 'runtime>, InvokeError> {
-        let api = &self.api;
+        let api = self.attachment.exports();
         // SAFETY: caller provides live metadata from the runtime bound by new.
         unsafe {
-            if (api.method_is_generic)(method.as_ptr()) {
+            if (api.method_generic)(method.as_ptr()) {
                 return Err(InvokeError::GenericMethod);
             }
-            let class = NonNull::new((api.method_get_class)(method.as_ptr())).ok_or(InvokeError::InvalidMetadata)?;
-            if (api.method_is_inflated)(method.as_ptr()) && !closed_references.contains(&class) {
+            let class = NonNull::new((api.method_class)(method.as_ptr())).ok_or(InvokeError::InvalidMetadata)?;
+            if (api.method_inflated)(method.as_ptr()) && !closed_references.contains(&class) {
                 return Err(InvokeError::GenericMethod);
             }
             let mut implementation_flags = 0;
-            if (api.method_get_flags)(method.as_ptr(), &raw mut implementation_flags) & raw::METHOD_ATTRIBUTE_ABSTRACT != 0 {
+            if (api.method_flags)(method.as_ptr(), &raw mut implementation_flags) & raw::METHOD_ATTRIBUTE_ABSTRACT != 0 {
                 return Err(InvokeError::AbstractMethod);
             }
-            if (api.class_is_generic)(class.as_ptr()) || ((api.class_is_inflated)(class.as_ptr()) && !closed_references.contains(&class)) {
+            if (api.class_generic)(class.as_ptr()) || ((api.class_inflated)(class.as_ptr()) && !closed_references.contains(&class)) {
                 return Err(InvokeError::GenericDeclaringType);
             }
-            let count = (api.method_get_param_count)(method.as_ptr()) as usize;
+            let count = (api.method_params)(method.as_ptr()) as usize;
             // A deliberate support bound, not a claim about the runtime's maximum signature size.
             if count > 64 {
                 return Err(InvokeError::TooManyParameters);
             }
-            let returns = self.signature_type((api.method_get_return_type)(method.as_ptr()), SignaturePosition::Return, contracts, closed_references)?;
+            let returns = self.signature_type((api.method_return)(method.as_ptr()), SignaturePosition::Return, contracts, closed_references)?;
             let parameters = (0..count)
                 .map(|index| {
                     self.signature_type(
-                        (api.method_get_param)(method.as_ptr(), index as u32),
+                        (api.method_param)(method.as_ptr(), index as u32),
                         SignaturePosition::Parameter(index),
                         contracts,
                         closed_references,
@@ -376,8 +358,8 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
                 context: self,
                 method,
                 class,
-                value_receiver: (api.class_is_valuetype)(class.as_ptr()),
-                instance: (api.method_is_instance)(method.as_ptr()),
+                value_receiver: (api.class_value)(class.as_ptr()),
+                instance: (api.method_instance)(method.as_ptr()),
                 parameters,
                 returns,
             })
@@ -394,11 +376,11 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
         if metadata.is_null() {
             return Err(InvokeError::InvalidMetadata);
         }
-        let api = &self.api;
+        let api = self.attachment.exports();
         // SAFETY: bind receives live method metadata; signature types belong to it.
         unsafe {
-            let code = (api.type_get_type)(metadata);
-            let by_ref = (api.type_is_byref)(metadata);
+            let code = (api.type_code)(metadata);
+            let by_ref = (api.type_byref)(metadata);
             let unsupported = || InvokeError::UnsupportedType {
                 position,
                 type_code: code,
@@ -415,11 +397,11 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
                 && (matches!(
                     code,
                     raw::type_code::STRING | raw::type_code::CLASS | raw::type_code::ARRAY | raw::type_code::OBJECT | raw::type_code::SZARRAY
-                ) || (code == raw::type_code::GENERICINST && closed_references.iter().any(|class| class.as_ptr() == (api.class_from_type)(metadata))))
+                ) || (code == raw::type_code::GENERICINST && closed_references.iter().any(|class| class.as_ptr() == (api.type_class)(metadata))))
             {
                 ValueKind::Reference
             } else if code == raw::type_code::VALUETYPE && !by_ref && !contracts.is_empty() {
-                let class = NonNull::new((api.class_from_type)(metadata)).ok_or(InvokeError::InvalidMetadata)?;
+                let class = NonNull::new((api.type_class)(metadata)).ok_or(InvokeError::InvalidMetadata)?;
                 match contracts.iter().find(|contract| contract.class() == class) {
                     Some(ValueTypeContract::BoxedReturn { .. }) if position == SignaturePosition::Return => ValueKind::Boxed,
                     Some(ValueTypeContract::I32Enum { .. }) => ValueKind::EnumI32,
@@ -433,14 +415,14 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
             let class = if matches!(kind, ValueKind::Void) {
                 None
             } else {
-                let class = NonNull::new((api.class_from_type)(metadata)).ok_or(InvokeError::InvalidMetadata)?;
-                if (api.class_is_generic)(class.as_ptr()) || ((api.class_is_inflated)(class.as_ptr()) && !closed_references.contains(&class)) {
+                let class = NonNull::new((api.type_class)(metadata)).ok_or(InvokeError::InvalidMetadata)?;
+                if (api.class_generic)(class.as_ptr()) || ((api.class_inflated)(class.as_ptr()) && !closed_references.contains(&class)) {
                     return Err(unsupported());
                 }
-                if matches!(kind, ValueKind::Reference) && (api.class_is_valuetype)(class.as_ptr()) {
+                if matches!(kind, ValueKind::Reference) && (api.class_value)(class.as_ptr()) {
                     return Err(unsupported());
                 }
-                if matches!(kind, ValueKind::Boxed | ValueKind::EnumI32) && !(api.class_is_valuetype)(class.as_ptr()) {
+                if matches!(kind, ValueKind::Boxed | ValueKind::EnumI32) && !(api.class_value)(class.as_ptr()) {
                     return Err(unsupported());
                 }
                 Some(class)
@@ -459,11 +441,11 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
     fn check_object(&self, object: NonNull<Object>, expected: NonNull<Class>, exact: bool) -> Result<(), InvokeError> {
         // SAFETY: all callers obtain this live object through a checked root or newly rooted result.
         unsafe {
-            let actual = NonNull::new((self.api.object_get_class)(object.as_ptr())).ok_or(InvokeError::InvalidMetadata)?;
+            let actual = NonNull::new((self.attachment.exports().object_class)(object.as_ptr())).ok_or(InvokeError::InvalidMetadata)?;
             let valid = if exact {
                 actual == expected
             } else {
-                (self.api.class_is_assignable_from)(expected.as_ptr(), actual.as_ptr())
+                (self.attachment.exports().assignable)(expected.as_ptr(), actual.as_ptr())
             };
             if !valid {
                 return Err(InvokeError::ObjectTypeMismatch);
@@ -546,7 +528,9 @@ impl<'attachment, 'runtime> CheckedMethod<'_, 'attachment, 'runtime> {
         let receiver = if let Some(object) = object {
             if self.value_receiver {
                 // SAFETY: exact value-type box checked above; retained root + nonmoving collector.
-                NonNull::new(unsafe { (context.api.object_unbox)(object.as_ptr()) }).ok_or(InvokeError::NullUnbox)?.as_ptr()
+                NonNull::new(unsafe { (context.attachment.exports().object_unbox)(object.as_ptr()) })
+                    .ok_or(InvokeError::NullUnbox)?
+                    .as_ptr()
             } else {
                 object.as_ptr().cast()
             }
@@ -557,7 +541,7 @@ impl<'attachment, 'runtime> CheckedMethod<'_, 'attachment, 'runtime> {
         // SAFETY: unsafe bind authorizes this body on this thread. Types, storage widths, byrefs,
         // receiver and root provenance were checked. Storage/roots remain live until it returns.
         let returned = unsafe {
-            (context.api.runtime_invoke)(
+            (context.attachment.exports().runtime_invoke)(
                 self.method.as_ptr(),
                 receiver,
                 if pointers.is_empty() { null_mut() } else { pointers.as_mut_ptr() },
@@ -601,7 +585,7 @@ impl<'attachment, 'runtime> CheckedMethod<'_, 'attachment, 'runtime> {
             ValueKind::Scalar(kind) => {
                 self.context.check_object(pointer, self.returns.class.ok_or(InvokeError::InvalidMetadata)?, true)?;
                 // SAFETY: exact primitive result box checked above, with nonmoving collector.
-                let payload = NonNull::new(unsafe { (self.context.api.object_unbox)(pointer.as_ptr()) }).ok_or(InvokeError::NullUnbox)?;
+                let payload = NonNull::new(unsafe { (self.context.attachment.exports().object_unbox)(pointer.as_ptr()) }).ok_or(InvokeError::NullUnbox)?;
                 // SAFETY: the fresh box holds precisely this primitive kind and has no exposed
                 // alias yet. Read the concrete primitive, never transmute arbitrary user types.
                 let value = unsafe { kind.read_box(payload) };
@@ -615,7 +599,7 @@ impl<'attachment, 'runtime> CheckedMethod<'_, 'attachment, 'runtime> {
                 self.context.check_object(pointer, self.returns.class.ok_or(InvokeError::InvalidMetadata)?, true)?;
                 // SAFETY: bind_with_value_types checked this exact enum class has Int32 size and
                 // backing identity. The newly returned exact enum box remains rooted/nonmoving.
-                let payload = NonNull::new(unsafe { (self.context.api.object_unbox)(pointer.as_ptr()) }).ok_or(InvokeError::NullUnbox)?;
+                let payload = NonNull::new(unsafe { (self.context.attachment.exports().object_unbox)(pointer.as_ptr()) }).ok_or(InvokeError::NullUnbox)?;
                 // SAFETY: the approved exact enum payload contains one initialized signed Int32.
                 let value = unsafe { payload.cast::<i32>().as_ptr().read_unaligned() };
                 Ok(ReturnValue::EnumI32 { value, root })
