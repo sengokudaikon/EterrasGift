@@ -473,66 +473,64 @@ fn near(tokens: &[TokenTree], at: usize) -> String {
     if near.is_empty() { "its end".to_owned() } else { format!("`{}`", near.join(" ")) }
 }
 
-/// The views' `@tr` strings, as `slint-tr-extractor` reads them, with each file they are in.
+/// The views' `@tr` strings, as `slint-tr-extractor` reads them, with the file each is in. It reads one file a run: handed
+/// several, the extractor (1.18.1) writes a line of references too long to fit as its first file twice and drops the rest.
 fn view_phrases(root: &Path, folder: &str) -> Result<Vec<(Found, String)>, Error> {
     let mut views = Vec::new();
     slint_files(&root.join(folder), &mut views)?;
     views.sort();
     let output = std::env::temp_dir().join(format!("phrases-{}.pot", std::process::id()));
-    let status = Command::new("slint-tr-extractor")
-        .current_dir(root)
-        .arg("--no-default-translation-context")
-        .arg("-o")
-        .arg(&output)
-        .args(views.iter().map(|path| relative(root, path)))
-        .status()
-        .map_err(Error::NoExtractor);
-    let text = fs::read_to_string(&output);
-    let _ = fs::remove_file(&output);
-    let status = status?;
-    if !status.success() {
-        return Err(Error::ExtractorFailed(status));
+    let mut found = Vec::new();
+    for view in &views {
+        let file = relative(root, view);
+        let status = Command::new("slint-tr-extractor")
+            .current_dir(root)
+            .arg("--no-default-translation-context")
+            .arg("-o")
+            .arg(&output)
+            .arg(&file)
+            .status()
+            .map_err(Error::NoExtractor);
+        let text = fs::read_to_string(&output);
+        let _ = fs::remove_file(&output);
+        let status = status?;
+        if !status.success() {
+            return Err(Error::ExtractorFailed(status));
+        }
+        let text = text.map_err(|error| io_error(&output, error))?;
+        let unreadable = |reason| Error::Unreadable {
+            file: format!("slint-tr-extractor's output for {file}"),
+            reason,
+        };
+        found.extend(extracted(&text).map_err(unreadable)?.into_iter().map(|phrase| (phrase, file.clone())));
     }
-    let text = text.map_err(|error| io_error(&output, error))?;
-    let unreadable = |reason| Error::Unreadable {
-        file: "slint-tr-extractor's output".to_owned(),
-        reason,
-    };
+    Ok(found)
+}
+
+/// The entries of a `.pot` the extractor wrote, in its order. Their references are left out: each run reads one file.
+fn extracted(text: &str) -> Result<Vec<Found>, String> {
     let mut found = Vec::new();
     for block in text.replace("\r\n", "\n").split("\n\n") {
-        let mut files: Vec<String> = Vec::new();
         let mut fields: BTreeMap<&str, String> = BTreeMap::new();
         let mut current = None;
         for line in block.lines() {
-            if let Some(references) = line.strip_prefix("#: ") {
-                for at in references.split_whitespace() {
-                    let file = at.rsplit_once(':').map_or(at, |(path, _)| path).to_owned();
-                    if !files.contains(&file) {
-                        files.push(file);
-                    }
-                }
-            } else if let Some((key, value)) = line.split_once(' ').filter(|(key, _)| matches!(*key, "msgid" | "msgid_plural" | "msgctxt")) {
-                fields.insert(key, po_string(value).map_err(unreadable)?);
+            if let Some((key, value)) = line.split_once(' ').filter(|(key, _)| matches!(*key, "msgid" | "msgid_plural" | "msgctxt")) {
+                fields.insert(key, po_string(value)?);
                 current = Some(key);
             } else if line.starts_with('"') {
                 if let Some(key) = current {
-                    let more = po_string(line).map_err(unreadable)?;
-                    fields.entry(key).or_default().push_str(&more);
+                    fields.entry(key).or_default().push_str(&po_string(line)?);
                 }
             } else {
                 current = None;
             }
         }
         if let Some(msgid) = fields.remove("msgid").filter(|msgid| !msgid.is_empty()) {
-            let (context, plural) = (fields.remove("msgctxt"), fields.remove("msgid_plural"));
-            for file in files {
-                let found_here = Found {
-                    context: context.clone(),
-                    msgid: msgid.clone(),
-                    plural: plural.clone(),
-                };
-                found.push((found_here, file));
-            }
+            found.push(Found {
+                context: fields.remove("msgctxt"),
+                msgid,
+                plural: fields.remove("msgid_plural"),
+            });
         }
     }
     Ok(found)
@@ -606,6 +604,28 @@ mod tests {
         assert_eq!(msgids("Phrase::new(\"two\r\nlines\")"), ["two\nlines"], "a CRLF checkout reads as Rust reads it");
         assert!(rust_phrases("Phrase::new(NAME)").is_err());
         assert!(rust_phrases(r#"Phrase::new("a" "b")"#).is_err());
+    }
+
+    #[test]
+    fn the_extractors_entries_are_read_in_its_order_without_the_header() {
+        let pot = "#\nmsgid \"\"\nmsgstr \"\"\n\"Project-Id-Version: PACKAGE VERSION\\n\"\n\n\
+            #: ui/a.slint:6 ui/a.slint:9\nmsgid \"Last Epoch\"\nmsgstr \"\"\n\n\
+            #: ui/a.slint:12\nmsgctxt \"key\"\nmsgid \"Delete\"\nmsgstr \"\"\n\n\
+            #: ui/a.slint:14\nmsgid \"\"\n\"{n} file \"\n\"left\"\nmsgid_plural \"{n} files left\"\nmsgstr[0] \"\"\nmsgstr[1] \"\"\n";
+        let found = |context: Option<&str>, msgid: &str, plural: Option<&str>| Found {
+            context: context.map(str::to_owned),
+            msgid: msgid.to_owned(),
+            plural: plural.map(str::to_owned),
+        };
+        assert_eq!(
+            extracted(pot).unwrap(),
+            [
+                found(None, "Last Epoch", None),
+                found(Some("key"), "Delete", None),
+                found(None, "{n} file left", Some("{n} files left")),
+            ]
+        );
+        assert!(extracted("msgid \"unterminated\nmsgstr \"\"\n").is_err());
     }
 
     #[test]

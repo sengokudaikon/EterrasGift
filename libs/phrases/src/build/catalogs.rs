@@ -2,15 +2,13 @@ use std::fmt::Write;
 use std::io;
 use std::path::Path;
 
-/// For a build script: writes `pub static CATALOGS: &[::phrases::Catalog]` to `out` from each
-/// `<lang>/<language>/LC_MESSAGES/<domain>.po`, for the crate to `include!`, and returns the languages found. It reads them
-/// with the parser `slint-build` bundles translations with and takes the entries it takes, so an app's Rust phrases and its
-/// views agree on what is translated.
+/// For a build script: the languages with a `<lang>/<language>/LC_MESSAGES/<domain>.po`, sorted, and a rerun of the script
+/// when `lang` changes. A script that hands `lang` to `slint-build`'s `with_bundled_translations` asks this first: Slint
+/// refuses a folder with no language.
 ///
-/// With no `lang` folder it bundles nothing and says so in a cargo warning, which an empty folder quiets. It panics on anything
-/// else it can't read or write, as a build script should, and on a plural rule that [`Translations`](crate::Translations)
-/// couldn't read.
-pub fn bundle_catalogs(lang: &Path, domain: &str, out: &Path) -> Vec<String> {
+/// With no `lang` folder there are none, and a cargo warning says so, which an empty folder quiets. It panics on a folder it
+/// can't read, as a build script should.
+pub fn languages(lang: &Path, domain: &str) -> Vec<String> {
     println!("cargo:rerun-if-changed={}", lang.display());
     let file = format!("LC_MESSAGES/{domain}.po");
     let mut languages = Vec::new();
@@ -29,6 +27,19 @@ pub fn bundle_catalogs(lang: &Path, domain: &str, out: &Path) -> Vec<String> {
         Err(error) => panic!("{}: {error}", lang.display()),
     }
     languages.sort();
+    languages
+}
+
+/// For a build script: writes `pub static CATALOGS: &[::phrases::Catalog]` to `out` from each
+/// `<lang>/<language>/LC_MESSAGES/<domain>.po`, for the crate to `include!`, and returns the [`languages`] found. It reads
+/// them with the parser `slint-build` bundles translations with and takes the entries it takes, so an app's Rust phrases and
+/// its views agree on what is translated.
+///
+/// With no `lang` folder it bundles nothing, as [`languages`] says. It panics on anything else it can't read or write, as a
+/// build script should, and on a plural rule that [`Translations`](crate::Translations) couldn't read.
+pub fn bundle_catalogs(lang: &Path, domain: &str, out: &Path) -> Vec<String> {
+    let file = format!("LC_MESSAGES/{domain}.po");
+    let languages = languages(lang, domain);
     let mut table = String::from("pub static CATALOGS: &[::phrases::Catalog] = &[\n");
     for language in &languages {
         let path = lang.join(language).join(&file);
@@ -115,6 +126,19 @@ msgstr "Rückgängig"
         assert!(!table.contains("Not done"), "{table}");
         assert!(!table.contains("{n} folder"), "a plural with a form missing is not finished: {table}");
         assert!(!table.contains("Undo"), "a fuzzy entry is not finished: {table}");
+    }
+
+    #[test]
+    fn the_languages_are_the_folders_with_the_domain_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let lang = dir.path().join("lang");
+        for (language, domain) in [("pl", "ui"), ("de", "ui"), ("fr", "other")] {
+            let folder = lang.join(language).join("LC_MESSAGES");
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::write(folder.join(format!("{domain}.po")), "").unwrap();
+        }
+        assert_eq!(languages(&lang, "ui"), ["de", "pl"]);
+        assert!(languages(&dir.path().join("missing"), "ui").is_empty());
     }
 
     #[test]

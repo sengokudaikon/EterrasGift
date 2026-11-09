@@ -61,6 +61,8 @@ Run `build::Template` from a task. `write` puts every word in one `.pot`, and `c
    found. With no folder there it bundles none and warns; an empty folder bundles none quietly. It panics on a folder it can't
    read.
 3. Pass the same folder to `with_bundled_translations`, but only if there are any languages: Slint refuses a folder with none.
+   Slint reads `<package>.po`, named after the package that compiles the views, so that is the domain to give both calls.
+   When the views compile in a crate of their own, its build script asks `build::languages` instead, which writes no table.
 4. As soon as the first window exists, before any page or message is built, pick the language once for all: `Translations::new`
    on the table, `Translations::choose` on the user's locale, then `Translations::select` and `locale::select` with what it
    chose, and Slint's `select_bundled_translation` for the views. Views, phrases and numbers then show in the same language.
