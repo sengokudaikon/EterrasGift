@@ -94,8 +94,8 @@ Each of these was hit and worked around in `crates/ui-view/ui`.
 - **Wheel scrolling in the headless window works with `WindowEvent::PointerScrolled`.**
 - **No opacity masks.** An image can't be faded by a gradient or clipped to a soft circle. Eterra's band (its reveal from
   the eye and its dissolving ends) is composited in Rust into a `SharedPixelBuffer` and shown as an `Image`
-  (`crates/ui/src/decorations.rs`). In a debug build that takes about 21 ms per frame for the 1536×304 cut, against
-  about 1 ms in release.
+  (`crates/ui-band`, which `decorations.rs` asks for each frame). Unoptimised, a frame of the spread takes 11–12 ms, so
+  that crate is optimised in every profile: 1.3–1.6 ms.
 - **Painting the ground colour over the ground isn't a no-op in the software renderer.** A ground-to-transparent gradient
   over the ground came out one level darker (13 against 14), which left faint boxes on the screen. Fade the image
   itself instead.

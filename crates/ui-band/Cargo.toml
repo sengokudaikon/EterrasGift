@@ -1,0 +1,12 @@
+[package]
+name = "eg-ui-band"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+slint.workspace = true
+
+[lints]
+workspace = true

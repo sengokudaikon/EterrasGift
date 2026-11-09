@@ -1444,6 +1444,7 @@ dependencies = [
  "eg-core",
  "eg-trainer",
  "eg-trainer-screens",
+ "eg-ui-band",
  "eg-ui-view",
  "file-ops",
  "image",
@@ -1462,6 +1463,13 @@ dependencies = [
  "tempfile",
  "tokio",
  "win-platform",
+]
+
+[[package]]
+name = "eg-ui-band"
+version = "0.1.0"
+dependencies = [
+ "slint",
 ]
 
 [[package]]

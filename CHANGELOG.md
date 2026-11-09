@@ -5,6 +5,7 @@ code and its tests, and what is still to build in [the helper's backlog](crates/
 
 ## 2026-11-09
 
+- Build: a dev build composites Eterra's band as a shipped one does (1.3–1.6 ms a frame, from 11–12): it is eg-ui-band, optimised in every profile.
 - UI: work a page hands off that never gets to run now ends as a fault would, not with the page loading for good.
 - Build: an edit to the UI's Rust no longer compiles the Slint views again (about 1 s, from 7): they are the new eg-ui-view, so a translation is now `lang/<language>/LC_MESSAGES/eg-ui-view.po`.
 - Build: an edit to Settings, Logs or a trainer page no longer rebuilds the trainer's worker: they are in eg-companion and the new eg-trainer-screens.

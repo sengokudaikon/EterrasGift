@@ -46,6 +46,7 @@ win-platform = { path = "libs/win-platform" }
 eg-companion = { path = "crates/companion" }
 eg-ui = { path = "crates/ui" }
 eg-ui-view = { path = "crates/ui-view" }
+eg-ui-band = { path = "crates/ui-band" }
 eg-trainer = { path = "crates/trainer" }
 eg-trainer-screens = { path = "crates/trainer-screens" }
 
@@ -147,9 +148,13 @@ opt-level = 2
 [profile.dev.package.i-slint-renderer-software]
 opt-level = 2
 
+# Eterra's band, composited pixel by pixel while the bloom moves (eg-ui-band): a frame of its spread takes 11-12 ms
+# unoptimised and 1.3-1.6 ms optimised. The crate is only that, so this costs a few seconds once.
+[profile.dev.package.eg-ui-band]
+opt-level = 3
+
 # What `mise run run` draws with: Slint's property and layout engine, FemtoVG and the glyph and vector rasterisers.
-# Unoptimised, a dev window lags behind what ships (Eterra's band takes 21 ms a frame against 1 ms). Third-party only,
-# so it costs one build.
+# Unoptimised, a dev window lags behind what ships. Third-party only, so it costs one build.
 [profile.dev.package.i-slint-core]
 opt-level = 2
 
