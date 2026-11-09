@@ -476,6 +476,24 @@ impl ModSources {
         }
         Ok(project.target_path.clone())
     }
+
+    /// A token for work stopped from elsewhere, such as a [`build`](Self::build) the page lets go of: cancelled as soon as
+    /// `stop` completes, or when the sources close. Nothing polls: a task waits on `stop`, and cancelling the token ends it.
+    pub fn cancel_on(&self, stop: impl Future<Output = ()> + Send + 'static) -> CancellationToken {
+        let cancel = self.lifetime.child_token();
+        let watched = cancel.clone();
+        let watching = self.tasks.spawn(async move {
+            tokio::select! {
+                () = stop => watched.cancel(),
+                () = watched.cancelled() => {}
+            }
+        });
+        // Refused only once the runtime has closed: the app is on its way out, and nothing more should run.
+        if watching.is_err() {
+            cancel.cancel();
+        }
+        cancel
+    }
 }
 
 fn cancelled(cancel: &CancellationToken) -> Result<(), SourceError> {

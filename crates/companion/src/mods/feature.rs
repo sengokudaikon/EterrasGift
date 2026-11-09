@@ -351,13 +351,6 @@ pub enum Effect {
     },
     PickMod,
     Launch(LaunchMode),
-    Build {
-        project: ModProject,
-        root: Option<PathBuf>,
-        sdk: Option<PathBuf>,
-        install_only: bool,
-    },
-    CancelBuild,
 }
 
 /// What the page tells the rest of the window.
@@ -413,6 +406,10 @@ pub struct State {
     /// The one launcher is starting the game, for this page or another.
     starting: bool,
     building: Option<String>,
+    /// The compiler run under way, for as long as it is wanted: dropping it stops the compiler.
+    compiling: Option<Compile>,
+    /// Numbers the compiler runs, so a run asked for again is a new one.
+    compiles: u64,
     build_job: Option<BuildJob>,
     /// What the build under way was asked as: its row, whether from sources, and whether it only installs.
     build_request: Option<(i32, bool, bool)>,
@@ -456,6 +453,8 @@ impl State {
             launching: false,
             starting: false,
             building: None,
+            compiling: None,
+            compiles: 0,
             build_job: None,
             build_request: None,
             stopped_build: None,
@@ -761,24 +760,60 @@ fn build(state: &mut State, effects: &mut Effects<Effect, Output>, index: i32, s
     state.building = Some(project.file());
     state.build_job = Some(BuildJob { keep_on: !source, before });
     state.build_request = Some(request);
-    // An install only reads the mods again; a build says what it builds while the compiler runs.
-    if !install_only {
-        say(state, BuildingName.with(&[("name", &name)]), false);
-    }
-    effects.push(Effect::Build {
+    let Some(root) = root.filter(|_| !install_only) else {
+        install_built(state, effects, project.target_path);
+        return;
+    };
+    // A build says what it builds while the compiler runs.
+    say(state, BuildingName.with(&[("name", &name)]), false);
+    state.compiles += 1;
+    state.compiling = Some(Compile {
+        run: state.compiles,
         project,
         root,
         sdk: state.sdk.clone(),
-        install_only,
     });
 }
 
+/// Installs what a build made, through the worker: the build isn't over until it is.
+fn install_built(state: &mut State, effects: &mut Effects<Effect, Output>, path: PathBuf) {
+    let job = state.build_job.take();
+    let change = Change::InstallBuilt {
+        path,
+        keep_on: job.as_ref().is_some_and(|job| job.keep_on),
+        before: job.and_then(|job| job.before),
+    };
+    enqueue(state, effects, change, Vec::new(), true, true, Failure::Raw);
+}
+
+/// Stops the compiler, if it runs: its build is over, and nothing of it comes back. True when one ran.
+fn stop_compiling(state: &mut State) -> bool {
+    let stopped = state.compiling.take().is_some();
+    if stopped {
+        finish_build(state);
+    }
+    stopped
+}
+
+/// One run of the compiler, on a project the page builds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Compile {
+    pub run: u64,
+    pub project: ModProject,
+    /// The game's folder, which the project builds against.
+    pub root: PathBuf,
+    pub sdk: Option<PathBuf>,
+}
+
 /// What runs while the state wants it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Subscription {
     /// A tick every [`GameLauncher::WATCH_INTERVAL`](crate::launch::launcher::GameLauncher::WATCH_INTERVAL), sending
     /// [`Intent::Watch`]. The page looks at the game only while it shows.
     Tick,
+    /// The compiler on a project, sending [`Intent::Built`] when it is done. It stops, and sends nothing, when the state no
+    /// longer wants it: a close, or the app's end.
+    Build(Compile),
 }
 
 impl Feature for Mods {
@@ -789,7 +824,11 @@ impl Feature for Mods {
     type Subscription = Subscription;
 
     fn subscriptions(state: &State) -> impl IntoIterator<Item = Subscription> {
-        state.visible.then_some(Subscription::Tick)
+        state
+            .visible
+            .then_some(Subscription::Tick)
+            .into_iter()
+            .chain(state.compiling.clone().map(Subscription::Build))
     }
 
     fn start(state: &mut State, effects: &mut Effects<Effect>) {
@@ -1025,17 +1064,10 @@ impl Feature for Mods {
             Intent::InstallBuild(index) => build(state, effects, index, false, true),
             Intent::BuildSource(index) => build(state, effects, index, true, false),
             Intent::Built(result) => {
+                state.compiling = None;
                 let result = result.unwrap_or_else(|_| Err(BuildStopped.into()));
                 match result {
-                    Ok(path) => {
-                        let job = state.build_job.take();
-                        let change = Change::InstallBuilt {
-                            path,
-                            keep_on: job.as_ref().is_some_and(|job| job.keep_on),
-                            before: job.and_then(|job| job.before),
-                        };
-                        enqueue(state, effects, change, Vec::new(), true, true, Failure::Raw);
-                    }
+                    Ok(path) => install_built(state, effects, path),
                     Err(error) => {
                         finish_build(state);
                         if state.closing {
@@ -1046,11 +1078,16 @@ impl Feature for Mods {
                     }
                 }
             }
-            Intent::StopWork => effects.push(Effect::CancelBuild),
+            Intent::StopWork => {
+                stop_compiling(state);
+            }
             Intent::CloseRequested => {
                 if !std::mem::replace(&mut state.closing, true) {
-                    state.stopped_build = state.build_request.filter(|_| state.building.is_some());
-                    effects.push(Effect::CancelBuild);
+                    // Only the compiler stops; a build already installing finishes, and isn't asked for again.
+                    let request = state.build_request;
+                    if stop_compiling(state) {
+                        state.stopped_build = request;
+                    }
                     commit_settings(state, effects);
                 }
                 finish_close(state, effects);
@@ -1766,7 +1803,6 @@ mod tests {
         let mut state = state();
         let revision = shown(&mut state);
         let told = step::<Mods>(&mut state, Intent::CloseRequested);
-        assert!(told.effects.iter().any(|effect| matches!(effect, Effect::CancelBuild)));
         assert!(told.outputs.is_empty(), "a read is still out");
         assert!(!state.status().can_play, "Play goes while the page closes");
         assert_eq!(
@@ -1808,9 +1844,8 @@ mod tests {
         assert_eq!(step::<Mods>(&mut state, Intent::CloseRequested).outputs, [Output::Closed(CloseAnswer::Closed)]);
     }
 
-    #[test]
-    fn a_build_a_close_stopped_starts_again_when_the_close_is_called_off() {
-        let mut state = state();
+    /// A project in the sources folder that no installed mod builds, and a game to build it against.
+    fn with_project(state: &mut State) {
         state.inventory.mods_folder = Some(PathBuf::from(r"C:\Game\Mods"));
         state.sources.not_installed = vec![ModProject {
             project_file: PathBuf::from(r"C:\Sources\Fixture\Fixture.csproj"),
@@ -1819,27 +1854,93 @@ mod tests {
             version: None,
             is_mod: true,
         }];
-        let builds = |effects: &[Effect]| effects.iter().filter(|effect| matches!(effect, Effect::Build { .. })).count();
-        assert_eq!(builds(&send(&mut state, Intent::BuildSource(0))), 1);
-        assert!(step::<Mods>(&mut state, Intent::CloseRequested).outputs.is_empty(), "the compiler is still running");
-        assert_eq!(
-            step::<Mods>(&mut state, Intent::Built(Ok(Err("cancelled".into())))).outputs,
-            [Output::Closed(CloseAnswer::Closed)]
-        );
-        assert_eq!(builds(&send(&mut state, Intent::CloseCalledOff)), 1, "the build starts again");
-        assert!(send(&mut state, Intent::CloseCalledOff).is_empty(), "once");
+    }
+
+    /// The compiler runs the state wants.
+    fn compiles(state: &State) -> Vec<Compile> {
+        spiderland::subscriptions::<Mods>(state)
+            .into_iter()
+            .filter_map(|subscription| match subscription {
+                Subscription::Build(compile) => Some(compile),
+                Subscription::Tick => None,
+            })
+            .collect()
     }
 
     #[test]
-    fn a_build_cancelled_by_closing_says_nothing_and_lets_the_close_finish() {
+    fn a_build_runs_the_compiler_against_the_game() {
         let mut state = state();
-        state.building = Some("Fixture.dll".into());
-        assert!(step::<Mods>(&mut state, Intent::CloseRequested).outputs.is_empty(), "the compiler is still running");
+        with_project(&mut state);
+        send(&mut state, Intent::BuildSource(0));
+        let [compile] = &compiles(&state)[..] else {
+            panic!("one compiler run expected");
+        };
+        assert_eq!(compile.root, PathBuf::from(r"C:\Game"));
+        assert!(state.status().building);
+        send(&mut state, Intent::Built(Ok(Ok(PathBuf::from(r"C:\Sources\Fixture\bin\Fixture.dll")))));
+        assert!(compiles(&state).is_empty(), "the compiler is done");
+        assert!(state.status().building, "the build isn't over until it's installed");
+    }
+
+    #[test]
+    fn a_build_a_close_stopped_starts_again_when_the_close_is_called_off() {
+        let mut state = state();
+        with_project(&mut state);
+        send(&mut state, Intent::BuildSource(0));
+        let first = compiles(&state);
         assert_eq!(
-            step::<Mods>(&mut state, Intent::Built(Ok(Err("cancelled".into())))).outputs,
-            [Output::Closed(CloseAnswer::Closed)]
+            step::<Mods>(&mut state, Intent::CloseRequested).outputs,
+            [Output::Closed(CloseAnswer::Closed)],
+            "the compiler stops, and nothing of it comes back to wait for"
         );
-        assert_eq!(state.status().change_message, "");
+        assert!(compiles(&state).is_empty());
+        send(&mut state, Intent::CloseCalledOff);
+        let again = compiles(&state);
+        assert_eq!(again.len(), 1, "the build starts again");
+        assert_ne!(again, first, "as a run of its own");
+        assert!(send(&mut state, Intent::CloseCalledOff).is_empty(), "once");
+        assert_eq!(compiles(&state), again);
+    }
+
+    #[test]
+    fn a_close_says_nothing_of_the_compiler_it_stopped() {
+        let mut state = state();
+        with_project(&mut state);
+        send(&mut state, Intent::BuildSource(0));
+        let said = state.status().change_message;
+        send(&mut state, Intent::CloseRequested);
+        assert!(!state.status().building);
+        assert_eq!(state.status().change_message, said);
+    }
+
+    #[test]
+    fn a_build_already_installing_is_waited_for_and_not_asked_for_again() {
+        let mut state = state();
+        with_project(&mut state);
+        send(&mut state, Intent::BuildSource(0));
+        let effects = send(&mut state, Intent::Built(Ok(Ok(PathBuf::from(r"C:\Sources\Fixture\bin\Fixture.dll")))));
+        let installing = revisions(&effects)[0];
+        assert!(step::<Mods>(&mut state, Intent::CloseRequested).outputs.is_empty(), "the install is still out");
+        send(&mut state, Intent::CloseCalledOff);
+        assert!(compiles(&state).is_empty(), "the build was never stopped");
+        send(
+            &mut state,
+            Intent::Answered {
+                revision: installing,
+                answer: observed(),
+            },
+        );
+        assert!(!state.status().building);
+    }
+
+    #[test]
+    fn the_app_s_end_stops_the_compiler() {
+        let mut state = state();
+        with_project(&mut state);
+        send(&mut state, Intent::BuildSource(0));
+        send(&mut state, Intent::StopWork);
+        assert!(compiles(&state).is_empty());
+        assert!(!state.status().building);
     }
 
     #[test]

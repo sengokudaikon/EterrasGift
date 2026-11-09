@@ -434,3 +434,19 @@ fn an_evaluator_panic_is_reported_releases_all_waiters_and_counts_as_the_runtime
     sources.close();
     assert!(runtime.shutdown(), "the app's exit code hears of it");
 }
+
+#[test]
+fn a_stop_from_elsewhere_cancels_its_token_and_so_does_the_close() {
+    let sources = service(&Arc::new(Runner::default()));
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let cancel = sources.cancel_on(async move {
+        let _ = stopped.await;
+    });
+    assert!(!cancel.is_cancelled());
+    drop(stop);
+    wait_until(|| cancel.is_cancelled());
+    let waiting = sources.cancel_on(std::future::pending());
+    sources.close();
+    assert!(waiting.is_cancelled(), "the close cancels what still waits");
+    assert!(sources.cancel_on(std::future::pending()).is_cancelled(), "and anything asked for after it");
+}

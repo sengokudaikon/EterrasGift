@@ -16,10 +16,9 @@ use eg_companion::mods::{
 use eg_core::settings_service::SettingsService;
 use phrases::phrases;
 use slint::{ComponentHandle, ModelRc, SharedString};
-use spiderland::{CheckedSlice, Intents, Store, Version, Wiring, callbacks};
+use spiderland::{CheckedSlice, Intents, Never, Store, Version, Wiring, callbacks};
 use spiderland_slint::{Background, InnerRows, Rows, WindowHost, Windowed, every};
 use std::any::Any;
-use task_runtime::CancellationToken;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -41,7 +40,6 @@ pub struct ModsPage {
 struct Window {
     services: ModsPage,
     background: Background,
-    build_cancel: Option<CancellationToken>,
     rows: Rows<ModRow>,
     source_rows: Rows<SourceRow>,
     setting_rows: Rows<ModSettingRow>,
@@ -63,7 +61,6 @@ pub(crate) fn build(window: &MainWindow, page: ModsPage, background: Background,
     let host = Window {
         services: page,
         background,
-        build_cancel: None,
         rows: Rows::default(),
         source_rows: Rows::default(),
         setting_rows: Rows::default(),
@@ -252,8 +249,27 @@ impl WindowHost<Mods> for Window {
         );
     }
 
-    fn subscribe(&mut self, Subscription::Tick: &Subscription, intents: &Intents<Intent>) -> Box<dyn Any> {
-        Box::new(every(GameLauncher::WATCH_INTERVAL, intents, || Intent::Watch(jiff::Timestamp::now())))
+    fn subscribe(&mut self, subscription: &Subscription, intents: &Intents<Intent>) -> Box<dyn Any> {
+        match subscription {
+            Subscription::Tick => Box::new(every(GameLauncher::WATCH_INTERVAL, intents, || Intent::Watch(jiff::Timestamp::now()))),
+            // The compiler runs on the pool for as long as the page wants it. Letting go of it kills the compiler at once:
+            // the stop cancels the token the process waits on.
+            Subscription::Build(compile) => {
+                let (sources, compile) = (self.services.sources.clone(), compile.clone());
+                Box::new(self.background.stoppable(
+                    intents,
+                    move |stop, _| {
+                        let cancel = sources.cancel_on(stop.stopped());
+                        let _done = cancel.clone().drop_guard();
+                        sources
+                            .build(&compile.project, &compile.root, compile.sdk.as_deref(), &cancel)
+                            .map_err(|error| error.to_string())
+                    },
+                    |never: Never| match never {},
+                    Intent::Built,
+                ))
+            }
+        }
     }
 
     fn perform(&mut self, window: Option<&MainWindow>, effect: Effect, intents: &Intents<Intent>) {
@@ -313,27 +329,6 @@ impl WindowHost<Mods> for Window {
             Effect::Launch(mode) => {
                 let launcher = self.services.launcher.clone();
                 self.background.run(intents, move || launcher.play(mode), Intent::Launched);
-            }
-            Effect::Build { project, root, sdk, install_only } => {
-                let cancel = CancellationToken::default();
-                self.build_cancel = Some(cancel.clone());
-                let sources = self.services.sources.clone();
-                self.background.run(
-                    intents,
-                    move || {
-                        if install_only {
-                            return Ok(project.target_path);
-                        }
-                        let root = root.expect("the feature asks for a build only with the game's root");
-                        sources.build(&project, &root, sdk.as_deref(), &cancel).map_err(|error| error.to_string())
-                    },
-                    Intent::Built,
-                );
-            }
-            Effect::CancelBuild => {
-                if let Some(cancel) = &self.build_cancel {
-                    cancel.cancel();
-                }
             }
         }
     }
