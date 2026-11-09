@@ -76,10 +76,37 @@ fn answered_by_intent() -> FieldRequest {
     FieldRequest::Pending(Box::pin(std::future::pending()))
 }
 
+/// The field requests the rows wait on. Each is numbered, and an answer is taken only while its row still waits on that
+/// number: a row made again since (another profile shown) waits on its own requests, never on its predecessor's.
+#[derive(Default)]
+struct Requests {
+    last: u64,
+    /// The request each feature's row waits on.
+    waiting: HashMap<String, u64>,
+}
+
+impl Requests {
+    fn ask(&mut self, id: &str) -> u64 {
+        self.last += 1;
+        self.waiting.insert(id.to_owned(), self.last);
+        self.last
+    }
+
+    /// Whether the row of `id` still waits on `request`; it waits no more once this says so.
+    fn answered(&mut self, id: &str, request: u64) -> bool {
+        let waited = self.waiting.get(id) == Some(&request);
+        if waited {
+            self.waiting.remove(id);
+        }
+        waited
+    }
+}
+
 /// The session as the rows see it inside the reducer.
 struct Commands<'a> {
     facts: &'a Facts,
     effects: RefCell<&'a mut Effects<Effect>>,
+    requests: RefCell<&'a mut Requests>,
 }
 
 impl Commands<'_> {
@@ -135,12 +162,15 @@ impl TrainerSession for Commands<'_> {
         self.facts.busy
     }
     fn read_fields(&self, id: &str) -> FieldRequest {
-        self.push(Effect::ReadFields { id: id.to_owned() });
+        let request = self.requests.borrow_mut().ask(id);
+        self.push(Effect::ReadFields { id: id.to_owned(), request });
         answered_by_intent()
     }
     fn write_fields(&self, id: &str, fields: &[FieldWrite]) -> FieldRequest {
+        let request = self.requests.borrow_mut().ask(id);
         self.push(Effect::WriteFields {
             id: id.to_owned(),
+            request,
             fields: fields.to_vec(),
         });
         answered_by_intent()
@@ -175,9 +205,10 @@ pub enum Intent {
     Discard(i32),
     /// What the session says now.
     Facts(Box<Facts>),
-    /// The game answered a row's read or write.
+    /// The game answered a row's read or write: the `request` its effect carried.
     FieldsAnswered {
         id: String,
+        request: u64,
         result: FieldResult,
     },
     SplitDue,
@@ -197,11 +228,14 @@ pub enum Effect {
         id: String,
         values: Vec<f64>,
     },
+    /// Its answer comes back as [`Intent::FieldsAnswered`], with this `request`.
     ReadFields {
         id: String,
+        request: u64,
     },
     WriteFields {
         id: String,
+        request: u64,
         fields: Vec<FieldWrite>,
     },
     /// Read the session again, and look for answers still owed.
@@ -320,6 +354,7 @@ pub struct State {
     live: bool,
     /// The shown hooks are a kept profile's, not only this connection's.
     kept: bool,
+    requests: Requests,
 }
 
 impl State {
@@ -337,6 +372,7 @@ impl State {
             shown: None,
             live: false,
             kept: true,
+            requests: Requests::default(),
         }
     }
 
@@ -425,9 +461,11 @@ impl State {
     pub fn row_views(&self) -> Vec<RowView> {
         let facts = (*self.facts).clone();
         let mut nothing = Effects::detached();
+        let mut unasked = Requests::default();
         let session = Commands {
             facts: &facts,
             effects: RefCell::new(&mut nothing),
+            requests: RefCell::new(&mut unasked),
         };
         self.rows().iter().map(|row| row_view(row, &session)).collect()
     }
@@ -614,6 +652,7 @@ fn show_section(state: &mut State, effects: &mut Effects<Effect>) {
     let session = Commands {
         facts: &facts,
         effects: RefCell::new(&mut *effects),
+        requests: RefCell::new(&mut state.requests),
     };
     let mut headings = Vec::new();
     if let Some(page) = state.current.and_then(|area| state.pages.get_mut(&area)).and_then(Option::as_mut)
@@ -650,9 +689,12 @@ fn follow_profiles(state: &mut State, effects: &mut Effects<Effect>) {
     state.live = facts.connected;
     state.kept = facts.kept;
     if rebuild {
+        // The rows are new: none waits on what the old ones asked.
+        state.requests.waiting.clear();
         let session = Commands {
             facts: &facts,
             effects: RefCell::new(&mut *effects),
+            requests: RefCell::new(&mut state.requests),
         };
         let (features, planned) = (&state.features, state.planned);
         for (area, page) in state.pages.iter_mut() {
@@ -675,6 +717,7 @@ fn follow_rows(state: &mut State, effects: &mut Effects<Effect>) {
     let session = Commands {
         facts: &facts,
         effects: RefCell::new(&mut *effects),
+        requests: RefCell::new(&mut state.requests),
     };
     let current = state.current;
     for (area, page) in state.pages.iter_mut() {
@@ -706,6 +749,7 @@ fn with_row(state: &mut State, effects: &mut Effects<Effect>, row: i32, action: 
     let session = Commands {
         facts: &facts,
         effects: RefCell::new(&mut *effects),
+        requests: RefCell::new(&mut state.requests),
     };
     let Some(row) = usize::try_from(row).ok() else {
         return;
@@ -779,6 +823,7 @@ impl SpiderlandFeature for TrainerPages {
                     let session = Commands {
                         facts: &facts,
                         effects: RefCell::new(&mut *effects),
+                        requests: RefCell::new(&mut state.requests),
                     };
                     let page = pages::build(area, &state.features, state.planned, &session);
                     state.pages.insert(area, page);
@@ -881,7 +926,10 @@ impl SpiderlandFeature for TrainerPages {
                 follow_profiles(state, effects);
                 follow_rows(state, effects);
             }
-            Intent::FieldsAnswered { id, result } => {
+            Intent::FieldsAnswered { id, request, result } => {
+                if !state.requests.answered(&id, request) {
+                    return;
+                }
                 let mut result = Some(result);
                 for page in state.pages.values_mut().flatten() {
                     for section in &mut page.sections {
@@ -1012,6 +1060,53 @@ mod tests {
     }
 
     #[test]
+    fn an_answer_to_a_replaced_editor_settles_nothing() {
+        let reads = |effects: &[Effect]| -> Vec<(String, u64)> {
+            effects
+                .iter()
+                .filter_map(|effect| match effect {
+                    Effect::ReadFields { id, request } => Some((id.clone(), *request)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let busy = |state: &State, id: &str| {
+            state
+                .pages
+                .values()
+                .flatten()
+                .flat_map(|page| &page.sections)
+                .any(|section| matches!(&section.content, Content::Rows(rows) if rows.iter().any(|row| matches!(row, Row::Editor(editor) if editor.feature.id() == id && editor.is_busy()))))
+        };
+        let mut state = State::new(FEATURES.to_vec(), false, 24.0);
+        send(&mut state, Intent::Facts(Box::new(facts(true))));
+        let first = reads(&send(&mut state, Intent::Open(Some(Area::Character))));
+        let (id, old) = first.first().expect("a connected editor reads as it is made").clone();
+        // Another character is shown: its editors are new, and read for themselves.
+        let mut other = facts(true);
+        other.shown = Some(Profile {
+            name: "Ana".into(),
+            class: "Rogue".into(),
+            cycle: "Legacy".into(),
+        });
+        let second = reads(&send(&mut state, Intent::Facts(Box::new(other))));
+        let (_, new) = second.iter().find(|(read, _)| *read == id).expect("the new editor reads too").clone();
+        let answer = |request, details: &str| Intent::FieldsAnswered {
+            id: id.clone(),
+            request,
+            result: Err(super::super::session::FieldError {
+                details: details.into(),
+                nothing_sent: true,
+            }),
+        };
+        // Mira's answer comes back late: it is not Ana's.
+        send(&mut state, answer(old, "Mira's read"));
+        assert!(busy(&state, &id), "an answer to the editor it replaced settled the new one");
+        send(&mut state, answer(new, "Ana's read"));
+        assert!(!busy(&state, &id), "the new editor's own answer settles it");
+    }
+
+    #[test]
     fn an_editor_reads_on_connecting_and_takes_its_answer_as_an_intent() {
         let mut state = State::new(FEATURES.to_vec(), false, 24.0);
         send(&mut state, Intent::Facts(Box::new(facts(false))));
@@ -1020,10 +1115,11 @@ mod tests {
         let id = effects
             .iter()
             .find_map(|effect| match effect {
-                Effect::ReadFields { id } => Some(id.clone()),
+                Effect::ReadFields { id, request } => Some((id.clone(), *request)),
                 _ => None,
             })
             .expect("a connected editor reads");
+        let (id, request) = id;
         let waiting = |state: &State| {
             state
                 .pages
@@ -1037,6 +1133,7 @@ mod tests {
             &mut state,
             Intent::FieldsAnswered {
                 id: id.clone(),
+                request,
                 result: Err(super::super::session::FieldError {
                     details: "denied".into(),
                     nothing_sent: true,

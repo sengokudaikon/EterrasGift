@@ -5,6 +5,7 @@ code and its tests, and what is still to build in [the helper's backlog](crates/
 
 ## 2026-11-09
 
+- Trainer: a field editor's late answer no longer settles the editor of a profile shown since; each read and write waits on its own answer.
 - Trainer: a page shows one state of the worker at a time; its profiles, hooks and connection are never read from two.
 - UI: closing waits for all the background work it let start, including work started just as it closed, and a second close of a writer waits as the first does.
 - Item Forge: template saves and deletes run one at a time in the order asked, and a save that finishes late leaves a newly typed name alone.

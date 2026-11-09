@@ -313,13 +313,13 @@ impl WindowHost<TrainerPages> for Window {
             Effect::DeleteProfile(profile) => self.session.delete_profile(&profile),
             Effect::SetHook { id, on } => self.session.set_hook(&id, on),
             Effect::SetHookValues { id, values } => self.session.set_hook_values(&id, &values),
-            Effect::ReadFields { id } => {
-                let request = self.session.read_fields(&id);
-                self.take_request(id, request, intents);
+            Effect::ReadFields { id, request } => {
+                let answer = self.session.read_fields(&id);
+                self.take_answer(id, request, answer, intents);
             }
-            Effect::WriteFields { id, fields } => {
-                let request = self.session.write_fields(&id, &fields);
-                self.take_request(id, request, intents);
+            Effect::WriteFields { id, request, fields } => {
+                let answer = self.session.write_fields(&id, &fields);
+                self.take_answer(id, request, answer, intents);
             }
             Effect::Refresh => intents.send(Intent::Facts(Box::new(read_facts(&*self.session, &self.features)))),
             Effect::ScheduleSplit => {
@@ -338,10 +338,11 @@ impl WindowHost<TrainerPages> for Window {
 }
 
 impl Window {
-    fn take_request(&self, id: String, request: FieldRequest, intents: &Intents<Intent>) {
-        match request {
-            FieldRequest::Done(result) => intents.send(Intent::FieldsAnswered { id, result }),
-            FieldRequest::Pending(answer) => self.background.wait(intents, answer, move |result| Intent::FieldsAnswered { id, result }),
+    /// Sends the game's answer back as the intent for `request`, now or once it comes.
+    fn take_answer(&self, id: String, request: u64, answer: FieldRequest, intents: &Intents<Intent>) {
+        match answer {
+            FieldRequest::Done(result) => intents.send(Intent::FieldsAnswered { id, request, result }),
+            FieldRequest::Pending(answer) => self.background.wait(intents, answer, move |result| Intent::FieldsAnswered { id, request, result }),
         }
     }
 
