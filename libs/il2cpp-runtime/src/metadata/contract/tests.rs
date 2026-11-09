@@ -67,7 +67,7 @@ unsafe extern "C-unwind" fn free(_: Ptr) {}
 // Same-name, same-arity overloads: KindId comes before the intended Kind overload.
 #[test]
 fn exact_overload_is_selected_and_ambiguity_or_wrong_return_is_refused() {
-    let mut access = MetadataApi::test_stubs();
+    let mut access = Exports::test_stubs();
     access.class_methods = methods;
     access.method_name = name;
     access.method_params = count;
@@ -173,7 +173,7 @@ fn reset() {
 
 #[test]
 fn mutable_field_is_exactly_the_declared_writable_instance_primitive_inside_the_object() {
-    let mut api = MetadataApi::test_stubs();
+    let mut api = Exports::test_stubs();
     api.corlib = corlib;
     api.class_from_name = class_from_name;
     api.class_field = class_field;
@@ -226,7 +226,7 @@ fn code_window_stops_at_its_limit_the_module_end_or_the_next_declared_method() {
         unsafe { *iter = token(index + 1) };
         CODE_POINTERS.get(index).map_or(std::ptr::null(), |word| std::ptr::from_ref(word).cast())
     }
-    let mut api = MetadataApi::test_stubs();
+    let mut api = Exports::test_stubs();
     api.class_methods = declared;
     // SAFETY: each authored method token points at a live word holding its code pointer; no code is read.
     let end = |limit, module_end| unsafe { api.code_end(token(OWNER), 0x1000, limit, module_end) }.unwrap();

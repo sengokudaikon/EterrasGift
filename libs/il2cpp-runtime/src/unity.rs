@@ -1,11 +1,11 @@
 //! What a Unity player adds to the runtime, through its managed classes: whether a wrapper's native object still exists,
 //! and whether this is Unity's main thread.
 
-use crate::metadata::{Class, MetadataApi, MetadataError, MethodError, MethodQuery, Others, Returns, target, unsupported};
+use crate::metadata::{Class, Exports, MetadataError, MethodError, MethodQuery, Others, Returns, target, unsupported};
 use crate::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, StrongRoot, raw};
 use std::ptr::NonNull;
 
-impl MetadataApi {
+impl Exports {
     /// Whether the native object behind a rooted `UnityEngine.Object` wrapper, an `owner`, still exists. `label` begins any
     /// contract failure's text.
     ///

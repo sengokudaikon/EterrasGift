@@ -5,7 +5,7 @@
 //!   presence, the locale, the item limits. They know nothing of what the trainer offers;
 //! - `features` are what the trainer offers, built on the accessors: stat edits, forge edits, tooltips, hooks.
 //!
-//! Fields are resolved, never carried as game-version offsets. [`RuntimeAccess`] is the runtime's [`MetadataApi`]
+//! Fields are resolved, never carried as game-version offsets. [`RuntimeAccess`] is the runtime's [`Exports`]
 //! with the game's own cached bindings beside it; every generic lookup is the runtime crate's.
 
 // Entry-point contracts cover the shared runtime assumptions. Keep local notes
@@ -17,7 +17,7 @@ pub(crate) use il2cpp_runtime::metadata::{MethodError, MethodQuery, Others, Para
 use il2cpp_runtime::metadata::{TestExportStub, Type};
 #[cfg(test)]
 use il2cpp_runtime::test_fakes;
-use il2cpp_runtime::{MetadataApi, RuntimeError, StrongRoot, raw};
+use il2cpp_runtime::{Exports, RuntimeError, StrongRoot, raw};
 use std::{
     ffi::{CStr, c_void},
     ops::Deref,
@@ -96,7 +96,7 @@ fn unsupported(contract: impl Into<String>) -> GameError {
 /// The runtime's metadata exports, with the bindings this game's queries cache beside them.
 #[derive(Clone, Copy)]
 pub struct RuntimeAccess {
-    api: MetadataApi,
+    api: Exports,
     caches: Option<&'static Caches>,
 }
 
@@ -142,8 +142,8 @@ impl RuntimeAccess {
 }
 
 impl Deref for RuntimeAccess {
-    type Target = MetadataApi;
-    fn deref(&self) -> &MetadataApi {
+    type Target = Exports;
+    fn deref(&self) -> &Exports {
         &self.api
     }
 }
@@ -151,7 +151,7 @@ impl Deref for RuntimeAccess {
 // Tests replace single exports with fakes.
 #[cfg(test)]
 impl std::ops::DerefMut for RuntimeAccess {
-    fn deref_mut(&mut self) -> &mut MetadataApi {
+    fn deref_mut(&mut self) -> &mut Exports {
         &mut self.api
     }
 }
@@ -160,11 +160,11 @@ impl RuntimeAccess {
     /// Resolve the complete metadata/status export table.
     ///
     /// # Safety
-    /// As [`MetadataApi::resolve`].
+    /// As [`Exports::resolve`].
     pub unsafe fn resolve(resolver: impl FnMut(&'static CStr) -> Option<NonNull<c_void>>) -> Result<Self, GameError> {
         Ok(Self {
             // SAFETY: the caller establishes export identity, ABI and lifetime.
-            api: unsafe { MetadataApi::resolve(resolver) }?,
+            api: unsafe { Exports::resolve(resolver) }?,
             // One per resolved runtime, kept for the process: the helper never frees what the game may still reach.
             caches: Some(Box::leak(Box::default())),
         })
@@ -174,7 +174,7 @@ impl RuntimeAccess {
     #[cfg(test)]
     fn test_stubs() -> Self {
         Self {
-            api: MetadataApi::test_stubs(),
+            api: Exports::test_stubs(),
             caches: None,
         }
     }

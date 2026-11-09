@@ -15,5 +15,5 @@ mod thread;
 mod unity;
 
 pub use invoke::{Argument, CheckedMethod, InvocationContext, InvocationOutcome, InvokeError, ReturnValue, Scalar, SignaturePosition, ValueTypeContract};
-pub use metadata::{MetadataApi, MetadataError};
+pub use metadata::{Exports, MetadataError};
 pub use thread::{AttachedThread, RuntimeError, StrongRoot, ThreadContext};

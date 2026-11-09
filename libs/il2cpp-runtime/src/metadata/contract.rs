@@ -2,7 +2,7 @@
 //! field's offset, a destination's exact type, and the bounded window of code to read. Nothing here calls a managed
 //! method or writes.
 
-use super::{Class, MAX_FIELD_OFFSET, MetadataApi, MetadataError, Method, MethodError, MethodQuery, Others, Params, Ptr, Returns, instance_offset, read_value, unsupported};
+use super::{Class, Exports, MAX_FIELD_OFFSET, MetadataError, Method, MethodError, MethodQuery, Others, Params, Ptr, Returns, instance_offset, read_value, unsupported};
 use crate::raw;
 use std::{
     ffi::{CStr, c_void},
@@ -27,7 +27,7 @@ impl MethodSpec {
     }
 }
 
-impl MetadataApi {
+impl Exports {
     /// The one method of `owner` with exactly `spec`'s signature: nongeneric, not P/Invoke or abstract, with its return
     /// type. The complete parameter signature is resolved before the selected overload's ABI and uniqueness are checked.
     ///

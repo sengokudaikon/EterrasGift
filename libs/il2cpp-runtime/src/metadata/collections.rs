@@ -2,7 +2,7 @@
 //! lists and their values. Singleton getters and formatter bodies are not invoked. Every function here also needs
 //! exclusive access to the object graph it reads, for the length of the call.
 
-use super::{Class, MetadataApi, MetadataError, Primitive, array_data, copy_values, metadata_text, read_value, target, unsupported};
+use super::{Class, Exports, MetadataError, Primitive, array_data, copy_values, metadata_text, read_value, target, unsupported};
 use crate::{AttachedThread, StrongRoot, raw};
 use std::{ffi::CStr, ptr::NonNull};
 
@@ -14,7 +14,7 @@ fn collection_count(count: i32, capacity: u32, maximum: u32) -> Result<usize, Me
     Ok(count as usize)
 }
 
-impl MetadataApi {
+impl Exports {
     // All child references remain in rooted parents until their own roots have been acquired; Unity native object
     // lifetime is checked separately.
     /// The class `name` nested directly in `parent`. Stricter than [`Self::nested_class`]: a null name, two classes of
@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(unsafe { CStr::from_ptr(name) }, c"Byte");
         token(BYTE_CLASS)
     }
-    fn fixture() -> (MetadataApi, ThreadContext) {
+    fn fixture() -> (Exports, ThreadContext) {
         let context = test_fakes::thread();
         ARRAY.set(0);
         RANK.set(1);
@@ -345,7 +345,7 @@ mod tests {
         IS_ENUM.set(true);
         BASE_CLASS.set(BYTE_CLASS);
         ENUM_BASE_CALLS.set(0);
-        let mut access = MetadataApi::test_stubs();
+        let mut access = Exports::test_stubs();
         access.object_class = object_class;
         access.class_value = class_value;
         access.class_rank = rank;

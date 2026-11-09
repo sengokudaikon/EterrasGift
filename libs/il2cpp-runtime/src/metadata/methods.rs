@@ -1,9 +1,9 @@
-//! Finding a class's methods: one lookup ([`MetadataApi::find_method`]) that takes the method a [`MethodQuery`] names
+//! Finding a class's methods: one lookup ([`Exports::find_method`]) that takes the method a [`MethodQuery`] names
 //! and checks it against the query's contract, and the walk to the nearest class that declares a method
-//! ([`MetadataApi::nearest_declaring`]). Every finder here and in callers is a query over these two. Nothing here
+//! ([`Exports::nearest_declaring`]). Every finder here and in callers is a query over these two. Nothing here
 //! calls a managed method.
 
-use super::{Class, MetadataApi, MetadataError, Method, Type, metadata_text, unsupported};
+use super::{Class, Exports, MetadataError, Method, Type, metadata_text, unsupported};
 use crate::raw;
 use std::{ffi::CStr, ptr::NonNull};
 
@@ -120,7 +120,7 @@ impl From<MetadataError> for MethodError {
     }
 }
 
-impl MetadataApi {
+impl Exports {
     /// The one method of `owner` that `query` names, checked against its contract. Only the exports the query needs
     /// are called.
     ///

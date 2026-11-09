@@ -135,8 +135,8 @@ unsafe extern "C-unwind" fn declaring(method: Method) -> Class {
     fake(method).declared_by.unwrap_or_else(|| LISTING.get()) as Class
 }
 
-fn api() -> MetadataApi {
-    let mut api = MetadataApi::test_stubs();
+fn api() -> Exports {
+    let mut api = Exports::test_stubs();
     api.class_methods = methods;
     api.method_name = name;
     api.method_params = count;

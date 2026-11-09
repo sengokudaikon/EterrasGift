@@ -1,7 +1,7 @@
 //! Typed copies of fields of rooted objects, each after its type, owner and storage are checked. Nothing here calls a
 //! managed method or writes.
 
-use super::{ARRAY_HEADER, Class, MetadataApi, MetadataError, Primitive, Ptr, copy_values, metadata_text, target, unsupported};
+use super::{ARRAY_HEADER, Class, Exports, MetadataError, Primitive, Ptr, copy_values, metadata_text, target, unsupported};
 use crate::{AttachedThread, StrongRoot, raw};
 use std::{ffi::CStr, ptr::NonNull};
 
@@ -16,7 +16,7 @@ fn decode_text(units: &[u16], maximum: usize) -> Result<String, MetadataError> {
     Ok(text)
 }
 
-impl MetadataApi {
+impl Exports {
     /// Copy one primitive instance field of a rooted `owner`, looked up on `owner` rather than on the object's own class.
     /// `label` begins any contract failure's text.
     ///
@@ -256,7 +256,7 @@ impl MetadataApi {
 }
 
 /// Field reads by resolved field, for objects read again and again in one call.
-impl MetadataApi {
+impl Exports {
     /// `owner.name`, declared on `owner` itself (not inherited, not shadowed) with exactly the type `expected`, static
     /// or instance as `is_static` says, and with a real offset.
     ///
@@ -489,7 +489,7 @@ mod tests {
         }
     }
 
-    fn fixture() -> (MetadataApi, ThreadContext) {
+    fn fixture() -> (Exports, ThreadContext) {
         let context = test_fakes::thread();
         FIELD_CLASS.set(CHILD_CLASS);
         FIELD_READS.set(0);
@@ -507,7 +507,7 @@ mod tests {
         GLOBAL_ENUM_LOOKUPS.set(0);
         VALUE_CLASS.set(false);
         STORES.set(0);
-        let mut access = MetadataApi::test_stubs();
+        let mut access = Exports::test_stubs();
         access.corlib = corlib;
         access.class_from_name = class_from_name;
         access.object_class = object_class;
@@ -777,7 +777,7 @@ mod boxing_tests {
         BOXES.set(BOXES.get() + 1);
         token(CHILD)
     }
-    fn fixture() -> (MetadataApi, ThreadContext) {
+    fn fixture() -> (Exports, ThreadContext) {
         let context = test_fakes::thread();
         BOXES.set(0);
         BYREF.set(false);
@@ -787,7 +787,7 @@ mod boxing_tests {
         CCTOR.set(false);
         WRONG_BOX.set(false);
         CHILD_METADATA.set(0);
-        let mut access = MetadataApi::test_stubs();
+        let mut access = Exports::test_stubs();
         access.object_class = object_class;
         access.assignable = assignable;
         access.class_field = field;

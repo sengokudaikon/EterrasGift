@@ -158,8 +158,8 @@ macro_rules! exports {
         /// The metadata, allocation and status exports. Resolution alone invokes neither managed bodies nor class
         /// initializers. Each field is the named export; calling one is the caller's unsafe contract.
         #[derive(Clone, Copy)]
-        pub struct MetadataApi { $(pub $field: $signature),+, cache: Option<&'static FieldCache> }
-        impl MetadataApi {
+        pub struct Exports { $(pub $field: $signature),+, cache: Option<&'static FieldCache> }
+        impl Exports {
             /// Every export a stub that panics when reached, and no cache: a test sets the exports it expects.
             #[cfg(any(test, feature = "test-stubs"))]
             pub fn test_stubs() -> Self { Self { $($field: <$signature as TestExportStub>::test_stub()),+, cache: None } }
@@ -262,7 +262,7 @@ exports! {
     assignable: "il2cpp_class_is_assignable_from" => raw::ClassIsAssignableFrom,
 }
 
-impl MetadataApi {
+impl Exports {
     /// The invocation table for this runtime: the exports this table already holds, plus the seven only invocation
     /// uses, resolved without calling any of them.
     ///
@@ -787,7 +787,7 @@ mod tests {
             LOOKUPS.with(|count| count.set(count.get() + 1));
             NonNull::<u8>::dangling().as_ptr().cast()
         }
-        let mut access = MetadataApi::test_stubs();
+        let mut access = Exports::test_stubs();
         access.class_field = lookup;
         access.cache = Some(Box::leak(Box::new(FieldCache::default())));
         let (mut first, mut second) = (0_u8, 0_u8);
@@ -853,7 +853,7 @@ mod tests {
                 drop(CString::from_raw(value.cast()));
             }
         }
-        let mut access = MetadataApi::test_stubs();
+        let mut access = Exports::test_stubs();
         access.class_methods = methods;
         access.method_name = name;
         access.method_params = count;
@@ -874,7 +874,7 @@ mod tests {
     #[test]
     fn resolution_fails_before_invoking_any_missing_export() {
         // SAFETY: no address is returned, so no ABI/lifetime promises are exercised.
-        let result = unsafe { MetadataApi::resolve(|_| None) };
+        let result = unsafe { Exports::resolve(|_| None) };
         assert!(matches!(result, Err(MetadataError::MissingExport(raw::MissingExport(name))) if name == c"il2cpp_domain_get"));
     }
     #[test]

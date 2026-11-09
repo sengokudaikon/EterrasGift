@@ -216,7 +216,7 @@ pub type ClassEnumBasetype = unsafe extern "C-unwind" fn(*mut Class) -> *const T
 pub type ClassValueSize = unsafe extern "C-unwind" fn(*mut Class, *mut u32) -> i32;
 
 /// The exports a checked invocation needs, from the Unity 6000.4 public header. Separate from attachment APIs; built by
-/// [`crate::metadata::MetadataApi::invocation`], which shares the metadata table's exports and resolves only the rest.
+/// [`crate::metadata::Exports::invocation`], which shares the metadata table's exports and resolves only the rest.
 #[derive(Clone, Copy)]
 pub struct InvocationApi {
     pub runtime_invoke: RuntimeInvoke,
