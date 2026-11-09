@@ -1,11 +1,10 @@
-//! The Slint UI: the `.slint` sources under `ui/`, compiled by `build.rs`, and the Rust that puts the app's state behind
-//! them: navigation, the pages rewritten on `spiderland` (`pages`), Eterra's decorations, and the Windows settings the design
+//! The Slint UI: the Rust that puts the app's state behind the views of `eg_ui_view`, re-exported here, which compile on their
+//! own: navigation, the pages rewritten on `spiderland` (`pages`), Eterra's decorations, and the Windows settings the design
 //! reacts to.
 
-// Deny, not forbid: the code Slint generates allows unsafe for its vtables, and forbid refuses that.
-#![deny(unsafe_code)]
+#![forbid(unsafe_code)]
 
-slint::include_modules!();
+pub use eg_ui_view::*;
 
 pub mod decorations;
 pub mod pages;

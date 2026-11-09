@@ -43,7 +43,7 @@ GPL-3.0-only (`LICENSE`).
 
 - Slint is used under the GPLv3.
 - Cinzel and Noto Sans are under the SIL Open Font License 1.1, and Fluent System Icons under the MIT License. Their
-  licences are in `crates/ui/ui/fonts/`.
-- Eterra's band (`crates/ui/ui/images/`) is the project's own art, not game assets.
+  licences are in `crates/ui-view/ui/fonts/`.
+- Eterra's band (`crates/ui-view/ui/images/`) is the project's own art, not game assets.
 
 The app's About section, at the end of Settings, says the same.

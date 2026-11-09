@@ -57,11 +57,11 @@ run = ["cargo lint", "cargo lint-libs", "cargo fmt --all --check", "cargo xtask 
 
 [tasks."slint:check"]
 description = "Fast compile check of a .slint file (default: app.slint)"
-run = "slint-viewer --check {{arg(name='file', default='crates/ui/ui/app.slint')}}"
+run = "slint-viewer --check {{arg(name='file', default='crates/ui-view/ui/app.slint')}}"
 
 [tasks.preview]
 description = "Live preview of a .slint file, reloading on save (default: app.slint)"
-run = "slint-viewer --auto-reload {{arg(name='file', default='crates/ui/ui/app.slint')}}"
+run = "slint-viewer --auto-reload {{arg(name='file', default='crates/ui-view/ui/app.slint')}}"
 
 [tasks.live]
 description = "The app with Slint's MCP server on 127.0.0.1:9316, headless. Real game host: never click Play"
@@ -76,7 +76,7 @@ env = { SLINT_EMIT_DEBUG_INFO = "1", SLINT_MCP_PORT = "9316" }
 
 [tasks."live:viewer"]
 description = "slint-viewer with its MCP server on 127.0.0.1:9315 (opens a window; no Rust logic)"
-run = "slint-viewer {{arg(name='file', default='crates/ui/ui/app.slint')}}"
+run = "slint-viewer {{arg(name='file', default='crates/ui-view/ui/app.slint')}}"
 env = { SLINT_MCP_PORT = "9315" }
 
 [tasks."game-files:install"]

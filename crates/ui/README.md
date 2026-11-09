@@ -1,7 +1,9 @@
 # eg-ui
 
-The app's view: hosts over the pages' features, and the Slint files they show. Slint is pinned to `=1.18.1` and used under
-the GPLv3, as the app is; Settings' About section says "Made with Slint" and names the bundled fonts' and icons' licences.
+The app's view: hosts over the pages' features, and the Slint views they show. The views are `eg-ui-view`
+(`crates/ui-view/ui`), a crate of their own, so a change to the Rust here doesn't compile them again; this crate re-exports
+what they generate. Slint is pinned to `=1.18.1` and used under the GPLv3, as the app is; Settings' About section says
+"Made with Slint" and names the bundled fonts' and icons' licences.
 
 ## A page's view
 
@@ -50,7 +52,7 @@ How the app's words read.
 
 ## Slint quirks met here (1.18.1)
 
-Each of these was hit and worked around in `crates/ui/ui`.
+Each of these was hit and worked around in `crates/ui-view/ui`.
 
 - **Inside a component that has a `max` property, `max(...)` fails** with "The expression is not a function". Use
   `Math.max`.
@@ -108,7 +110,7 @@ Each of these was hit and worked around in `crates/ui/ui`.
 - **`FlexboxLayout` reports a taller preferred height than it lays out**, so the forge's status strip measures its
   one-line width separately.
 - **Transforms (`transform-scale-*`, rotation) are not available in the software renderer**, so captures can't show
-  them; an elliptical gradient is an SVG instead (`ui/gradients/`).
+  them; an elliptical gradient is an SVG instead (`crates/ui-view/ui/gradients/`).
 - **Slint surfaces no window activation**, so the Windows settings it can't read itself ("Animation effects", high
   contrast) are polled every 2 s (`eg_ui::follow_system_settings`, started by the app and not by captures).
 - **`slint-viewer` can't run headless with MCP.** `SLINT_BACKEND=headless`

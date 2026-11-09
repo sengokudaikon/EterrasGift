@@ -45,6 +45,7 @@ unity-files = { path = "libs/unity-files" }
 win-platform = { path = "libs/win-platform" }
 eg-companion = { path = "crates/companion" }
 eg-ui = { path = "crates/ui" }
+eg-ui-view = { path = "crates/ui-view" }
 eg-trainer = { path = "crates/trainer" }
 eg-trainer-screens = { path = "crates/trainer-screens" }
 

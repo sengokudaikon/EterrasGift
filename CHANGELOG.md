@@ -5,6 +5,7 @@ code and its tests, and what is still to build in [the helper's backlog](crates/
 
 ## 2026-11-09
 
+- Build: an edit to the UI's Rust no longer compiles the Slint views again (about 1 s, from 7): they are the new eg-ui-view, so a translation is now `lang/<language>/LC_MESSAGES/eg-ui-view.po`.
 - Build: an edit to Settings, Logs or a trainer page no longer rebuilds the trainer's worker: they are in eg-companion and the new eg-trainer-screens.
 - Settings: Restart still works after the game data service stopped on a fault, as after the mod library stopped.
 - Mods: a fault while reading mod projects now fails the app's exit code.

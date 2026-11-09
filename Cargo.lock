@@ -1444,6 +1444,7 @@ dependencies = [
  "eg-core",
  "eg-trainer",
  "eg-trainer-screens",
+ "eg-ui-view",
  "file-ops",
  "image",
  "jiff",
@@ -1453,7 +1454,6 @@ dependencies = [
  "rfd",
  "serde_json",
  "slint",
- "slint-build",
  "spiderland",
  "spiderland-slint",
  "strum",
@@ -1462,6 +1462,15 @@ dependencies = [
  "tempfile",
  "tokio",
  "win-platform",
+]
+
+[[package]]
+name = "eg-ui-view"
+version = "0.1.0"
+dependencies = [
+ "phrases",
+ "slint",
+ "slint-build",
 ]
 
 [[package]]

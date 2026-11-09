@@ -19,7 +19,7 @@ fn main() -> ExitCode {
         project: "Eterra's Gift",
         command: "cargo xtask phrases",
         sources: &["crates"],
-        views: "crates/ui/ui",
+        views: "crates/ui-view/ui",
     };
     let result = match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         ["phrases"] => template

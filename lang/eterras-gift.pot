@@ -195,7 +195,7 @@ msgstr ""
 msgid "Building {name}…"
 msgstr ""
 
-#: crates/companion/src/mods/feature.rs crates/ui/ui/strings/mods.slint
+#: crates/companion/src/mods/feature.rs crates/ui-view/ui/strings/mods.slint
 msgid "Building…"
 msgstr ""
 
@@ -251,7 +251,7 @@ msgstr ""
 msgid "Open MelonLoader's log from the last game with mods"
 msgstr ""
 
-#: crates/companion/src/mods/feature.rs crates/ui/ui/strings/mods.slint
+#: crates/companion/src/mods/feature.rs crates/ui-view/ui/strings/mods.slint
 msgid "Open the Mods folder"
 msgstr ""
 
@@ -1259,7 +1259,7 @@ msgstr ""
 msgid "Changes ({n})"
 msgstr ""
 
-#: crates/trainer-screens/src/forge/editor/ledger.rs crates/ui/ui/strings/forge.slint
+#: crates/trainer-screens/src/forge/editor/ledger.rs crates/ui-view/ui/strings/forge.slint
 msgid "Discard draft"
 msgid_plural "Discard {n} drafts"
 msgstr[0] ""
@@ -1383,7 +1383,7 @@ msgstr ""
 msgid "\"{name}\" matches the item already."
 msgstr ""
 
-#: crates/trainer-screens/src/forge/editor/templates.rs crates/ui/ui/strings/forge.slint
+#: crates/trainer-screens/src/forge/editor/templates.rs crates/ui-view/ui/strings/forge.slint
 msgid "Affixes"
 msgstr ""
 
@@ -1461,7 +1461,7 @@ msgstr ""
 msgid "Wait for the write in progress to finish, then draft the template."
 msgstr ""
 
-#: crates/trainer-screens/src/forge/editor/templates.rs crates/ui/ui/strings/forge.slint
+#: crates/trainer-screens/src/forge/editor/templates.rs crates/ui-view/ui/strings/forge.slint
 msgid "Whole item"
 msgstr ""
 
@@ -1477,7 +1477,7 @@ msgstr ""
 msgid "A legendary's legendary potential is fixed."
 msgstr ""
 
-#: crates/trainer-screens/src/forge/editor/tr.rs crates/ui/ui/strings/forge.slint
+#: crates/trainer-screens/src/forge/editor/tr.rs crates/ui-view/ui/strings/forge.slint
 msgid "Add affix"
 msgstr ""
 
@@ -1493,7 +1493,7 @@ msgstr ""
 msgid "Compatibility couldn't be confirmed."
 msgstr ""
 
-#: crates/trainer-screens/src/forge/editor/tr.rs crates/ui/ui/strings/forge.slint
+#: crates/trainer-screens/src/forge/editor/tr.rs crates/ui-view/ui/strings/forge.slint
 msgid "Confirmed"
 msgstr ""
 
@@ -1517,7 +1517,7 @@ msgstr ""
 msgid "Forging potential"
 msgstr ""
 
-#: crates/trainer-screens/src/forge/editor/tr.rs crates/ui/ui/strings/forge.slint
+#: crates/trainer-screens/src/forge/editor/tr.rs crates/ui-view/ui/strings/forge.slint
 msgid "Implicits"
 msgstr ""
 
@@ -1533,7 +1533,7 @@ msgstr ""
 msgid "Legendary potential"
 msgstr ""
 
-#: crates/trainer-screens/src/forge/editor/tr.rs crates/ui/ui/strings/forge.slint
+#: crates/trainer-screens/src/forge/editor/tr.rs crates/ui-view/ui/strings/forge.slint
 msgid "Level requirement"
 msgstr ""
 
@@ -1601,11 +1601,11 @@ msgstr ""
 msgid "T{tier}"
 msgstr ""
 
-#: crates/trainer-screens/src/forge/editor/tr.rs crates/ui/ui/strings/mods.slint
+#: crates/trainer-screens/src/forge/editor/tr.rs crates/ui-view/ui/strings/mods.slint
 msgid "Undo"
 msgstr ""
 
-#: crates/trainer-screens/src/forge/editor/tr.rs crates/trainer-screens/src/forge/picker.rs crates/ui/ui/strings/forge.slint
+#: crates/trainer-screens/src/forge/editor/tr.rs crates/trainer-screens/src/forge/picker.rs crates/ui-view/ui/strings/forge.slint
 msgid "Unique modifiers"
 msgstr ""
 
@@ -2198,7 +2198,7 @@ msgstr ""
 msgid "Potion"
 msgstr ""
 
-#: crates/trainer-screens/src/forge/picker.rs crates/ui/ui/strings/forge.slint
+#: crates/trainer-screens/src/forge/picker.rs crates/ui-view/ui/strings/forge.slint
 msgid "Prefix or suffix"
 msgstr ""
 
@@ -2324,7 +2324,7 @@ msgstr ""
 msgid "Unnamed item"
 msgstr ""
 
-#: crates/trainer-screens/src/forge/project.rs crates/trainer-screens/src/forge/rows.rs crates/ui/ui/strings/forge.slint
+#: crates/trainer-screens/src/forge/project.rs crates/trainer-screens/src/forge/rows.rs crates/ui-view/ui/strings/forge.slint
 msgid "Value"
 msgstr ""
 
@@ -2420,7 +2420,7 @@ msgstr ""
 msgid "Sets only the {flag} flag. The game's own {name} effects are not applied."
 msgstr ""
 
-#: crates/trainer-screens/src/forge/rows.rs crates/ui/ui/strings/forge.slint
+#: crates/trainer-screens/src/forge/rows.rs crates/ui-view/ui/strings/forge.slint
 msgid "The game changed this affix after you drafted it."
 msgstr ""
 
@@ -2494,7 +2494,7 @@ msgstr ""
 msgid "Not changed: {details}"
 msgstr ""
 
-#: crates/trainer-screens/src/pages.rs crates/ui/ui/strings/trainer.slint
+#: crates/trainer-screens/src/pages.rs crates/ui-view/ui/strings/trainer.slint
 msgid "Not read yet"
 msgstr ""
 
@@ -2631,15 +2631,15 @@ msgstr ""
 msgid "Manual"
 msgstr ""
 
-#: crates/trainer-screens/src/settings.rs crates/ui/ui/strings/shell.slint
+#: crates/trainer-screens/src/settings.rs crates/ui-view/ui/strings/shell.slint
 msgid "Off"
 msgstr ""
 
-#: crates/trainer-screens/src/settings.rs crates/ui/ui/strings/shell.slint
+#: crates/trainer-screens/src/settings.rs crates/ui-view/ui/strings/shell.slint
 msgid "On"
 msgstr ""
 
-#: crates/trainer-screens/src/settings.rs crates/ui/ui/strings/trainer.slint
+#: crates/trainer-screens/src/settings.rs crates/ui-view/ui/strings/trainer.slint
 msgid "Read again"
 msgstr ""
 
@@ -3411,7 +3411,7 @@ msgstr ""
 msgid "Rank, favor and reputation"
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/ui/ui/strings/forge.slint
+#: crates/trainer/src/features/registry.rs crates/ui-view/ui/strings/forge.slint
 msgid "Rarity"
 msgstr ""
 
@@ -3736,24 +3736,728 @@ msgstr ""
 msgid "Suffix"
 msgstr ""
 
-#: crates/trainer/src/item/edit.rs crates/ui/ui/strings/forge.slint
+#: crates/trainer/src/item/edit.rs crates/ui-view/ui/strings/forge.slint
 msgctxt "seal"
 msgid "Corrupted"
 msgstr ""
 
-#: crates/trainer/src/item/edit.rs crates/ui/ui/strings/forge.slint
+#: crates/trainer/src/item/edit.rs crates/ui-view/ui/strings/forge.slint
 msgctxt "seal"
 msgid "Normal"
 msgstr ""
 
-#: crates/trainer/src/item/edit.rs crates/ui/ui/strings/forge.slint
+#: crates/trainer/src/item/edit.rs crates/ui-view/ui/strings/forge.slint
 msgctxt "seal"
 msgid "Primordial"
 msgstr ""
 
-#: crates/trainer/src/item/edit.rs crates/ui/ui/strings/forge.slint
+#: crates/trainer/src/item/edit.rs crates/ui-view/ui/strings/forge.slint
 msgctxt "seal"
 msgid "Sealed"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "A unique with affixes becomes legendary, and set items hold no affixes. Rolls, legendary potential and Weaver's Will carry over."
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "About implicits"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "About incompatible affixes"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint crates/ui-view/ui/strings/trainer.slint
+msgid "About {}"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Affix"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Affix kind"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Affixes only"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Allow incompatible affixes"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Applied"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Base: {}"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Bases"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Cancel"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Change seal state"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Change tier"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Changed in game. Discard and redo."
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Class"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Clear filters"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Clear search"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint crates/ui-view/ui/strings/trainer.slint
+msgid "Delete"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Delete \"{}\""
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Delete \"{}\"; it can't be brought back"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Delete this template for good?"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint crates/ui-view/ui/strings/trainer.slint
+msgid "Delete…"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Discard every draft on this item"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Discard the draft for {}"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Draft"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Draft \"{}\" onto the item"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Draft a saved template onto this item, or save this item as one"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Draft: {}"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Filters"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Item: {}"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint crates/ui-view/ui/strings/trainer.slint
+msgid "Keep"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Keep \"{}\""
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Keep affix"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Keep the current draft (Esc)"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "List incompatible affixes"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "List unique modifiers too"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Lists affixes this item can't roll. Writing one needs \"I know what I'm doing\"."
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Lists bases the current affixes can't roll on. Writing one needs \"I know what I'm doing\"."
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Max rolls"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Max tiers"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Name or ID"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Name, unique, category or ID"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "No templates yet. Save this item's affixes, or the whole item, below."
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "No unique or set item matches."
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Nothing applied to this item yet."
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Range"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Rarity: {}"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Read-only"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Remove affix"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Remove filter: {}"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Replace"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Replace affix…"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Replace {}"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Replacement affixes"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Save"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Save the item as Apply would leave it under this name"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Save the item as Apply would leave it, in place of \"{}\""
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Saving replaces \"{}\"."
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Seal"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Seal state for {}"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Search affixes"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Search uniques and set items"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Show draft for {}"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Show or hide the changes"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Show or hide the filters"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Show this draft"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Slot"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Source"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Stale draft"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Stat tags"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Template name"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Templates"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "The game changed these rolls after you drafted them."
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "The game changed this roll after you drafted it."
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "These lines share one roll in the game, so changing one changes the other."
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Tier"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Tier for {}"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Tiers"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "To be added"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "To be removed"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Uniques and set items"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "What to save"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "Write the drafts to the game (Ctrl+S)"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgid "in game"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint crates/ui-view/ui/strings/mods.slint
+msgctxt "key"
+msgid "Delete"
+msgstr ""
+
+#: crates/ui-view/ui/strings/forge.slint
+msgctxt "verb"
+msgid "Draft"
+msgstr ""
+
+#: crates/ui-view/ui/strings/home.slint
+msgid "Companion tools for Last Epoch."
+msgstr ""
+
+#: crates/ui-view/ui/strings/home.slint crates/ui-view/ui/strings/logs.slint
+msgid "Last Epoch"
+msgstr ""
+
+#: crates/ui-view/ui/strings/home.slint
+msgid "Play offline"
+msgstr ""
+
+#: crates/ui-view/ui/strings/home.slint crates/ui-view/ui/strings/mods.slint
+msgid "Play offline with mods"
+msgstr ""
+
+#: crates/ui-view/ui/strings/home.slint
+msgid "Play online"
+msgstr ""
+
+#: crates/ui-view/ui/strings/logs.slint
+msgid "Connection details, fault reports and the game's own log."
+msgstr ""
+
+#: crates/ui-view/ui/strings/logs.slint
+msgid "Copy"
+msgstr ""
+
+#: crates/ui-view/ui/strings/logs.slint
+msgid "Copy the displayed log"
+msgstr ""
+
+#: crates/ui-view/ui/strings/logs.slint
+msgid "Copy the displayed log, which names your characters"
+msgstr ""
+
+#: crates/ui-view/ui/strings/logs.slint crates/ui-view/ui/strings/shell.slint
+msgid "Eterra's Gift"
+msgstr ""
+
+#: crates/ui-view/ui/strings/logs.slint
+msgid "Log source"
+msgstr ""
+
+#: crates/ui-view/ui/strings/logs.slint
+msgid "Reading logs…"
+msgstr ""
+
+#: crates/ui-view/ui/strings/logs.slint
+msgid "Refresh"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Add a mod from its DLL file"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Add a mod to see its details and settings here."
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Add a mod's DLL, or copy it into the Mods folder."
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Add mod"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Build and install"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Build and install it to turn it on"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Build it from its project and install it, turned on"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Changed since the last game with mods"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Go back to what the last game with mods used"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Install the latest build from its project"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Installed"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Installed mods"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "It stays installed either way"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Last game with mods"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Load {}"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Mods from sources, not installed"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Mods load only when you play offline with mods."
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "No mods yet"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Not installed"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Nothing logged."
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Open folder"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Open log"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Remove"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Remove it (Del). Its settings are kept."
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Restore the removed mod (Ctrl+Z)"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Revert {n} change"
+msgid_plural "Revert {n} changes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Select a mod to see its details and settings."
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Show in folder"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Show its DLL in File Explorer"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Space"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Start offline with the mods that are on"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "These lines are from an earlier build."
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Turn off"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Turn on"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Turn on or off (Space)"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "Version"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "{} from sources"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "{} of {} on"
+msgstr ""
+
+#: crates/ui-view/ui/strings/mods.slint
+msgid "×{}"
+msgstr ""
+
+#: crates/ui-view/ui/strings/settings.slint
+msgid "About"
+msgstr ""
+
+#: crates/ui-view/ui/strings/settings.slint
+msgid "Browse…"
+msgstr ""
+
+#: crates/ui-view/ui/strings/settings.slint
+msgid "Cinzel and Noto Sans are under the SIL Open Font License 1.1."
+msgstr ""
+
+#: crates/ui-view/ui/strings/settings.slint
+msgid "Eterra's Gift {}"
+msgstr ""
+
+#: crates/ui-view/ui/strings/settings.slint
+msgid "Fluent System Icons are under the MIT License."
+msgstr ""
+
+#: crates/ui-view/ui/strings/settings.slint
+msgid "Free software under the GNU General Public License, version 3."
+msgstr ""
+
+#: crates/ui-view/ui/strings/settings.slint
+msgid "Locations"
+msgstr ""
+
+#: crates/ui-view/ui/strings/settings.slint
+msgid "Made with Slint."
+msgstr ""
+
+#: crates/ui-view/ui/strings/settings.slint
+msgid "Restart Eterra's Gift to apply the saved changes"
+msgstr ""
+
+#: crates/ui-view/ui/strings/settings.slint
+msgid "Restart now"
+msgstr ""
+
+#: crates/ui-view/ui/strings/settings.slint
+msgid "Retry save"
+msgstr ""
+
+#: crates/ui-view/ui/strings/settings.slint
+msgid "Save locations"
+msgstr ""
+
+#: crates/ui-view/ui/strings/settings.slint
+msgid "Save the locations above"
+msgstr ""
+
+#: crates/ui-view/ui/strings/settings.slint
+msgid "Source code: {}"
+msgstr ""
+
+#: crates/ui-view/ui/strings/settings.slint
+msgid "Takes effect after restarting Eterra's Gift."
+msgstr ""
+
+#: crates/ui-view/ui/strings/settings.slint
+msgid "Try saving again"
+msgstr ""
+
+#: crates/ui-view/ui/strings/shell.slint
+msgid "Collapse navigation"
+msgstr ""
+
+#: crates/ui-view/ui/strings/shell.slint
+msgid "Expand navigation"
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "Delete this profile"
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "Delete {0}'s profile? Next time {0} enters play, everything starts off."
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "Delete {}'s profile? Nothing changes in the game until this session ends."
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "Discard"
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "Item details unavailable"
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "Item readback unavailable"
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "Keep as profile"
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "Keep these settings for {}"
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "None in your stash."
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "Not ported yet"
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "Place an item in the forge to edit it."
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "Profile"
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "Put every value back to what the game holds"
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "Read the game again"
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "Read the stash again"
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "The forge is empty"
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "Warning"
+msgstr ""
+
+#: crates/ui-view/ui/strings/trainer.slint
+msgid "Write the changes to the game and read them back"
 msgstr ""
 
 #: crates/ui/src/pages/logs.rs
@@ -3793,722 +4497,18 @@ msgstr ""
 msgid "Windows executable"
 msgstr ""
 
-#: crates/ui/src/shell/navigation.rs crates/ui/ui/strings/home.slint
+#: crates/ui/src/shell/navigation.rs crates/ui-view/ui/strings/home.slint
 msgid "Home"
 msgstr ""
 
-#: crates/ui/src/shell/navigation.rs crates/ui/ui/strings/logs.slint
+#: crates/ui/src/shell/navigation.rs crates/ui-view/ui/strings/logs.slint
 msgid "Logs"
 msgstr ""
 
-#: crates/ui/src/shell/navigation.rs crates/ui/ui/strings/mods.slint
+#: crates/ui/src/shell/navigation.rs crates/ui-view/ui/strings/mods.slint
 msgid "Mods"
 msgstr ""
 
-#: crates/ui/src/shell/navigation.rs crates/ui/ui/strings/mods.slint crates/ui/ui/strings/settings.slint
+#: crates/ui/src/shell/navigation.rs crates/ui-view/ui/strings/mods.slint crates/ui-view/ui/strings/settings.slint
 msgid "Settings"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "A unique with affixes becomes legendary, and set items hold no affixes. Rolls, legendary potential and Weaver's Will carry over."
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "About implicits"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "About incompatible affixes"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint crates/ui/ui/strings/trainer.slint
-msgid "About {}"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Affix"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Affix kind"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Affixes only"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Allow incompatible affixes"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Applied"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Base: {}"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Bases"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Cancel"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Change seal state"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Change tier"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Changed in game. Discard and redo."
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Class"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Clear filters"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Clear search"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint crates/ui/ui/strings/trainer.slint
-msgid "Delete"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Delete \"{}\""
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Delete \"{}\"; it can't be brought back"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Delete this template for good?"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint crates/ui/ui/strings/trainer.slint
-msgid "Delete…"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Discard every draft on this item"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Discard the draft for {}"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Draft"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Draft \"{}\" onto the item"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Draft a saved template onto this item, or save this item as one"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Draft: {}"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Filters"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Item: {}"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint crates/ui/ui/strings/trainer.slint
-msgid "Keep"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Keep \"{}\""
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Keep affix"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Keep the current draft (Esc)"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "List incompatible affixes"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "List unique modifiers too"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Lists affixes this item can't roll. Writing one needs \"I know what I'm doing\"."
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Lists bases the current affixes can't roll on. Writing one needs \"I know what I'm doing\"."
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Max rolls"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Max tiers"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Name or ID"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Name, unique, category or ID"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "No templates yet. Save this item's affixes, or the whole item, below."
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "No unique or set item matches."
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Nothing applied to this item yet."
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Range"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Rarity: {}"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Read-only"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Remove affix"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Remove filter: {}"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Replace"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Replace affix…"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Replace {}"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Replacement affixes"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Save"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Save the item as Apply would leave it under this name"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Save the item as Apply would leave it, in place of \"{}\""
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Saving replaces \"{}\"."
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Seal"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Seal state for {}"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Search affixes"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Search uniques and set items"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Show draft for {}"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Show or hide the changes"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Show or hide the filters"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Show this draft"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Slot"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Source"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Stale draft"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Stat tags"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Template name"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Templates"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "The game changed these rolls after you drafted them."
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "The game changed this roll after you drafted it."
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "These lines share one roll in the game, so changing one changes the other."
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Tier"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Tier for {}"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Tiers"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "To be added"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "To be removed"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Uniques and set items"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "What to save"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Write the drafts to the game (Ctrl+S)"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "in game"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint crates/ui/ui/strings/mods.slint
-msgctxt "key"
-msgid "Delete"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgctxt "verb"
-msgid "Draft"
-msgstr ""
-
-#: crates/ui/ui/strings/home.slint
-msgid "Companion tools for Last Epoch."
-msgstr ""
-
-#: crates/ui/ui/strings/home.slint crates/ui/ui/strings/logs.slint
-msgid "Last Epoch"
-msgstr ""
-
-#: crates/ui/ui/strings/home.slint
-msgid "Play offline"
-msgstr ""
-
-#: crates/ui/ui/strings/home.slint crates/ui/ui/strings/mods.slint
-msgid "Play offline with mods"
-msgstr ""
-
-#: crates/ui/ui/strings/home.slint
-msgid "Play online"
-msgstr ""
-
-#: crates/ui/ui/strings/logs.slint
-msgid "Connection details, fault reports and the game's own log."
-msgstr ""
-
-#: crates/ui/ui/strings/logs.slint
-msgid "Copy"
-msgstr ""
-
-#: crates/ui/ui/strings/logs.slint
-msgid "Copy the displayed log"
-msgstr ""
-
-#: crates/ui/ui/strings/logs.slint
-msgid "Copy the displayed log, which names your characters"
-msgstr ""
-
-#: crates/ui/ui/strings/logs.slint crates/ui/ui/strings/shell.slint
-msgid "Eterra's Gift"
-msgstr ""
-
-#: crates/ui/ui/strings/logs.slint
-msgid "Log source"
-msgstr ""
-
-#: crates/ui/ui/strings/logs.slint
-msgid "Reading logs…"
-msgstr ""
-
-#: crates/ui/ui/strings/logs.slint
-msgid "Refresh"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Add a mod from its DLL file"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Add a mod to see its details and settings here."
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Add a mod's DLL, or copy it into the Mods folder."
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Add mod"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Build and install"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Build and install it to turn it on"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Build it from its project and install it, turned on"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Changed since the last game with mods"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Go back to what the last game with mods used"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Install the latest build from its project"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Installed"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Installed mods"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "It stays installed either way"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Last game with mods"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Load {}"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Mods from sources, not installed"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Mods load only when you play offline with mods."
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "No mods yet"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Not installed"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Nothing logged."
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Open folder"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Open log"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Remove"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Remove it (Del). Its settings are kept."
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Restore the removed mod (Ctrl+Z)"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Revert {n} change"
-msgid_plural "Revert {n} changes"
-msgstr[0] ""
-msgstr[1] ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Select a mod to see its details and settings."
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Show in folder"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Show its DLL in File Explorer"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Space"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Start offline with the mods that are on"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "These lines are from an earlier build."
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Turn off"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Turn on"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Turn on or off (Space)"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "Version"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "{} from sources"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "{} of {} on"
-msgstr ""
-
-#: crates/ui/ui/strings/mods.slint
-msgid "×{}"
-msgstr ""
-
-#: crates/ui/ui/strings/settings.slint
-msgid "About"
-msgstr ""
-
-#: crates/ui/ui/strings/settings.slint
-msgid "Browse…"
-msgstr ""
-
-#: crates/ui/ui/strings/settings.slint
-msgid "Cinzel and Noto Sans are under the SIL Open Font License 1.1."
-msgstr ""
-
-#: crates/ui/ui/strings/settings.slint
-msgid "Eterra's Gift {}"
-msgstr ""
-
-#: crates/ui/ui/strings/settings.slint
-msgid "Fluent System Icons are under the MIT License."
-msgstr ""
-
-#: crates/ui/ui/strings/settings.slint
-msgid "Free software under the GNU General Public License, version 3."
-msgstr ""
-
-#: crates/ui/ui/strings/settings.slint
-msgid "Locations"
-msgstr ""
-
-#: crates/ui/ui/strings/settings.slint
-msgid "Made with Slint."
-msgstr ""
-
-#: crates/ui/ui/strings/settings.slint
-msgid "Restart Eterra's Gift to apply the saved changes"
-msgstr ""
-
-#: crates/ui/ui/strings/settings.slint
-msgid "Restart now"
-msgstr ""
-
-#: crates/ui/ui/strings/settings.slint
-msgid "Retry save"
-msgstr ""
-
-#: crates/ui/ui/strings/settings.slint
-msgid "Save locations"
-msgstr ""
-
-#: crates/ui/ui/strings/settings.slint
-msgid "Save the locations above"
-msgstr ""
-
-#: crates/ui/ui/strings/settings.slint
-msgid "Source code: {}"
-msgstr ""
-
-#: crates/ui/ui/strings/settings.slint
-msgid "Takes effect after restarting Eterra's Gift."
-msgstr ""
-
-#: crates/ui/ui/strings/settings.slint
-msgid "Try saving again"
-msgstr ""
-
-#: crates/ui/ui/strings/shell.slint
-msgid "Collapse navigation"
-msgstr ""
-
-#: crates/ui/ui/strings/shell.slint
-msgid "Expand navigation"
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "Delete this profile"
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "Delete {0}'s profile? Next time {0} enters play, everything starts off."
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "Delete {}'s profile? Nothing changes in the game until this session ends."
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "Discard"
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "Item details unavailable"
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "Item readback unavailable"
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "Keep as profile"
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "Keep these settings for {}"
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "None in your stash."
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "Not ported yet"
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "Place an item in the forge to edit it."
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "Profile"
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "Put every value back to what the game holds"
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "Read the game again"
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "Read the stash again"
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "The forge is empty"
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "Warning"
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "Write the changes to the game and read them back"
 msgstr ""

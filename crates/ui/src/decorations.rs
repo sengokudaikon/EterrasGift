@@ -602,7 +602,7 @@ mod tests {
     }
 
     fn keyframes() -> Vec<Image> {
-        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/images");
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../ui-view/ui/images");
         ["band-1-wilted.png", "band-2-budding.png", "band-3-opening.png", "band-4-bloom.png"]
             .iter()
             .map(|name| Image::load_from_path(&folder.join(name)).expect("a keyframe"))
