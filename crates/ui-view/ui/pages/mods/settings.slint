@@ -1,0 +1,132 @@
+// A mod's setting in its pane, and the number box it is typed in.
+
+import { Tokens } from "../../tokens.slint";
+import { FieldFrame } from "../../widgets/text-field.slint";
+import { KeyboardFocus } from "../../globals.slint";
+import { BodyText, LabelText, CaptionText, CaptionTone } from "../../widgets/text.slint";
+import { ToggleSwitch } from "../../widgets/toggle.slint";
+import { FocusRing } from "../../widgets/focus.slint";
+import { ChoiceBox } from "../../widgets/choice-box.slint";
+import { ModSettingRow } from "state.slint";
+
+// Fluent's text box (retinted, compact): the number right-aligned, a muted unit 8px from the right edge after it. Native
+// editing keeps its undo stack. Enter and focus loss commit the draft.
+export component ModsField inherits Rectangle {
+    in property <string> text;
+    in property <string> label;
+    in property <string> unit;
+    in property <bool> enabled: true;
+    callback edited(string);
+    callback committed();
+    // Revert must reach the input even after native editing replaced its binding.
+    changed text => {
+        if (input.text != root.text) { input.text = root.text; }
+    }
+    property <bool> input-focused: input.has-focus;
+    changed input-focused => { if (!root.input-focused) { root.committed(); } }
+    height: Tokens.control-min-height;
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    // A number the cfg can't hold is said under the setting's name; the box keeps its ordinary frame.
+    background: FieldFrame.background(root.enabled, input.has-focus, touch.has-hover);
+    border-color: FieldFrame.border(root.enabled, input.has-focus, touch.has-hover);
+    accessible-role: text-input;
+    accessible-label: root.label;
+    accessible-value: root.text;
+    forward-focus: input;
+    touch := TouchArea {
+        enabled: root.enabled;
+        pointer-event(event) => { if (event.kind == PointerEventKind.down) { KeyboardFocus.visible = false; } }
+        clicked => { input.focus(); }
+    }
+    // [padding | number | padding] [unit | its margin], inside the 1px frame: the unit sits after the text and its padding.
+    HorizontalLayout {
+        padding-left: 1px + Tokens.text-control-padding.left;
+        padding-right: 1px + (root.unit != "" ? Tokens.mod-setting-unit-margin.right : Tokens.text-control-padding.right);
+        spacing: root.unit != "" ? Tokens.text-control-padding.right : 0px;
+        input := TextInput {
+            text: root.text;
+            enabled: root.enabled;
+            single-line: true;
+            color: root.enabled ? Tokens.text-brush : Tokens.text-disabled-brush;
+            selection-background-color: Tokens.accent-pressed-color;
+            selection-foreground-color: Tokens.on-accent-color;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            edited => { root.edited(self.text); }
+            accepted => { root.committed(); }
+        }
+        if root.unit != "": Text { text: root.unit; color: Tokens.text-muted-brush; vertical-alignment: center; horizontal-stretch: 0; }
+    }
+    FocusRing { focused: input.has-focus; }
+}
+
+// [name | control] over the description, which takes the pane's whole width, so a narrow pane keeps it readable.
+export component SettingItem inherits Rectangle {
+    in property <bool> busy;
+    callback setting-toggled(int, bool);
+    callback setting-choice(int, string);
+    callback setting-edited(int, string);
+    callback commit-settings();
+    in property <ModSettingRow> item;
+    in property <int> index;
+    height: layout.preferred-height;
+    layout := VerticalLayout {
+        // The mod's own group, from its settings description: a section label like "Settings", a step from the group before.
+        if root.item.group != "": VerticalLayout {
+            padding-top: root.index == 0 ? Tokens.mod-setting-first-group-margin.top : Tokens.mod-setting-group-margin.top;
+            padding-bottom: Tokens.mod-setting-group-margin.bottom;
+            LabelText { text: root.item.group; }
+        }
+        VerticalLayout {
+            padding-top: Tokens.setting-row-margin.top;
+            padding-bottom: Tokens.setting-row-margin.bottom;
+            spacing: Tokens.space-2;
+            HorizontalLayout {
+                spacing: Tokens.space-12;
+                BodyText { text: root.item.name; color: root.item.drafted ? Tokens.draft-brush : Tokens.text-brush; vertical-alignment: center; horizontal-stretch: 1; }
+                // Switches, choices and boxes keep to the column's right edge, so they line up whatever their content.
+                Rectangle {
+                    horizontal-stretch: 0;
+                    width: root.item.kind == "choice" ? Math.max(Tokens.mod-setting-field-width, Tokens.space-12 + choice-probe.preferred-width + Tokens.combo-box-glyph-column-width) : Tokens.mod-setting-field-width;
+                    height: Tokens.control-min-height;
+                    // The choice box is as wide as the label it shows (Fluent's 12px padding and 32px chevron column), and
+                    // never narrower than a number box.
+                    choice-probe := Text { visible: false; text: root.item.choice-label; }
+                    if root.item.kind == "switch": ToggleSwitch {
+                        x: parent.width - self.preferred-width;
+                        width: self.preferred-width;
+                        checked: root.item.is-on; label: root.item.name; enabled: !root.busy;
+                        toggled(value) => { root.setting-toggled(root.index, value); }
+                    }
+                    if root.item.kind == "choice": ChoiceBox {
+                        choices: root.item.choice-labels; index: root.item.choice-index; fallback-text: root.item.choice-label;
+                        label: root.item.name; enabled: !root.busy;
+                        chosen(choice) => { root.setting-choice(root.index, root.item.choices[choice].value); }
+                    }
+                    if root.item.kind != "switch" && root.item.kind != "choice": ModsField {
+                        text: root.item.value; label: root.item.name; unit: root.item.unit;
+                        enabled: !root.busy;
+                        edited(value) => { root.setting-edited(root.index, value); }
+                        committed => { root.commit-settings(); }
+                    }
+                }
+            }
+            VerticalLayout {
+                spacing: Tokens.space-1;
+                if root.item.description != "": CaptionText { text: root.item.description; }
+                if root.item.drafted: CaptionText { text: root.item.was; }
+                // A number the cfg can't hold is said under its name; the box keeps what was typed.
+                if root.item.error != "": HorizontalLayout {
+                    spacing: Tokens.space-6;
+                    Rectangle {
+                        width: Tokens.icon-size-small;
+                        Image { y: Tokens.icon-baseline-nudge.top; width: Tokens.icon-size-small; height: Tokens.icon-size-small; image-fit: contain; source: Tokens.icon-error; colorize: Tokens.error-brush; }
+                    }
+                    CaptionText { text: root.item.error; tone: CaptionTone.error; horizontal-stretch: 1; }
+                }
+            }
+        }
+    }
+}

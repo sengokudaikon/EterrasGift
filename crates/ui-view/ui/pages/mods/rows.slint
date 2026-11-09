@@ -1,0 +1,50 @@
+// The parts of a mod's row: its check box, and a spot with a tooltip of its own.
+
+import { Tokens } from "../../tokens.slint";
+import { KeyboardFocus } from "../../globals.slint";
+import { TipTrigger } from "../../widgets/focus.slint";
+
+// A row's check box, retinted as Fluent's: brass when on. It is no tab stop of its own; Space on the row does the same.
+export component ModCheck inherits Rectangle {
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    in property <bool> hovered;
+    width: Tokens.icon-size-nav;
+    height: Tokens.icon-size-nav;
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    // Unticked, Fluent's BaseMedium frame, BaseMediumHigh under the pointer; the text's secondary colour in high contrast.
+    border-color: !root.enabled ? Tokens.text-disabled-brush : root.checked ? Tokens.accent-brush
+        : Tokens.high-contrast ? Tokens.text-secondary-brush : root.hovered ? Tokens.fluent-base-medium-high-color : Tokens.fluent-base-medium-color;
+    background: root.checked ? Tokens.accent-brush : Tokens.ground-brush;
+    if root.checked: Path {
+        x: Tokens.space-4;
+        y: Tokens.space-4;
+        width: Tokens.space-12;
+        height: Tokens.space-12;
+        stroke: Tokens.on-accent-brush;
+        stroke-width: Tokens.check-glyph-stroke-width;
+        MoveTo { x: 1; y: 6; }
+        LineTo { x: 4.5; y: 9.5; }
+        LineTo { x: 11; y: 2.5; }
+    }
+}
+
+// A part of a row with a tooltip of its own. Pressing it selects the row, as pressing the rest of the row does; the
+// right button asks for the row's menu at the pointer.
+export component RowSpot inherits TouchArea {
+    in property <string> tip;
+    callback pressed-down();
+    // Where the right button went down, in window coordinates.
+    callback menu-requested(length, length);
+    pointer-event(event) => {
+        if (event.kind == PointerEventKind.down) {
+            KeyboardFocus.visible = false;
+            root.pressed-down();
+            if (event.button == PointerEventButton.right) {
+                root.menu-requested(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
+    }
+    TipTrigger { text: root.tip; hovered: root.has-hover; }
+}

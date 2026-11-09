@@ -1,0 +1,84 @@
+// The Mods page's state, shared with Rust (`crates/ui/src/pages/mods.rs`).
+
+import { MessageTone } from "../common.slint";
+
+export struct ModRow {
+    name: string, version: string, author: string,
+    enabled: bool, drafted: bool, problem: string, problem-label: string,
+}
+
+export struct SourceRow { name: string, version: string, folder: string, project: string, busy: bool }
+
+export struct SettingChoiceRow { value: string, label: string }
+
+export struct ModSettingRow {
+    category: string, key: string, name: string, description: string, group: string,
+    kind: string, value: string, is-on: bool, unit: string, drafted: bool,
+    was: string, error: string, choices: [SettingChoiceRow], choice-label: string, choice-index: int, choice-labels: [string],
+}
+
+export struct ModLogRow { time: string, text: string, error: bool, count: int, count-tip: string }
+
+export global ModsState {
+    in property <[ModRow]> mods;
+    in property <[SourceRow]> sources;
+    in property <[ModSettingRow]> settings;
+    in property <[ModLogRow]> log-lines;
+    in property <int> selected-index: -1;
+    in property <int> installed-count;
+    in property <int> enabled-count;
+    // Until the mods are read once the page says nothing about them, not even that there are none.
+    in property <bool> is-read;
+    in property <bool> can-open-folder: true;
+    in property <bool> can-open-log;
+    // What Open folder and Open log do, or why they can't yet (shown on the disabled buttons too).
+    in property <string> open-folder-tip;
+    in property <string> open-log-tip;
+    in property <string> readiness;
+    // Short facts beside each other under the readiness sentence: the loader, the game, the last game with mods.
+    in property <[string]> readiness-facts;
+    in property <MessageTone> readiness-tone: MessageTone.info;
+    in property <bool> can-play;
+    in property <bool> busy;
+    in property <string> selected-name;
+    // "Version 0.12.1 by sengokudaikon"; the DLL's file name has a line of its own.
+    in property <string> selected-detail;
+    in property <string> selected-file;
+    in property <string> selected-source;
+    in property <string> selected-source-path;
+    in property <string> selected-build-status;
+    in property <string> selected-description;
+    in property <string> selected-problem;
+    in property <string> selected-state;
+    in property <bool> selected-enabled;
+    in property <bool> selected-has-sources;
+    in property <bool> can-install-build;
+    in property <bool> building;
+    in property <string> rebuild-text;
+    in property <string> rebuild-tip;
+    in property <string> install-build-text;
+    in property <bool> previous-build;
+    in property <string> change-message;
+    in property <bool> change-is-draft;
+    in property <MessageTone> change-tone: MessageTone.info;
+    in property <bool> can-undo;
+    in property <int> draft-count;
+    callback select-mod(int);
+    callback toggle-mod(int);
+    callback remove-mod(int);
+    callback reveal-mod(int);
+    callback rebuild(int);
+    callback install-build(int);
+    callback build-source(int);
+    callback setting-edited(int, string);
+    callback setting-toggled(int, bool);
+    callback setting-choice(int, string);
+    callback commit-settings();
+    callback undo-remove();
+    callback revert-drafts();
+    callback refresh();
+    callback add-mod();
+    callback open-folder();
+    callback open-log();
+    callback play();
+}
