@@ -1,4 +1,5 @@
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::Duration;
 use task_runtime::{Refusal, Runtime, Serial};
@@ -101,4 +102,36 @@ fn on_a_runtime_already_closing_nothing_is_accepted() {
     let serial = Serial::start((), &tasks);
     assert_eq!(serial.enqueue(|_| ()).unwrap_err(), Refusal::Closed);
     serial.close();
+}
+
+#[test]
+fn closers_at_once_each_wait_for_what_was_accepted() {
+    let runtime = Runtime::start().unwrap();
+    let serial = Serial::start((), &runtime.tasks());
+    let (open, gate) = mpsc::channel::<()>();
+    let ran = Arc::new(AtomicBool::new(false));
+    let done = ran.clone();
+    let job = serial
+        .enqueue(move |_| {
+            gate.recv_timeout(PATIENCE).unwrap();
+            done.store(true, Ordering::SeqCst);
+        })
+        .unwrap();
+    let closers: Vec<_> = (0..2)
+        .map(|_| {
+            let (serial, ran) = (serial.clone(), ran.clone());
+            thread::spawn(move || {
+                serial.close();
+                ran.load(Ordering::SeqCst)
+            })
+        })
+        .collect();
+    // Both closers are inside close() by now: neither may come back before the job it accepted has run.
+    thread::sleep(Duration::from_millis(100));
+    open.send(()).unwrap();
+    for closer in closers {
+        assert!(closer.join().unwrap(), "a close came back while a job it accepted was still to run");
+    }
+    job.blocking_recv().unwrap();
+    assert!(!runtime.shutdown());
 }

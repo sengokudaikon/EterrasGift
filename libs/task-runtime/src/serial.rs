@@ -3,7 +3,7 @@
 use crate::{CancellationToken, JoinHandle, Tasks};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use tokio::sync::{mpsc, oneshot};
 
 /// Runs one job on the state, and says whether it ended without a panic. It sets `stopped` before its reply ends, so a
@@ -90,13 +90,15 @@ impl<S: Send + 'static> Serial<S> {
         self.inner.stopped.load(Ordering::Acquire)
     }
 
-    /// Refuses new jobs and waits on this thread until every accepted one has run. Calling it again waits the same way.
-    /// Like [`Tasks::block_on`], never call it inside a task on the reactor.
+    /// Refuses new jobs and waits on this thread until every accepted one has run. Calling it again, or from several
+    /// threads at once, waits the same way. Like [`Tasks::block_on`], never call it inside a task on the reactor, nor in
+    /// one of its own jobs.
     pub fn close(&self) {
-        self.inner.jobs.lock().unwrap().take();
-        let worker = self.inner.worker.lock().unwrap().take();
-        if let Some(worker) = worker {
-            let _ = self.inner.tasks.block_on(worker);
+        self.inner.jobs.lock().unwrap_or_else(PoisonError::into_inner).take();
+        // Held across the wait: a closer that comes while another waits finds the worker gone only once it has ended.
+        let mut worker = self.inner.worker.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(handle) = worker.take() {
+            let _ = self.inner.tasks.block_on(handle);
         }
     }
 }

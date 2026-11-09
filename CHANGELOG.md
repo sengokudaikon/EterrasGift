@@ -5,6 +5,7 @@ code and its tests, and what is still to build in [the helper's backlog](crates/
 
 ## 2026-11-09
 
+- UI: closing waits for all the background work it let start, including work started just as it closed, and a second close of a writer waits as the first does.
 - Item Forge: template saves and deletes run one at a time in the order asked, and a save that finishes late leaves a newly typed name alone.
 - Item Forge: closing the window during Apply or Undo waits until every step is sent and read back; a step that fails keeps the window open on the Forge.
 - Mods: closing during a build stops the compiler and closes at once; a build already installing finishes and isn't started again if the close is called off.

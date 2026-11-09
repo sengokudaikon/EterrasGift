@@ -21,8 +21,8 @@ mod serial;
 
 use std::future::Future;
 use std::io;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, PoisonError, RwLock};
 use std::thread;
 use std::time::Duration;
 use tokio::runtime::{Builder, Handle};
@@ -52,12 +52,11 @@ impl Runtime {
         let runtime = Builder::new_current_thread().enable_all().thread_name("background").build()?;
         let tasks = Tasks {
             handle: runtime.handle().clone(),
-            tracker: TaskTracker::new(),
             token: CancellationToken::new(),
-            ancestors: Vec::new(),
+            scopes: vec![Arc::default()],
             faulted: Arc::default(),
         };
-        let (root, tracker) = (tasks.token.clone(), tasks.tracker.clone());
+        let (root, tracker) = (tasks.token.clone(), tasks.own().tracker.clone());
         let reactor = thread::Builder::new().name("reactor".into()).spawn(move || {
             runtime.block_on(async {
                 root.cancelled().await;
@@ -81,7 +80,7 @@ impl Runtime {
     }
 
     fn close(&mut self) {
-        self.tasks.token.cancel();
+        self.tasks.begin_close();
         if let Some(reactor) = self.reactor.take()
             && reactor.join().is_err()
         {
@@ -103,25 +102,30 @@ impl Drop for Runtime {
 #[derive(Clone)]
 pub struct Tasks {
     handle: Handle,
-    tracker: TaskTracker,
     token: CancellationToken,
-    /// The scopes around this one, whose closes also wait for its work.
-    ancestors: Vec<TaskTracker>,
+    /// This scope and the ones around it, outermost first: each one's close waits for this scope's work.
+    scopes: Vec<Arc<Scope>>,
     faulted: Arc<AtomicBool>,
+}
+
+/// One scope's barrier: the work it waits for, and whether its close has begun. Work is admitted while this is read as
+/// open, and counted before the read ends, so a close that marks it closed waits for all work admitted before and refuses
+/// the rest.
+#[derive(Default)]
+struct Scope {
+    tracker: TaskTracker,
+    closed: RwLock<bool>,
 }
 
 impl Tasks {
     /// Runs synchronous work on the blocking pool.
     pub fn spawn_blocking<T: Send + 'static>(&self, work: impl FnOnce() -> T + Send + 'static) -> Result<JoinHandle<T>, Closed> {
-        self.admit()?;
-        let held = self.hold();
-        Ok(self.tracker.spawn_blocking_on(
-            move || {
+        self.admit(|held| {
+            self.handle.spawn_blocking(move || {
                 let _held = held;
                 work()
-            },
-            &self.handle,
-        ))
+            })
+        })
     }
 
     /// Runs a future on the reactor thread. A future that outlives the app's use of it must end when its [`Tasks::token`]
@@ -131,15 +135,12 @@ impl Tasks {
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        self.admit()?;
-        let held = self.hold();
-        Ok(self.tracker.spawn_on(
-            async move {
+        self.admit(|held| {
+            self.handle.spawn(async move {
                 let _held = held;
                 future.await
-            },
-            &self.handle,
-        ))
+            })
+        })
     }
 
     /// Waits on this thread for a future, such as a [`JoinHandle`], for code that is synchronous and already off the UI
@@ -156,23 +157,24 @@ impl Tasks {
 
     /// A part of this scope that closes on its own. Panics in it count as this scope's.
     pub fn scope(&self) -> Tasks {
-        let mut ancestors = self.ancestors.clone();
-        ancestors.push(self.tracker.clone());
+        let mut scopes = self.scopes.clone();
+        scopes.push(Arc::default());
         Tasks {
             handle: self.handle.clone(),
-            tracker: TaskTracker::new(),
             token: self.token.child_token(),
-            ancestors,
+            scopes,
             faulted: self.faulted.clone(),
         }
     }
 
-    /// Cancels this scope's tokens, refuses new work in it and waits for its accepted work to end. Calling it again, or
-    /// from several places at once, waits the same way. Other scopes carry on.
+    /// Cancels this scope's tokens, refuses new work in it and waits for its accepted work to end, including work
+    /// admitted while the close began. Calling it again, or from several places at once, waits the same way. Other
+    /// scopes carry on.
     pub async fn close(&self) {
-        self.token.cancel();
-        self.tracker.close();
-        self.tracker.wait().await;
+        self.begin_close();
+        let tracker = &self.own().tracker;
+        tracker.close();
+        tracker.wait().await;
     }
 
     /// Whether any task in the runtime has panicked. A `JoinHandle` tells whoever awaits it; this also covers work nobody awaited, or
@@ -185,23 +187,38 @@ impl Tasks {
     /// ([`Serial`]'s queued jobs). Only work that is already counted, by the task waiting for it, may come here.
     fn run_accepted<T: Send + 'static>(&self, work: impl FnOnce() -> T + Send + 'static) -> JoinHandle<T> {
         let held = self.hold();
-        self.tracker.spawn_blocking_on(
-            move || {
-                let _held = held;
-                work()
-            },
-            &self.handle,
-        )
+        self.handle.spawn_blocking(move || {
+            let _held = held;
+            work()
+        })
     }
 
-    fn admit(&self) -> Result<(), Closed> {
-        if self.token.is_cancelled() { Err(Closed) } else { Ok(()) }
+    fn own(&self) -> &Scope {
+        self.scopes.last().expect("a runtime's tasks have a scope")
     }
 
+    /// Marks this scope closed, so it admits nothing more, then cancels its tokens. The only way a scope's token is
+    /// cancelled, so a cancelled scope is always a closed one.
+    fn begin_close(&self) {
+        *self.own().closed.write().unwrap_or_else(PoisonError::into_inner) = true;
+        self.token.cancel();
+    }
+
+    /// Starts work with `spawn`, unless this scope or one around it has begun to close. Every scope stays open until the
+    /// work is counted in each, so no close can finish its wait without it.
+    fn admit<R>(&self, spawn: impl FnOnce(Held) -> R) -> Result<R, Closed> {
+        let open: Vec<_> = self.scopes.iter().map(|scope| scope.closed.read().unwrap_or_else(PoisonError::into_inner)).collect();
+        if open.iter().any(|closed| **closed) {
+            return Err(Closed);
+        }
+        Ok(spawn(self.hold()))
+    }
+
+    /// Counts a task in every scope it belongs to, until it ends.
     fn hold(&self) -> Held {
         Held {
             faulted: self.faulted.clone(),
-            _ancestors: self.ancestors.iter().map(TaskTracker::token).collect(),
+            _scopes: self.scopes.iter().map(|scope| scope.tracker.token()).collect(),
         }
     }
 }
@@ -209,7 +226,7 @@ impl Tasks {
 /// Held for a task's whole run: it is dropped by the unwinding when the task panics, before the `JoinHandle` resolves.
 struct Held {
     faulted: Arc<AtomicBool>,
-    _ancestors: Vec<TaskTrackerToken>,
+    _scopes: Vec<TaskTrackerToken>,
 }
 
 impl Drop for Held {

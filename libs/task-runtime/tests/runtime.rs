@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Barrier, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread};
 use std::time::Duration;
@@ -220,4 +220,35 @@ fn dropping_the_runtime_is_the_same_barrier() {
     started.recv_timeout(PATIENCE).unwrap();
     drop(runtime);
     assert!(finished.load(Ordering::Acquire));
+}
+
+#[test]
+fn work_admitted_as_a_scope_closes_is_waited_for_or_refused() {
+    let runtime = Runtime::start().unwrap();
+    let tasks = runtime.tasks();
+    let late = Arc::new(AtomicBool::new(false));
+    for _ in 0..20_000 {
+        let scope = tasks.scope();
+        let closed = Arc::new(AtomicBool::new(false));
+        let start = Arc::new(Barrier::new(2));
+        let spawner = {
+            let (scope, closed, late, start) = (scope.clone(), closed.clone(), late.clone(), start.clone());
+            thread::spawn(move || {
+                start.wait();
+                // Work the close accepted runs before the close comes back, so it never sees the close done.
+                let _ = scope.spawn_blocking(move || {
+                    if closed.load(Ordering::SeqCst) {
+                        late.store(true, Ordering::SeqCst);
+                    }
+                });
+            })
+        };
+        start.wait();
+        tasks.block_on(scope.close());
+        closed.store(true, Ordering::SeqCst);
+        spawner.join().unwrap();
+        assert!(!late.load(Ordering::SeqCst), "work was admitted after its scope's close had come back");
+    }
+    assert!(!runtime.shutdown());
+    assert!(!late.load(Ordering::SeqCst), "work was admitted after its scope's close had come back");
 }
