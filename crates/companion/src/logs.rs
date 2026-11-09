@@ -5,7 +5,7 @@
 //! the view alone, which keeps a text selection in place.
 
 use phrases::phrases;
-use spiderland::{Effects, Feature, Panicked, Tracked};
+use spiderland::{Effects, Error, Feature, Tracked};
 use std::{
     fs::{self, File},
     io::{self, Read, Seek, SeekFrom},
@@ -187,7 +187,7 @@ pub enum Intent {
     Choose(Source),
     Read {
         generation: u64,
-        result: Result<Contents, Panicked>,
+        result: Result<Contents, Error>,
     },
 }
 
@@ -281,7 +281,7 @@ impl Feature for Logs {
                 match result {
                     Ok(contents) => state.contents.set(contents),
                     // What was last read stays up, with word that it may be out of date.
-                    Err(Panicked) => {
+                    Err(_) => {
                         let mut contents = (*state.contents).clone();
                         contents.notice = ReadPanicked.into();
                         state.contents.set(contents);
@@ -450,7 +450,7 @@ mod tests {
             &mut state,
             Intent::Read {
                 generation: again,
-                result: Err(Panicked),
+                result: Err(Error::Panicked),
             },
         );
         assert!(!state.is_loading());

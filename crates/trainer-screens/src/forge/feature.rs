@@ -12,7 +12,7 @@ use eg_trainer::backend::{BackendError, BackendSnapshot, ForgeSnapshot, ForgeSta
 use eg_trainer::definitions::catalog::GameCatalog;
 use eg_trainer::item::template::ItemTemplate;
 use phrases::phrases;
-use spiderland::{Effects, Feature, Panicked, Pulse, Tracked};
+use spiderland::{Effects, Error, Feature, Pulse, Tracked};
 use std::sync::Arc;
 
 phrases! {
@@ -114,20 +114,20 @@ pub enum Intent {
     MaxRolls,
     /// Read the kept templates, so the flyout opens with them.
     ReadTemplates,
-    TemplatesRead(Result<Vec<ItemTemplate>, Panicked>),
+    TemplatesRead(Result<Vec<ItemTemplate>, Error>),
     TemplatesOpened,
     TemplateName(String),
     TemplateSave(String, bool),
     TemplateSaved {
         name: String,
         replaced: Option<String>,
-        result: Result<Result<(), String>, Panicked>,
+        result: Result<Result<(), String>, Error>,
     },
     TemplateApply(usize),
     TemplateDelete(usize),
     TemplateDeleted {
         name: String,
-        result: Result<Result<(), String>, Panicked>,
+        result: Result<Result<(), String>, Error>,
     },
     Apply,
     Undo,
@@ -268,10 +268,10 @@ fn read_templates(editor: &ForgeEditor, effects: &mut Effects<Effect>) {
 }
 
 /// Why work on a template's file failed, if it did.
-fn failure_of(result: Result<Result<(), String>, Panicked>) -> Option<String> {
+fn failure_of(result: Result<Result<(), String>, Error>) -> Option<String> {
     match result {
         Ok(result) => result.err(),
-        Err(Panicked) => Some(UnexpectedFault.into()),
+        Err(_) => Some(UnexpectedFault.into()),
     }
 }
 
@@ -745,7 +745,7 @@ mod tests {
         step::<Forge>(&mut state, failed(Ok(Err("disk full".into()))));
         assert_eq!(state.editor().template_message, "The template could not be saved: disk full");
         assert_eq!(state.editor().template_name, "Boots");
-        step::<Forge>(&mut state, failed(Err(Panicked)));
+        step::<Forge>(&mut state, failed(Err(Error::Panicked)));
         assert!(state.editor().template_message.contains("fault log"));
         assert_eq!(state.editor().template_name, "Boots");
     }
@@ -754,7 +754,7 @@ mod tests {
     fn a_read_that_panics_leaves_what_was_read_before() {
         let mut state = keeping();
         step::<Forge>(&mut state, Intent::TemplatesRead(Ok(vec![template("Boots")])));
-        step::<Forge>(&mut state, Intent::TemplatesRead(Err(Panicked)));
+        step::<Forge>(&mut state, Intent::TemplatesRead(Err(Error::Panicked)));
         assert_eq!(state.editor().templates.len(), 1);
     }
 

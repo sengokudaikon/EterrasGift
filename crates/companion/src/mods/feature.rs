@@ -17,7 +17,7 @@ use melon_loader::loader_state::LoaderPreparation;
 use melon_loader::preferences::PreferenceKind;
 use phrases::phrases;
 use serde_json::Value as JsonValue;
-use spiderland::{CloseAnswer, Effects, Feature, Panicked, Tracked, Version};
+use spiderland::{CloseAnswer, Effects, Error, Feature, Tracked, Version};
 use std::collections::{BTreeSet, VecDeque};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -247,11 +247,11 @@ pub enum Answer {
 
 impl Answer {
     /// The worker's result, or why there is none.
-    pub fn of(result: Result<io::Result<Observation>, Panicked>) -> Answer {
+    pub fn of(result: Result<io::Result<Observation>, Error>) -> Answer {
         match result {
             Ok(Ok(observation)) => Answer::Observed(Box::new(observation)),
             Ok(Err(error)) => Answer::Failed(error.to_string()),
-            Err(Panicked) => Answer::Stopped(LibraryStopped.into()),
+            Err(_) => Answer::Stopped(LibraryStopped.into()),
         }
     }
 
@@ -285,11 +285,11 @@ pub enum Intent {
     },
     SourcesRead {
         revision: u64,
-        result: Result<(Result<SourceSnapshot, SourceError>, bool), Panicked>,
+        result: Result<(Result<SourceSnapshot, SourceError>, bool), Error>,
     },
     Watched {
         generation: u64,
-        result: Result<(bool, bool, bool), Panicked>,
+        result: Result<(bool, bool, bool), Error>,
     },
     Select(i32),
     Toggle(i32),
@@ -308,15 +308,15 @@ pub enum Intent {
     OpenFolder,
     OpenLog,
     /// How opening a file or folder went.
-    Opened(Result<Result<(), String>, Panicked>),
+    Opened(Result<Result<(), String>, Error>),
     /// Something outside the worker failed, in the words of what failed.
     Failed(String),
     Play,
-    Launched(Result<LaunchReport, Panicked>),
+    Launched(Result<LaunchReport, Error>),
     Rebuild(i32),
     InstallBuild(i32),
     BuildSource(i32),
-    Built(Result<Result<PathBuf, String>, Panicked>),
+    Built(Result<Result<PathBuf, String>, Error>),
     StopWork,
     CloseRequested,
     /// The window stays after the page closed for it: a build the close stopped starts again.
@@ -841,7 +841,7 @@ impl Feature for Mods {
                         let said = sources_unreadable(state.folder.as_deref(), &error);
                         say(state, said, true);
                     }
-                    Err(Panicked) => say(state, ReadStopped.get(), true),
+                    Err(_) => say(state, ReadStopped.get(), true),
                 }
             }
             Intent::Watched { generation, result } => {
@@ -996,7 +996,7 @@ impl Feature for Mods {
             Intent::Opened(result) => match result {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => say(state, error, true),
-                Err(Panicked) => say(state, OpenStopped.get(), true),
+                Err(_) => say(state, OpenStopped.get(), true),
             },
             Intent::Failed(error) => say(state, error, true),
             Intent::Play => {
@@ -1014,7 +1014,7 @@ impl Feature for Mods {
                 state.launching = false;
                 state.starting = false;
                 refresh(state, effects);
-                let report = result.unwrap_or_else(|Panicked| LaunchReport {
+                let report = result.unwrap_or_else(|_| LaunchReport {
                     started: false,
                     message: StoppedUnexpectedly.into(),
                 });
@@ -1024,7 +1024,7 @@ impl Feature for Mods {
             Intent::InstallBuild(index) => build(state, effects, index, false, true),
             Intent::BuildSource(index) => build(state, effects, index, true, false),
             Intent::Built(result) => {
-                let result = result.unwrap_or_else(|Panicked| Err(BuildStopped.into()));
+                let result = result.unwrap_or_else(|_| Err(BuildStopped.into()));
                 match result {
                     Ok(path) => {
                         let job = state.build_job.take();
@@ -1715,7 +1715,7 @@ mod tests {
             &mut state,
             Intent::Watched {
                 generation,
-                result: Err(Panicked),
+                result: Err(Error::Panicked),
             },
         );
         assert_eq!(send(&mut state, Intent::Watch(now)).len(), 1);
@@ -1750,7 +1750,7 @@ mod tests {
         let revision = shown(&mut state);
         send(&mut state, Intent::Answered { revision, answer: observed() });
         send(&mut state, Intent::Play);
-        send(&mut state, Intent::Launched(Err(Panicked)));
+        send(&mut state, Intent::Launched(Err(Error::Panicked)));
         assert!(!state.launching);
         assert_eq!(state.status().change_message, StoppedUnexpectedly.get());
     }
@@ -1840,7 +1840,7 @@ mod tests {
     fn a_build_that_panics_says_so_and_ends_the_build() {
         let mut state = state();
         state.building = Some("Fixture.dll".into());
-        send(&mut state, Intent::Built(Err(Panicked)));
+        send(&mut state, Intent::Built(Err(Error::Panicked)));
         assert!(!state.status().building);
         assert_eq!(state.status().change_message, BuildStopped.get());
     }

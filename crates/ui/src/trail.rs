@@ -33,6 +33,7 @@ mod tests {
         type Intent = Intent;
         type Effect = Never;
         type Output = Never;
+        type Subscription = Never;
 
         fn reduce(_: &mut (), _: Intent, _: &mut Effects<Never>) {}
     }

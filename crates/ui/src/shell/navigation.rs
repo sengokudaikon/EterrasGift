@@ -389,6 +389,7 @@ impl Feature for Shell {
     type Intent = Intent;
     type Effect = Never;
     type Output = Entered;
+    type Subscription = Never;
 
     fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Never, Entered>) {
         let handled = Outcome::Handled { focus: None };

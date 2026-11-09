@@ -12,7 +12,7 @@ use crate::launch::loader::ModLoaderState;
 use eg_core::bloom::BloomPhase;
 use eg_core::game_log::GameReadiness;
 use phrases::{Phrase, phrases};
-use spiderland::{Effects, Feature, Panicked, Tracked};
+use spiderland::{Effects, Error, Feature, Tracked};
 use std::borrow::Cow;
 
 phrases! {
@@ -39,7 +39,7 @@ pub enum Intent {
     /// What the game's watch sees now.
     Seen(GameSeen),
     Start(LaunchMode),
-    Started(Result<LaunchReport, Panicked>),
+    Started(Result<LaunchReport, Error>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -144,7 +144,7 @@ impl Feature for Home {
                 }
             }
             Intent::Started(result) => {
-                state.model.finish(result.unwrap_or_else(|Panicked| LaunchReport {
+                state.model.finish(result.unwrap_or_else(|_| LaunchReport {
                     started: false,
                     message: StartFailed.into(),
                 }));
@@ -479,7 +479,7 @@ mod tests {
         let mut state = State::default();
         send(&mut state, found(BloomPhase::Wilted));
         send(&mut state, Intent::Start(LaunchMode::Offline));
-        assert_eq!(send(&mut state, Intent::Started(Err(Panicked))), [Effect::Refresh]);
+        assert_eq!(send(&mut state, Intent::Started(Err(Error::Panicked))), [Effect::Refresh]);
         let view = present(state.model());
         assert_eq!(view.message, StartFailed.get());
         assert!(view.message_is_error);
