@@ -17,7 +17,7 @@ use melon_loader::loader_state::LoaderPreparation;
 use melon_loader::preferences::PreferenceKind;
 use phrases::phrases;
 use serde_json::Value as JsonValue;
-use spiderland::{CloseAnswer, Effects, Error, Feature, Tracked, Version};
+use spiderland::{Asked, CloseAnswer, Effects, Error, Feature, Latest, Tracked, Version};
 use std::collections::{BTreeSet, VecDeque};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -288,7 +288,7 @@ pub enum Intent {
         result: Result<(Result<SourceSnapshot, SourceError>, bool), Error>,
     },
     Watched {
-        generation: u64,
+        asked: Asked,
         result: Result<(bool, bool, bool), Error>,
     },
     Select(i32),
@@ -337,7 +337,7 @@ pub enum Effect {
         files: Vec<String>,
     },
     WatchGame {
-        generation: u64,
+        asked: Asked,
         log: Option<PathBuf>,
     },
     Locate {
@@ -420,7 +420,8 @@ pub struct State {
     stopped_build: Option<(i32, bool, bool)>,
     sdk_said: bool,
     watch_pending: bool,
-    watch_generation: u64,
+    /// The looks at the game asked for: only the latest one's answer counts.
+    watch: Latest,
     follow: u8,
     adopted: Vec<String>,
     deleted: Vec<String>,
@@ -460,7 +461,7 @@ impl State {
             stopped_build: None,
             sdk_said: false,
             watch_pending: false,
-            watch_generation: 0,
+            watch: Latest::default(),
             follow: 0,
             adopted: Vec::new(),
             deleted: Vec::new(),
@@ -655,7 +656,8 @@ fn take_observation(state: &mut State, effects: &mut Effects<Effect, Output>, re
     if revision != state.revision {
         return;
     }
-    state.watch_generation += 1;
+    // A look still out began before this observation, which says the same and is newer.
+    state.watch.ask();
     state.running = observation.running;
     state.modded_run = observation.modded;
     state.starting = observation.starting;
@@ -810,9 +812,8 @@ impl Feature for Mods {
                 state.now = now;
                 if state.visible && !state.watch_pending {
                     state.watch_pending = true;
-                    state.watch_generation += 1;
                     effects.push(Effect::WatchGame {
-                        generation: state.watch_generation,
+                        asked: state.watch.ask(),
                         log: state.inventory.loader_log.clone(),
                     });
                 }
@@ -844,12 +845,12 @@ impl Feature for Mods {
                     Err(_) => say(state, ReadStopped.get(), true),
                 }
             }
-            Intent::Watched { generation, result } => {
+            Intent::Watched { asked, result } => {
                 state.watch_pending = false;
                 let Ok((running, modded, starting)) = result else {
                     return;
                 };
-                if generation != state.watch_generation || state.closing {
+                if !state.watch.answer(asked) || state.closing {
                     return;
                 }
                 let was_running = std::mem::replace(&mut state.running, running);
@@ -1683,18 +1684,24 @@ mod tests {
         assert_eq!(state.status().change_message, "");
     }
 
+    fn watch_asked(effects: &[Effect]) -> Asked {
+        let [Effect::WatchGame { asked, .. }] = effects else {
+            panic!("one look at the game expected, not {effects:?}");
+        };
+        *asked
+    }
+
     #[test]
     fn looks_at_the_game_never_overlap_and_stop_with_the_page() {
         let mut state = state();
         shown(&mut state);
         let now = jiff::Timestamp::UNIX_EPOCH;
-        assert_eq!(send(&mut state, Intent::Watch(now)).len(), 1);
+        let asked = watch_asked(&send(&mut state, Intent::Watch(now)));
         assert!(send(&mut state, Intent::Watch(now)).is_empty(), "one is still out");
-        let generation = state.watch_generation;
         send(
             &mut state,
             Intent::Watched {
-                generation,
+                asked,
                 result: Ok((true, false, false)),
             },
         );
@@ -1709,12 +1716,11 @@ mod tests {
         let mut state = state();
         shown(&mut state);
         let now = jiff::Timestamp::UNIX_EPOCH;
-        send(&mut state, Intent::Watch(now));
-        let generation = state.watch_generation;
+        let asked = watch_asked(&send(&mut state, Intent::Watch(now)));
         send(
             &mut state,
             Intent::Watched {
-                generation,
+                asked,
                 result: Err(Error::Panicked),
             },
         );

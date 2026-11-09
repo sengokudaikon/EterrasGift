@@ -104,10 +104,10 @@ impl WindowHost<Logs> for Window {
     }
 
     fn perform(&mut self, _: Option<&MainWindow>, effect: Effect, intents: &Intents<Intent>) {
-        let Effect::Read { generation, source } = effect;
+        let Effect::Read { asked, source } = effect;
         let files = self.files.clone();
         let status = status(self.backend.as_ref());
         self.background
-            .run(intents, move || read(files.as_ref(), source, status), move |result| Intent::Read { generation, result });
+            .run(intents, move || read(files.as_ref(), source, status), move |result| Intent::Read { asked, result });
     }
 }

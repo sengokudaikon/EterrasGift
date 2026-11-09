@@ -1,11 +1,11 @@
 //! The log viewer: recent fault reports and a bounded tail of Player.log, as a feature.
 //!
 //! Showing the page, a tick while it shows and the user's choices are intents; reading the files is an effect. A newer read
-//! makes an older one's result meaningless, so each read carries a generation. Contents that come back unchanged leave
+//! makes an older one's result meaningless, so each read is numbered (`Latest`) and only the latest one's counts. Contents that come back unchanged leave
 //! the view alone, which keeps a text selection in place.
 
 use phrases::phrases;
-use spiderland::{Effects, Error, Feature, Tracked};
+use spiderland::{Asked, Effects, Error, Feature, Latest, Tracked};
 use std::{
     fs::{self, File},
     io::{self, Read, Seek, SeekFrom},
@@ -186,22 +186,22 @@ pub enum Intent {
     Refresh,
     Choose(Source),
     Read {
-        generation: u64,
+        asked: Asked,
         result: Result<Contents, Error>,
     },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Effect {
-    Read { generation: u64, source: Source },
+    Read { asked: Asked, source: Source },
 }
 
 #[derive(Debug, Default)]
 pub struct State {
     source: Source,
     visible: bool,
-    generation: u64,
-    loading: bool,
+    /// The reads asked for; one is out while the latest has no answer.
+    reads: Latest,
     contents: Tracked<Contents>,
 }
 
@@ -219,7 +219,7 @@ impl State {
     }
 
     pub fn is_loading(&self) -> bool {
-        self.loading
+        self.reads.is_waiting()
     }
 
     /// What the view shows. Its version moves only when they changed.
@@ -261,7 +261,7 @@ impl Feature for Logs {
             Intent::Hidden => state.visible = false,
             // A slow disk gets to finish: only asking for it by hand replaces a read still out.
             Intent::Watch => {
-                if state.visible && !state.loading {
+                if state.visible && !state.is_loading() {
                     read_again(state, effects);
                 }
             }
@@ -273,11 +273,10 @@ impl Feature for Logs {
                 state.contents.set(Contents { notice, ..Contents::default() });
                 read_again(state, effects);
             }
-            Intent::Read { generation, result } => {
-                if generation != state.generation {
+            Intent::Read { asked, result } => {
+                if !state.reads.answer(asked) {
                     return;
                 }
-                state.loading = false;
                 match result {
                     Ok(contents) => state.contents.set(contents),
                     // What was last read stays up, with word that it may be out of date.
@@ -293,10 +292,8 @@ impl Feature for Logs {
 }
 
 fn read_again(state: &mut State, effects: &mut Effects<Effect>) {
-    state.generation = state.generation.wrapping_add(1);
-    state.loading = true;
     effects.push(Effect::Read {
-        generation: state.generation,
+        asked: state.reads.ask(),
         source: state.source,
     });
 }
@@ -319,18 +316,18 @@ mod tests {
         }
     }
 
-    fn generation(effects: &[Effect]) -> u64 {
-        let [Effect::Read { generation, .. }] = effects else {
+    fn asked(effects: &[Effect]) -> Asked {
+        let [Effect::Read { asked, .. }] = effects else {
             panic!("one read expected, not {effects:?}");
         };
-        *generation
+        *asked
     }
 
     #[test]
     fn a_page_that_shows_from_the_first_reads_at_once() {
         assert!(spiderland::start::<Logs>(&mut State::new(false)).is_empty());
         let mut state = State::new(true);
-        assert_eq!(generation(&spiderland::start::<Logs>(&mut state)), 1);
+        asked(&spiderland::start::<Logs>(&mut state));
         assert!(state.is_loading());
     }
 
@@ -343,7 +340,7 @@ mod tests {
         send(
             &mut state,
             Intent::Read {
-                generation: generation(&effects),
+                asked: asked(&effects),
                 result: Ok(contents("text")),
             },
         );
@@ -359,26 +356,32 @@ mod tests {
         send(
             &mut state,
             Intent::Read {
-                generation: generation(&effects),
+                asked: asked(&effects),
                 result: Ok(contents("text")),
             },
         );
-        assert_eq!(send(&mut state, Intent::Watch).len(), 1);
+        let again = asked(&send(&mut state, Intent::Watch));
         send(&mut state, Intent::Hidden);
         assert!(spiderland::subscriptions::<Logs>(&state).is_empty());
-        state.loading = false;
+        send(
+            &mut state,
+            Intent::Read {
+                asked: again,
+                result: Ok(contents("text")),
+            },
+        );
         assert!(send(&mut state, Intent::Watch).is_empty(), "a tick already on its way is ignored");
     }
 
     #[test]
     fn a_result_from_before_a_newer_read_is_dropped() {
         let mut state = State::default();
-        let first = generation(&send(&mut state, Intent::Shown));
-        let second = generation(&send(&mut state, Intent::Refresh));
+        let first = asked(&send(&mut state, Intent::Shown));
+        let second = asked(&send(&mut state, Intent::Refresh));
         send(
             &mut state,
             Intent::Read {
-                generation: first,
+                asked: first,
                 result: Ok(contents("old")),
             },
         );
@@ -387,7 +390,7 @@ mod tests {
         send(
             &mut state,
             Intent::Read {
-                generation: second,
+                asked: second,
                 result: Ok(contents("new")),
             },
         );
@@ -397,11 +400,11 @@ mod tests {
     #[test]
     fn choosing_a_source_clears_the_old_text_and_reads_the_new_one() {
         let mut state = State::default();
-        let first = generation(&send(&mut state, Intent::Shown));
+        let first = asked(&send(&mut state, Intent::Shown));
         send(
             &mut state,
             Intent::Read {
-                generation: first,
+                asked: first,
                 result: Ok(contents("the app's")),
             },
         );
@@ -414,20 +417,20 @@ mod tests {
     #[test]
     fn an_unchanged_read_leaves_the_view_alone() {
         let mut state = State::default();
-        let first = generation(&send(&mut state, Intent::Shown));
+        let first = asked(&send(&mut state, Intent::Shown));
         send(
             &mut state,
             Intent::Read {
-                generation: first,
+                asked: first,
                 result: Ok(contents("same")),
             },
         );
         let shown = state.contents().version();
-        let again = generation(&send(&mut state, Intent::Watch));
+        let again = asked(&send(&mut state, Intent::Watch));
         send(
             &mut state,
             Intent::Read {
-                generation: again,
+                asked: again,
                 result: Ok(contents("same")),
             },
         );
@@ -437,19 +440,19 @@ mod tests {
     #[test]
     fn a_read_that_panics_keeps_the_text_and_says_so() {
         let mut state = State::default();
-        let first = generation(&send(&mut state, Intent::Shown));
+        let first = asked(&send(&mut state, Intent::Shown));
         send(
             &mut state,
             Intent::Read {
-                generation: first,
+                asked: first,
                 result: Ok(contents("kept")),
             },
         );
-        let again = generation(&send(&mut state, Intent::Refresh));
+        let again = asked(&send(&mut state, Intent::Refresh));
         send(
             &mut state,
             Intent::Read {
-                generation: again,
+                asked: again,
                 result: Err(Error::Panicked),
             },
         );

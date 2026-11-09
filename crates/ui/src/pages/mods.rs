@@ -279,7 +279,7 @@ impl WindowHost<Mods> for Window {
                     move |result| Intent::SourcesRead { revision, result },
                 );
             }
-            Effect::WatchGame { generation, log } => {
+            Effect::WatchGame { asked, log } => {
                 let launcher = self.services.launcher.clone();
                 self.background.run(
                     intents,
@@ -287,7 +287,7 @@ impl WindowHost<Mods> for Window {
                         let (running, modded) = running_state(&launcher, log.as_deref());
                         (running, modded, launcher.is_starting())
                     },
-                    move |result| Intent::Watched { generation, result },
+                    move |result| Intent::Watched { asked, result },
                 );
             }
             Effect::Locate { item, folder } => match self.services.worker.enqueue(move |library| Ok(library.locate(&item, folder.as_deref()))) {
