@@ -1,0 +1,133 @@
+// The lines under a row's title: a hook's values and an editor's fields.
+
+import { Tokens } from "../../tokens.slint";
+import { LabelText } from "../../widgets/text.slint";
+import { NumberBox } from "../../widgets/number-box.slint";
+import { ValueSlider } from "../../widgets/value-slider.slint";
+import { ChoiceBox } from "../../widgets/choice-box.slint";
+import { FeatureValueView, FeatureFieldView, RowActionKind, RowAction } from "state.slint";
+
+// One of a hook's several values: [name | box], the name indented under the title, the box in the value column.
+export component ValueLine inherits Rectangle {
+    // From the page: what this shows and what it asks of it.
+    callback acted(RowAction);
+    pure callback value-checked(int, int, string) -> string;
+
+    in property <FeatureValueView> value;
+    in property <int> row-index;
+    in property <int> value-index;
+    in property <length> title-width;
+    in property <length> value-right;
+    in property <bool> enabled;
+    in property <string> help;
+
+    height: Math.max(Tokens.control-min-height, label.height);
+
+    label := Text {
+        x: Tokens.feature-nested-indent.left;
+        y: (parent.height - self.height) / 2;
+        width: root.title-width - self.x;
+        height: self.preferred-height;
+        text: root.value.label;
+        color: Tokens.text-secondary-brush;
+        wrap: word-wrap;
+    }
+
+    if !root.value.choice: ValueSlider {
+        width: Tokens.feature-field-width;
+        x: root.value-right - self.width;
+        y: (parent.height - self.height) / 2;
+        text: root.value.text;
+        unit: root.value.unit;
+        fraction: root.value.fraction;
+        range: root.value.range;
+        label: root.value.accessible-name;
+        accessible-description: root.help;
+        tip: root.value.step-tip;
+        enabled: root.enabled;
+        vertical-steps: true;
+        scrubbed(delta) => { root.acted({ kind: RowActionKind.value-scrubbed, row: root.row-index, item: root.value-index, share: delta }); }
+        scrub-ended(cancelled) => { root.acted({ kind: cancelled ? RowActionKind.value-scrub-cancelled : RowActionKind.value-scrub-ended, row: root.row-index, item: root.value-index }); }
+        stepped(steps) => { root.acted({ kind: RowActionKind.value-stepped, row: root.row-index, item: root.value-index, number: steps }); }
+        stepped-to-end(end) => { root.acted({ kind: end ? RowActionKind.value-to-end : RowActionKind.value-to-start, row: root.row-index, item: root.value-index }); }
+        committed(text) => { root.acted({ kind: RowActionKind.value-committed, row: root.row-index, item: root.value-index, text: text }); }
+        checked(text) => { return root.value-checked(root.row-index, root.value-index, text); }
+    }
+
+    if root.value.choice: ChoiceBox {
+        width: self.natural-width;
+        x: root.value-right - self.width;
+        y: (parent.height - self.height) / 2;
+        choices: root.value.choices;
+        index: root.value.choice-index;
+        label: root.value.accessible-name;
+        accessible-description: root.help;
+        enabled: root.enabled;
+        chosen(choice) => { root.acted({ kind: RowActionKind.value-chosen, row: root.row-index, item: root.value-index, number: choice }); }
+    }
+}
+
+// An editor's field: [name over "In game: N" | box], indented under the title, under its group's name when it heads one.
+export component FieldLine inherits Rectangle {
+    // From the page: what this shows and what it asks of it.
+    callback acted(RowAction);
+
+    in property <FeatureFieldView> field;
+    in property <int> row-index;
+    in property <int> field-index;
+    in property <length> title-width;
+    in property <length> value-x;
+    in property <bool> enabled;
+    in property <string> help;
+
+    property <length> group-height: root.field.starts-group ? group.y + group.height + Tokens.space-6 : 0px;
+    property <length> pair-height: label.height + Tokens.space-2 + game.height;
+    property <length> grid-height: Math.max(Tokens.control-min-height, root.pair-height);
+
+    height: root.group-height + root.grid-height;
+
+    group := LabelText {
+        visible: root.field.starts-group;
+        x: Tokens.feature-nested-indent.left;
+        y: root.field.first ? 0px : Tokens.feature-nested-group-margin.top;
+        width: parent.width - self.x;
+        height: root.field.starts-group ? self.preferred-height : 0px;
+        text: root.field.group;
+    }
+
+    label := Text {
+        x: Tokens.feature-nested-indent.left;
+        y: root.group-height + (root.grid-height - root.pair-height) / 2;
+        width: root.title-width - self.x;
+        height: self.preferred-height;
+        text: root.field.label;
+        color: root.field.drafted ? Tokens.draft-brush : Tokens.text-secondary-brush;
+        wrap: word-wrap;
+    }
+
+    game := Text {
+        x: label.x;
+        y: label.y + label.height + Tokens.space-2;
+        width: label.width;
+        height: self.preferred-height;
+        text: root.field.game-text;
+        font-size: Tokens.font-size-value;
+        color: Tokens.text-muted-brush;
+        wrap: word-wrap;
+    }
+
+    NumberBox {
+        x: root.value-x;
+        y: root.group-height + (root.grid-height - self.height) / 2;
+        value: root.field.text;
+        label: root.field.accessible-name;
+        accessible-description: root.help;
+        tip: root.field.step-tip;
+        enabled: root.enabled;
+        drafted: root.field.drafted;
+        // Typed and committed alike: the draft is the text.
+        edited(text) => { root.acted({ kind: RowActionKind.field-edited, row: root.row-index, item: root.field-index, text: text }); }
+        committed(text) => { root.acted({ kind: RowActionKind.field-edited, row: root.row-index, item: root.field-index, text: text }); }
+        stepped(direction) => { root.acted({ kind: RowActionKind.field-stepped, row: root.row-index, item: root.field-index, number: direction }); }
+    }
+}

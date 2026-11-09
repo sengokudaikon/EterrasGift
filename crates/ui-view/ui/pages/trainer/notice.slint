@@ -1,0 +1,101 @@
+// What a trainer page shows while it has nothing to work on.
+
+import { Tokens } from "../../tokens.slint";
+import { Connection } from "../../globals.slint";
+import { Button, ButtonKind } from "../../widgets/button.slint";
+import { TitleText } from "../../widgets/text.slint";
+import { AshField, EterraFrames } from "../../decorations.slint";
+import { TrainerText } from "../../strings/trainer.slint";
+
+// A page body that has nothing to work on yet, in words: the connection's state on
+// every trainer page, or the connected forge with no item to show. A stop the user has to fix carries the warning mark
+// beside its title; the connection's one next step (Connect, Retry) is the only button, and only the connection offers it.
+// Ash drifts up during a real wait and lies still under the empty forge; it is gone on a stop (Rust says which, and drives
+// the drift's frames).
+export component TrainerNotice inherits Rectangle {
+    in property <string> title;
+    in property <string> detail;
+    in property <bool> stopped;
+    in property <bool> ash-shown;
+    in property <bool> ash-still;
+    in property <bool> action-shown;
+
+    // The reading line height as a factor of the value size's own line (crates/ui/README.md: read on a probe, never on the
+    // text that sets it).
+    probe := Text {
+        visible: false;
+        font-size: Tokens.font-size-value;
+        text: " ";
+    }
+
+    if root.ash-shown: AshField {
+        width: root.width;
+        height: root.height;
+        still: root.ash-still;
+    }
+
+    if root.ash-shown && !root.ash-still: EterraFrames { }
+
+    VerticalLayout {
+        alignment: center;
+        padding-left: Tokens.forge-empty-margin.left;
+        padding-right: Tokens.forge-empty-margin.right;
+        padding-top: Tokens.forge-empty-margin.top;
+        padding-bottom: Tokens.forge-empty-margin.bottom;
+
+        HorizontalLayout {
+            alignment: center;
+
+            VerticalLayout {
+                max-width: Tokens.reading-max-width;
+                spacing: Tokens.space-12;
+
+                HorizontalLayout {
+                    alignment: center;
+
+                    if root.stopped: VerticalLayout {
+                        alignment: center;
+                        padding-right: Tokens.leading-mark-margin.right;
+
+                        Image {
+                            width: Tokens.icon-size;
+                            height: Tokens.icon-size;
+                            image-fit: contain;
+                            source: Tokens.icon-warning;
+                            colorize: Tokens.warning-brush;
+                            accessible-role: image;
+                            accessible-label: TrainerText.warning;
+                        }
+                    }
+
+                    TitleText {
+                        text: root.title;
+                        horizontal-alignment: center;
+                    }
+                }
+
+                Text {
+                    text: root.detail;
+                    font-size: Tokens.font-size-value;
+                    line-height-factor: Tokens.line-height-reading / Math.max(1px, probe.font-metrics.ascent - probe.font-metrics.descent);
+                    color: Tokens.text-secondary-brush;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+
+                if root.action-shown && Connection.show-action: HorizontalLayout {
+                    alignment: center;
+                    padding-top: Tokens.empty-action-margin.top;
+
+                    Button {
+                        text: Connection.action-text;
+                        kind: ButtonKind.primary;
+                        clicked => {
+                            Connection.connect();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

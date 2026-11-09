@@ -1,0 +1,140 @@
+// The trainer pages' state, shared with Rust (crates/ui/src/pages/trainer): the profile, the open page's sections and
+// rows, and what a row asks.
+
+// A row is a game hook (a switch, with values), an editor (fields read from the game), a list of what the character holds,
+// a feature not ported yet (a source checkout only), or a section's heading on a page that stacks its sections.
+export enum FeatureRowKind { heading, hook, editor, held, planned }
+
+// A status line's mark: the check once the game holds it, the error mark with the reason.
+export enum FeatureTone { none, confirmed, error }
+
+// A hook's value: a number box with its unit, or a pick from a list.
+export struct FeatureValueView {
+    label: string,
+    accessible-name: string,
+    unit: string,
+    choice: bool,
+    choices: [string],
+    choice-index: int,
+    text: string,
+    step-tip: string,
+    // Where it sits on its bar (0 to 1), and its "minimum – maximum" for the typing popover.
+    fraction: float,
+    range: string,
+}
+
+// An editor's field: its name over what the game holds, and its box (a draft until Apply).
+export struct FeatureFieldView {
+    label: string,
+    group: string,
+    starts-group: bool,
+    first: bool,
+    accessible-name: string,
+    text: string,
+    game-text: string,
+    drafted: bool,
+    step-tip: string,
+}
+
+export struct FeatureRowView {
+    kind: FeatureRowKind,
+    title: string,
+    help: string,
+    // A hook: its switch, its one value on the title line or several listed under it, and where it stands.
+    on: bool,
+    has-inline: bool,
+    choice-only: bool,
+    inline-value: FeatureValueView,
+    status: string,
+    tone: FeatureTone,
+    // Its controls take changes: an editor connected, served and not waiting on the game; a hook unless the connected game
+    // cannot have it in this version.
+    can-use: bool,
+    // An editor or held items: why it cannot be used, under the title (it waits for a connection, or this version cannot
+    // serve it).
+    reason: string,
+    unread: bool,
+    empty: bool,
+    has-drafts: bool,
+    can-discard: bool,
+    can-apply: bool,
+    apply-text: string,
+    // A planned feature: its values and their defaults, or its fields' names.
+    details: string,
+}
+
+// A row's lists: a hook's values listed under its title, an editor's fields. They sit apart from the row so a change to the
+// row leaves their items in place (a box being typed in keeps its focus); a list is replaced only when its length changes.
+export struct FeatureRowModels {
+    listed-values: [FeatureValueView],
+    fields: [FeatureFieldView],
+}
+
+// Where Rust placed a row (by its index in `TrainerState.rows`): its column, its top in the list (a heading's below the
+// section spacing Rust leaves above it), and whether it ends that column.
+export struct FeatureRowPlace { column: int, y: length, ends: bool }
+
+// What a row asks: its switch turned (`on`); one of its values (`item`) typed (`text`), stepped (`number` steps), dragged
+// (`share`, the drag's distance as a share of its range, sent once, when it ends), its drag ended or called off, sent to
+// either end, or picked from its list (`number`); one of an editor's fields typed (`text`) or stepped (`number`, the
+// direction); Read again, Apply or Discard.
+export enum RowActionKind {
+    toggled,
+    value-committed,
+    value-stepped,
+    value-scrubbed,
+    value-scrub-ended,
+    value-scrub-cancelled,
+    value-to-start,
+    value-to-end,
+    value-chosen,
+    field-edited,
+    field-stepped,
+    read,
+    apply,
+    discard,
+}
+
+export struct RowAction { kind: RowActionKind, row: int, item: int, number: int, share: float, on: bool, text: string }
+
+export global TrainerState {
+    // Every kept profile (its character's name, class and cycle), the last played first; the character whose hooks the
+    // rows are, by its index among them (-1 for one in play without a profile), its name and its full label (empty while
+    // none is), whether its hooks are kept as its profile or last this session only; and what the rows do with them.
+    in property <[string]> profiles;
+    in property <int> profile-index: -1;
+    in property <string> profile-name;
+    in property <string> profile-label;
+    in property <bool> profile-kept: true;
+    in property <string> profile-caption;
+    // While no game runs: show another profile, or delete the shown one. While its character is in play: keep its hooks
+    // as its profile, or delete the profile, leaving its hooks for this session.
+    callback select-profile(int);
+    callback delete-profile();
+    callback keep-profile();
+
+    // The open page: its sections (none when it has one), the chosen one, and what that section holds.
+    in property <[string]> sections;
+    in-out property <int> section;
+    in property <bool> item-forge;
+    in property <[FeatureRowView]> rows;
+    in property <[FeatureRowModels]> row-models;
+    in property <[FeatureRowPlace]> row-places;
+    in property <int> column-count: 1;
+    // The tallest column, with every row in place.
+    in property <length> rows-height;
+    // False while a section's rows wait for their split, so they appear in their columns (view.rs `Layout`).
+    in property <bool> rows-ready: true;
+    // Changes when another page or section opens, so the list starts at its top.
+    in property <int> serial;
+
+    callback open(string);
+    callback select-section(int);
+    // The layout reports how many columns fit and each row's height; Rust splits the rows into the columns.
+    callback columns-changed(int);
+    callback row-measured(int, length);
+
+    // What a row asks, and why a text typed for row `int`'s value `int` is no value (empty when it is one).
+    callback acted(RowAction);
+    pure callback value-checked(int, int, string) -> string;
+}

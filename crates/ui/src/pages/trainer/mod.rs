@@ -1,4 +1,4 @@
-//! The trainer's pages in the window: their binding to `pages/trainer.slint`. What they show and how they answer is
+//! The trainer's pages in the window: their binding to `TrainerState` (`pages/trainer/state.slint`). What they show and how they answer is
 //! `eg_trainer_screens`. With the trainer's worker they run on its snapshots; without one, on `Unconnected`, which tells
 //! the truth: no offline character is connected. Captures drive other states through fake sessions of their own.
 

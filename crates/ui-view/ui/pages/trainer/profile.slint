@@ -1,0 +1,140 @@
+// Whose hooks a trainer page shows, over its rows.
+
+import { Tokens } from "../../tokens.slint";
+import { TrainerAccess } from "../../globals.slint";
+import { Button, ButtonKind } from "../../widgets/button.slint";
+import { BodyText, LabelText, CaptionText } from "../../widgets/text.slint";
+import { ChoiceBox } from "../../widgets/choice-box.slint";
+import { TrainerText } from "../../strings/trainer.slint";
+
+// Over the hooks: whose they are and when they apply. While no game runs another profile can be chosen, or the shown one
+// deleted (asked first, in place of the caption). While its character is in play it is named, and its hooks are kept as
+// its profile, or its profile deleted (asked first too). With no profile yet, only how one comes.
+export component ProfileBand inherits Rectangle {
+    // From the page: what this shows and what it asks of it.
+    in property <TrainerAccess> access;
+    callback delete-profile();
+    callback keep-profile();
+    in property <string> profile-caption;
+    in property <int> profile-index;
+    in property <bool> profile-kept;
+    in property <string> profile-label;
+    in property <string> profile-name;
+    in property <[string]> profiles;
+    callback select-profile(int);
+
+    in property <bool> compact;
+
+    property <length> margin-left: root.compact ? Tokens.trainer-body-compact-margin.left : Tokens.trainer-body-margin.left;
+    property <length> margin-right: root.compact ? Tokens.trainer-body-compact-margin.right : Tokens.trainer-body-margin.right;
+    property <bool> setup: root.access == TrainerAccess.setup;
+    property <bool> shown: root.profile-label != "";
+    property <bool> kept: root.profile-kept;
+    // Delete was pressed: the band asks before it deletes. Another profile shown, or the game seen, asks nothing.
+    property <bool> confirming;
+    property <int> index: root.profile-index;
+
+    changed setup => {
+        root.confirming = false;
+    }
+    changed index => {
+        root.confirming = false;
+    }
+    changed kept => {
+        root.confirming = false;
+    }
+
+    VerticalLayout {
+        padding-left: root.margin-left;
+        padding-right: root.margin-right;
+        padding-top: Tokens.trainer-body-margin.top;
+        spacing: Tokens.space-4;
+
+        if root.shown: HorizontalLayout {
+            spacing: Tokens.space-12;
+            alignment: start;
+
+            LabelText {
+                text: TrainerText.profile;
+                vertical-alignment: center;
+            }
+
+            if root.setup: ChoiceBox {
+                width: self.natural-width;
+                choices: root.profiles;
+                index: root.profile-index;
+                label: TrainerText.profile;
+                enabled: !root.confirming;
+                chosen(index) => {
+                    root.select-profile(index);
+                }
+            }
+
+            if root.setup: Button {
+                text: TrainerText.delete-ellipsis;
+                enabled: !root.confirming;
+                tip: TrainerText.delete-profile-tip;
+                clicked => {
+                    root.confirming = true;
+                }
+            }
+
+            if !root.setup: BodyText {
+                text: root.profile-label;
+                vertical-alignment: center;
+            }
+
+            if !root.setup && !root.kept: Button {
+                text: TrainerText.keep-as-profile;
+                tip: TrainerText.keep-for(root.profile-name);
+                clicked => {
+                    root.keep-profile();
+                }
+            }
+
+            if !root.setup && root.kept: Button {
+                text: TrainerText.delete-ellipsis;
+                enabled: !root.confirming;
+                tip: TrainerText.delete-profile-tip;
+                clicked => {
+                    root.confirming = true;
+                }
+            }
+        }
+
+        if root.confirming: HorizontalLayout {
+            spacing: Tokens.space-12;
+            alignment: start;
+
+            CaptionText {
+                text: root.setup
+                    ? TrainerText.delete-profile-setup(root.profile-name)
+                    : TrainerText.delete-profile-live(root.profile-name);
+                wrap: word-wrap;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+
+            Button {
+                text: TrainerText.delete;
+                kind: ButtonKind.primary;
+                clicked => {
+                    root.confirming = false;
+                    root.delete-profile();
+                }
+            }
+
+            Button {
+                text: TrainerText.keep;
+                clicked => {
+                    root.confirming = false;
+                }
+            }
+        }
+
+        if !root.confirming: CaptionText {
+            text: root.profile-caption;
+            wrap: word-wrap;
+        }
+    }
+}
