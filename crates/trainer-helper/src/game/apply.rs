@@ -76,23 +76,23 @@ impl RuntimeAccess {
     pub(crate) unsafe fn mutable_field(&self, owner: Class, name: &CStr, primitive: &CStr, code: i32) -> Result<NonNull<raw::FieldInfo>, WriteError> {
         // SAFETY: the caller's contract is the runtime crate's.
         let field = unsafe { self.api.mutable_field(owner, name, primitive, code) }?.ok_or_else(|| WriteError::Refused("Not the exact mutable instance field".into()))?;
-        NonNull::new(field.cast()).ok_or_else(|| WriteError::Refused("Missing mutable field".into()))
+        NonNull::new(field).ok_or_else(|| WriteError::Refused("Missing mutable field".into()))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::{Ptr, Type, test_fakes::token};
+    use crate::game::{Field, Type, test_fakes::token};
     use il2cpp_runtime::{MetadataError, metadata::unsupported};
     use std::ffi::c_char;
 
     #[test]
     fn a_field_that_is_not_the_destination_is_refused_in_the_helpers_words() {
-        unsafe extern "C-unwind" fn class_field(_: Class, _: *const c_char) -> Ptr {
+        unsafe extern "C-unwind" fn class_field(_: Class, _: *const c_char) -> Field {
             token(0x2000)
         }
-        unsafe extern "C-unwind" fn no_type(_: Ptr) -> Type {
+        unsafe extern "C-unwind" fn no_type(_: Field) -> Type {
             std::ptr::null()
         }
         let mut api = RuntimeAccess::test_stubs();

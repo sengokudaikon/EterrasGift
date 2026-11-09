@@ -13,7 +13,7 @@
 
 #[cfg(test)]
 use il2cpp_runtime::metadata::Type;
-use il2cpp_runtime::metadata::{Class, MetadataError, Method, Ptr, array_data, copy_values, instance_offset, metadata_text, read_value, target, write_bytes};
+use il2cpp_runtime::metadata::{Class, Field, Image, MetadataError, Method, Ptr, array_data, copy_values, instance_offset, metadata_text, read_value, target, write_bytes};
 pub(crate) use il2cpp_runtime::metadata::{MethodError, MethodQuery, Others, Params, Returns};
 #[cfg(test)]
 use il2cpp_runtime::test_fakes;

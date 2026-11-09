@@ -41,7 +41,7 @@ impl RuntimeAccess {
                 .mutable_field(owner, c"zoomDefault", c"Single", raw::type_code::R4)
                 .map_err(|e| unsupported(e.to_string()))?;
             let offset = self.hook_field(owner, c"zoomDefault", "System.Single", 4)?;
-            let baseline = self.single_bits(&camera, field.as_ptr().cast())?;
+            let baseline = self.single_bits(&camera, field.as_ptr())?;
             let online = self.hook_online_storage(&self.images()?)?.as_ptr() as usize;
             ScalarBinding::pin(self, target(&camera)?.as_ptr() as usize, offset, baseline, online)
         }

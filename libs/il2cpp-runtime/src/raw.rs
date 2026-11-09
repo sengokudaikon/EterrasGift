@@ -13,7 +13,7 @@ macro_rules! opaque {
     )+ };
 }
 
-opaque!(Domain, Thread, Object, MethodInfo, Exception, Class, Type, FieldInfo);
+opaque!(Domain, Assembly, Image, Thread, Object, MethodInfo, Exception, Class, Type, FieldInfo);
 
 // Attribute bits returned by il2cpp_field_get_flags and il2cpp_method_get_flags, named as in
 // IL2CPP's il2cpp-tabledefs.h (the ECMA-335 FieldAttributes/MethodAttributes values).

@@ -14,6 +14,10 @@ on a thread cannot mix two runtimes' exports. The two exports that store into th
 returned apart, as `raw::FieldWriteApi`: code handed only the table cannot write. `Exports::test_stubs` (behind `test-stubs`) is
 a table whose every export panics when reached, for tests to set the ones they expect.
 
+The exports pass each kind of runtime handle as a pointer type of its own (`metadata::{Assembly, Image, Class, Field, Method,
+Type}`, over the opaque types in `raw`), so one cannot be passed where another is expected. `metadata::Ptr` is only storage with
+no type of its own: a field's destination, an iterator's slot, a runtime allocation, a GC handle.
+
 ## What it assumes
 
 Windows x64, an initialized runtime, and Unity 6000.4's exports (authored native fixtures use 6000.4.8f1). Export signatures,

@@ -11,7 +11,6 @@ use crate::game::{
     instance_offset, target, unsupported,
 };
 use il2cpp_runtime::{AttachedThread, raw};
-use std::ffi::c_void;
 #[cfg(test)]
 mod tests;
 pub(crate) struct StatFeature {
@@ -58,7 +57,7 @@ impl RuntimeAccess {
             let SelectedStat { player, stat, bits: baseline } = self.selected_stat(attached, manager, feature)?;
             let object = target(&player.stats).map_err(GameError::from)?;
             let field = self.mutable_field(stat.owner, stat.name, c"Single", raw::type_code::R4)?;
-            if field.as_ptr().cast::<c_void>() != stat.field.cast::<c_void>() {
+            if field.as_ptr() != stat.field {
                 return Err(unsupported("scalar field identity").into());
             }
             let offset = (self.field_offset)(stat.field);

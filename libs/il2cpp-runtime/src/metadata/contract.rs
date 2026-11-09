@@ -2,7 +2,7 @@
 //! field's offset, a destination's exact type, and the bounded window of code to read. Nothing here calls a managed
 //! method or writes.
 
-use super::{Class, Exports, MAX_FIELD_OFFSET, MetadataError, Method, MethodError, MethodQuery, Others, Params, Ptr, Returns, instance_offset, read_value, unsupported};
+use super::{Class, Exports, Field, MAX_FIELD_OFFSET, MetadataError, Method, MethodError, MethodQuery, Others, Params, Returns, instance_offset, read_value, unsupported};
 use crate::raw;
 use std::{
     ffi::{CStr, c_void},
@@ -100,7 +100,7 @@ impl Exports {
     /// # Safety
     /// Attached thread of this initialized runtime; `field` is a static field of `owner` with validated type and flags, and
     /// its value fits in eight bytes.
-    pub unsafe fn hook_static_storage(&self, owner: Class, field: Ptr, alignment: usize) -> Result<NonNull<c_void>, MetadataError> {
+    pub unsafe fn hook_static_storage(&self, owner: Class, field: Field, alignment: usize) -> Result<NonNull<c_void>, MetadataError> {
         // SAFETY: static field type/flags validated by caller; initialize through the public field API, then obtain
         // the owning storage through the public class API. The primitive fits in this eight-byte snapshot.
         unsafe {
@@ -124,7 +124,7 @@ impl Exports {
     ///
     /// # Safety
     /// `owner` is class metadata of this live runtime.
-    pub unsafe fn mutable_field(&self, owner: Class, name: &CStr, primitive: &CStr, code: i32) -> Result<Option<Ptr>, MetadataError> {
+    pub unsafe fn mutable_field(&self, owner: Class, name: &CStr, primitive: &CStr, code: i32) -> Result<Option<Field>, MetadataError> {
         // SAFETY: The owner is retained metadata; exact type, flags and declaring-class checks precede returning a writable field.
         unsafe {
             let field = self.field(owner, name)?;

@@ -1,7 +1,7 @@
 //! The character's stats, as two accessors on the player's stats object that know nothing of each other: its attack
 //! attributes, declared on `CharacterStats`, and its leech stats, declared on `BaseStats`.
 use super::player::{PlayerError, PlayerFields};
-use crate::game::{Class, Ptr, RuntimeAccess};
+use crate::game::{Class, Field, RuntimeAccess};
 use std::ffi::CStr;
 
 /// One `System.Single` stat: the class that declares it, its name and its field.
@@ -9,7 +9,7 @@ use std::ffi::CStr;
 pub(crate) struct Stat {
     pub(crate) owner: Class,
     pub(crate) name: &'static CStr,
-    pub(crate) field: Ptr,
+    pub(crate) field: Field,
 }
 
 /// The character's attack attributes, declared on `CharacterStats`.

@@ -123,7 +123,7 @@ impl RuntimeAccess {
             if (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0 {
                 return Err(refused("allAffixes is static"));
             }
-            writes.clear_object(target(master)?, NonNull::new(field.cast()).ok_or_else(|| refused("allAffixes is absent"))?);
+            writes.clear_object(target(master)?, NonNull::new(field).ok_or_else(|| refused("allAffixes is absent"))?);
             Ok(())
         }
     }
@@ -323,7 +323,7 @@ impl RuntimeAccess {
             {
                 return Err(refused(format!("{} is not a writable enum field", name.to_string_lossy())));
             }
-            NonNull::new(field.cast()).ok_or_else(|| refused("Missing enum field"))
+            NonNull::new(field).ok_or_else(|| refused("Missing enum field"))
         }
     }
 

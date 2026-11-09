@@ -24,8 +24,12 @@ mod read;
 pub use contract::MethodSpec;
 pub use methods::{MAX_CLASS_DEPTH, MethodError, MethodQuery, Others, Params, Returns};
 
+/// Storage with no type of its own: a field's destination, an iterator's slot, a runtime allocation, a GC handle.
 pub type Ptr = *mut c_void;
+pub type Assembly = *const raw::Assembly;
+pub type Image = *const raw::Image;
 pub type Class = *mut raw::Class;
+pub type Field = *mut raw::FieldInfo;
 pub type Method = *const raw::MethodInfo;
 pub type Type = *const raw::Type;
 
@@ -150,7 +154,7 @@ impl Exports {
     ///
     /// # Safety
     /// The caller is attached to this export table's live runtime, with assembly loading excluded for the call.
-    pub unsafe fn images(&self) -> Result<Vec<Ptr>, MetadataError> {
+    pub unsafe fn images(&self) -> Result<Vec<Image>, MetadataError> {
         // SAFETY: The attached runtime retains its domain/assembly array; its bounded count precedes copying live image descriptors.
         unsafe {
             let domain = (self.domain_get)();
@@ -179,7 +183,7 @@ impl Exports {
     ///
     /// # Safety
     /// `images` are this runtime's retained image descriptors.
-    pub unsafe fn class_in(&self, images: &[Ptr], namespace: &CStr, name: &CStr) -> Result<Class, MetadataError> {
+    pub unsafe fn class_in(&self, images: &[Image], namespace: &CStr, name: &CStr) -> Result<Class, MetadataError> {
         // SAFETY: Image and class descriptors belong to retained immutable metadata; lookup never invokes a game method.
         unsafe {
             let mut found: Class = std::ptr::null_mut();
@@ -250,12 +254,12 @@ impl Exports {
     ///
     /// # Safety
     /// The lookup contract (module docs).
-    pub unsafe fn field(&self, mut class: Class, name: &CStr) -> Result<Ptr, MetadataError> {
+    pub unsafe fn field(&self, mut class: Class, name: &CStr) -> Result<Field, MetadataError> {
         let owner = class as usize;
         if let Some(cache) = self.cache
             && let Some(field) = cache.fields.lock().unwrap_or_else(|p| p.into_inner()).get(&owner).and_then(|fields| fields.get(name))
         {
-            return Ok(*field as Ptr);
+            return Ok(*field as Field);
         }
         // SAFETY: class comes from this runtime's metadata; parent and field descriptors
         // remain live and immutable under the operation's retained-runtime contract.
@@ -306,7 +310,7 @@ impl Exports {
     ///
     /// # Safety
     /// The lookup contract (module docs).
-    pub unsafe fn field_class(&self, field: Ptr, label: &str) -> Result<Class, MetadataError> {
+    pub unsafe fn field_class(&self, field: Field, label: &str) -> Result<Class, MetadataError> {
         // SAFETY: The field descriptor is retained metadata; nonnull non-byref type metadata is checked before resolving its class.
         unsafe {
             let ty = (self.field_type)(field);
@@ -325,7 +329,7 @@ impl Exports {
     ///
     /// # Safety
     /// The lookup contract (module docs).
-    pub unsafe fn instance_field_in(&self, owner: Class, name: &CStr, expected: Class, label: &str) -> Result<Ptr, MetadataError> {
+    pub unsafe fn instance_field_in(&self, owner: Class, name: &CStr, expected: Class, label: &str) -> Result<Field, MetadataError> {
         // SAFETY: The owner is retained metadata; expected field class and instance storage are validated before returning the descriptor.
         unsafe {
             let field = self.field(owner, name)?;
@@ -340,7 +344,7 @@ impl Exports {
     ///
     /// # Safety
     /// The lookup contract (module docs), with `object` rooted in this runtime.
-    pub unsafe fn instance_field(&self, object: &StrongRoot<'_, '_>, name: &CStr, expected: Class) -> Result<Ptr, MetadataError> {
+    pub unsafe fn instance_field(&self, object: &StrongRoot<'_, '_>, name: &CStr, expected: Class) -> Result<Field, MetadataError> {
         // SAFETY: The receiver is rooted; its field type, instance storage and expected class are checked before returning metadata.
         unsafe {
             let class = (self.object_class)(target(object)?.as_ptr());
@@ -470,7 +474,7 @@ impl Exports {
             if owner.is_null() || receiver.is_null() || !(self.assignable)(owner, receiver) {
                 return Err(unsupported("reference store declaring class"));
             }
-            NonNull::new(field.cast()).ok_or_else(|| unsupported("reference field absent"))
+            NonNull::new(field).ok_or_else(|| unsupported("reference field absent"))
         }
     }
 
@@ -499,7 +503,7 @@ impl Exports {
     ///
     /// # Safety
     /// The lookup contract (module docs).
-    pub unsafe fn static_field(&self, class: Class, name: &CStr, expected: &str) -> Result<Ptr, MetadataError> {
+    pub unsafe fn static_field(&self, class: Class, name: &CStr, expected: &str) -> Result<Field, MetadataError> {
         // SAFETY: The live field descriptor is checked for static nonliteral storage and exact type before being used by a getter.
         unsafe {
             let field = self.field(class, name)?;
@@ -624,7 +628,7 @@ mod tests {
     #[test]
     fn field_descriptors_are_resolved_once_per_runtime_class_and_name() {
         thread_local! { static LOOKUPS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) }; }
-        unsafe extern "C-unwind" fn lookup(_: Class, _: *const c_char) -> Ptr {
+        unsafe extern "C-unwind" fn lookup(_: Class, _: *const c_char) -> Field {
             LOOKUPS.with(|count| count.set(count.get() + 1));
             NonNull::<u8>::dangling().as_ptr().cast()
         }

@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    metadata::Type,
+    metadata::{Image, Ptr, Type},
     test_fakes::{corlib, token},
 };
 use std::{cell::Cell, ffi::c_char};
@@ -128,19 +128,19 @@ thread_local! {
     static FLAGS: Cell<i32> = const { Cell::new(0) };
     static OFFSET: Cell<usize> = const { Cell::new(144) };
 }
-unsafe extern "C-unwind" fn class_from_name(_: *const std::ffi::c_void, namespace: *const c_char, name: *const c_char) -> Class {
+unsafe extern "C-unwind" fn class_from_name(_: Image, namespace: *const c_char, name: *const c_char) -> Class {
     // SAFETY: system_class supplies static nul-terminated names.
     assert_eq!(unsafe { (CStr::from_ptr(namespace), CStr::from_ptr(name)) }, (c"System", c"Int32"));
     token(INT32)
 }
-unsafe extern "C-unwind" fn class_field(owner: Class, _: *const c_char) -> Ptr {
+unsafe extern "C-unwind" fn class_field(owner: Class, _: *const c_char) -> Field {
     assert_eq!(owner as usize, OWNER);
     if MISSING.get() { std::ptr::null_mut() } else { token(FIELD) }
 }
 unsafe extern "C-unwind" fn class_parent(_: Class) -> Class {
     std::ptr::null_mut()
 }
-unsafe extern "C-unwind" fn field_type(_: Ptr) -> Type {
+unsafe extern "C-unwind" fn field_type(_: Field) -> Type {
     token(0x5000)
 }
 unsafe extern "C-unwind" fn type_byref(_: Type) -> bool {
@@ -152,13 +152,13 @@ unsafe extern "C-unwind" fn type_code(_: Type) -> i32 {
 unsafe extern "C-unwind" fn type_class(_: Type) -> Class {
     token(TYPE_CLASS.get())
 }
-unsafe extern "C-unwind" fn field_parent(_: Ptr) -> Class {
+unsafe extern "C-unwind" fn field_parent(_: Field) -> Class {
     token(DECLARING.get())
 }
-unsafe extern "C-unwind" fn field_flags(_: Ptr) -> i32 {
+unsafe extern "C-unwind" fn field_flags(_: Field) -> i32 {
     FLAGS.get()
 }
-unsafe extern "C-unwind" fn field_offset(_: Ptr) -> usize {
+unsafe extern "C-unwind" fn field_offset(_: Field) -> usize {
     OFFSET.get()
 }
 fn reset() {

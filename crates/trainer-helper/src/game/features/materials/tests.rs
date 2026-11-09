@@ -283,10 +283,10 @@ fn material_reference_contract_refuses_wrong_type_byref_static_value_owner_and_u
         static VALUE: Cell<bool> = const { Cell::new(false) };
         static OFFSET: Cell<usize> = const { Cell::new(16) };
     }
-    unsafe extern "C-unwind" fn field(_: Class, _: *const c_char) -> Ptr {
+    unsafe extern "C-unwind" fn field(_: Class, _: *const c_char) -> Field {
         token(3)
     }
-    unsafe extern "C-unwind" fn ty(_: Ptr) -> Type {
+    unsafe extern "C-unwind" fn ty(_: Field) -> Type {
         token(4)
     }
     unsafe extern "C-unwind" fn class(_: Type) -> Class {
@@ -295,13 +295,13 @@ fn material_reference_contract_refuses_wrong_type_byref_static_value_owner_and_u
     unsafe extern "C-unwind" fn byref(_: Type) -> bool {
         BYREF.get()
     }
-    unsafe extern "C-unwind" fn flags(_: Ptr) -> i32 {
+    unsafe extern "C-unwind" fn flags(_: Field) -> i32 {
         FLAGS.get()
     }
     unsafe extern "C-unwind" fn value(_: *const raw::Class) -> bool {
         VALUE.get()
     }
-    unsafe extern "C-unwind" fn offset(_: Ptr) -> usize {
+    unsafe extern "C-unwind" fn offset(_: Field) -> usize {
         OFFSET.get()
     }
     let mut access = RuntimeAccess::test_stubs();

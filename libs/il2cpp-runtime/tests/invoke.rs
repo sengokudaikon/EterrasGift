@@ -1,4 +1,5 @@
 //! Fake metadata/runtime tests for rejection, storage and rooting; not Unity compatibility evidence.
+use il2cpp_runtime::metadata::Image;
 use il2cpp_runtime::raw;
 use il2cpp_runtime::{Argument, CheckedMethod, Exports, InvocationContext, InvocationOutcome, InvokeError, ReturnValue, RuntimeError, Scalar, ThreadContext, ValueTypeContract};
 use static_assertions::assert_not_impl_any;
@@ -164,10 +165,10 @@ class_boolean!(class_value, value);
 class_boolean!(class_generic, generic);
 class_boolean!(class_inflated, inflated);
 class_boolean!(class_enum, enumeration);
-unsafe extern "C-unwind" fn get_corlib() -> *const c_void {
+unsafe extern "C-unwind" fn get_corlib() -> Image {
     FAKE.with_borrow(|f| pointer(f.corlib))
 }
-unsafe extern "C-unwind" fn class_from_name(image: *const c_void, namespace: *const c_char, name: *const c_char) -> *mut raw::Class {
+unsafe extern "C-unwind" fn class_from_name(image: Image, namespace: *const c_char, name: *const c_char) -> *mut raw::Class {
     // SAFETY: the checked enum validator supplies static NUL-terminated corlib names.
     let (namespace, name) = unsafe { (CStr::from_ptr(namespace), CStr::from_ptr(name)) };
     assert_eq!(namespace, c"System");

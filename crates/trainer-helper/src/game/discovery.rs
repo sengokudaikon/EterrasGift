@@ -1,7 +1,7 @@
 //! Resolving the game's runtime: its own image, its classes (including the two it nests in others) and the dispatcher
 //! the helper runs on. Nothing here reads a game object or calls a game method.
 
-use super::{Class, GameError, Ptr, RuntimeAccess, read_value, unsupported};
+use super::{Class, GameError, Image, RuntimeAccess, read_value, unsupported};
 use eg_trainer_wire::protocol::{Discovery, DispatcherSpec};
 use il2cpp_runtime::{AttachedThread, metadata::record_class};
 use std::{ffi::CStr, ptr::NonNull, sync::Mutex};
@@ -14,9 +14,9 @@ pub struct DiscoveredRuntime {
 
 #[derive(Clone, Copy)]
 pub(crate) struct Images {
-    pub(crate) all: &'static [Ptr],
+    pub(crate) all: &'static [Image],
     /// The game's own assembly: the image that defines `PlayerFinder`.
-    pub(crate) game: Ptr,
+    pub(crate) game: Image,
 }
 
 /// The images of the assembly table they were read from. IL2CPP's table is fixed once its domain exists; a table at
@@ -74,8 +74,8 @@ impl RuntimeAccess {
     unsafe fn read_images(&self) -> Result<Images, GameError> {
         // SAFETY: as `images`.
         unsafe {
-            let all: &'static [Ptr] = Vec::leak(self.api.images()?);
-            let mut game: Ptr = std::ptr::null_mut();
+            let all: &'static [Image] = Vec::leak(self.api.images()?);
+            let mut game: Image = std::ptr::null();
             let mut player_finder: Class = std::ptr::null_mut();
             for &image in all {
                 let candidate = (self.class_from_name)(image, c"".as_ptr(), c"PlayerFinder".as_ptr());

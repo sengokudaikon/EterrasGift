@@ -4,7 +4,7 @@
 //! [`raw::FieldWriteApi`], so code given only the table cannot write. Signatures follow Unity 6000.4.8f1's
 //! `il2cpp-api-functions.h`.
 
-use crate::metadata::{Class, MetadataError, Method, Ptr, Type};
+use crate::metadata::{Assembly, Class, Field, Image, MetadataError, Method, Ptr, Type};
 use crate::raw;
 use std::{
     ffi::{CStr, c_char, c_void},
@@ -98,22 +98,22 @@ exports! {
     gchandle_free: "il2cpp_gchandle_free" => unsafe extern "C-unwind" fn(Ptr),
     gchandle_target: "il2cpp_gchandle_get_target" => unsafe extern "C-unwind" fn(Ptr) -> *mut raw::Object,
     // Metadata, allocation and status, which the lookups call. None runs a managed body or a class initializer.
-    assemblies: "il2cpp_domain_get_assemblies" => unsafe extern "C-unwind" fn(*const raw::Domain, *mut usize) -> *const Ptr,
-    assembly_image: "il2cpp_assembly_get_image" => unsafe extern "C-unwind" fn(Ptr) -> Ptr,
-    class_from_name: "il2cpp_class_from_name" => unsafe extern "C-unwind" fn(*const c_void, *const c_char, *const c_char) -> Class,
+    assemblies: "il2cpp_domain_get_assemblies" => unsafe extern "C-unwind" fn(*const raw::Domain, *mut usize) -> *const Assembly,
+    assembly_image: "il2cpp_assembly_get_image" => unsafe extern "C-unwind" fn(Assembly) -> Image,
+    class_from_name: "il2cpp_class_from_name" => unsafe extern "C-unwind" fn(Image, *const c_char, *const c_char) -> Class,
     class_parent: "il2cpp_class_get_parent" => unsafe extern "C-unwind" fn(Class) -> Class,
     class_nested: "il2cpp_class_get_nested_types" => unsafe extern "C-unwind" fn(Class, *mut Ptr) -> Class,
     class_name: "il2cpp_class_get_name" => unsafe extern "C-unwind" fn(Class) -> *const c_char,
     class_namespace: "il2cpp_class_get_namespace" => unsafe extern "C-unwind" fn(Class) -> *const c_char,
-    class_image: "il2cpp_class_get_image" => unsafe extern "C-unwind" fn(Class) -> Ptr,
-    class_field: "il2cpp_class_get_field_from_name" => unsafe extern "C-unwind" fn(Class, *const c_char) -> Ptr,
-    field_type: "il2cpp_field_get_type" => unsafe extern "C-unwind" fn(Ptr) -> Type,
-    field_parent: "il2cpp_field_get_parent" => unsafe extern "C-unwind" fn(Ptr) -> Class,
-    field_flags: "il2cpp_field_get_flags" => unsafe extern "C-unwind" fn(Ptr) -> i32,
-    field_offset: "il2cpp_field_get_offset" => unsafe extern "C-unwind" fn(Ptr) -> usize,
-    static_get: "il2cpp_field_static_get_value" => unsafe extern "C-unwind" fn(Ptr, Ptr),
-    field_get: "il2cpp_field_get_value" => unsafe extern "C-unwind" fn(*mut raw::Object, Ptr, Ptr),
-    field_get_object: "il2cpp_field_get_value_object" => unsafe extern "C-unwind" fn(Ptr, *mut raw::Object) -> *mut raw::Object,
+    class_image: "il2cpp_class_get_image" => unsafe extern "C-unwind" fn(Class) -> Image,
+    class_field: "il2cpp_class_get_field_from_name" => unsafe extern "C-unwind" fn(Class, *const c_char) -> Field,
+    field_type: "il2cpp_field_get_type" => unsafe extern "C-unwind" fn(Field) -> Type,
+    field_parent: "il2cpp_field_get_parent" => unsafe extern "C-unwind" fn(Field) -> Class,
+    field_flags: "il2cpp_field_get_flags" => unsafe extern "C-unwind" fn(Field) -> i32,
+    field_offset: "il2cpp_field_get_offset" => unsafe extern "C-unwind" fn(Field) -> usize,
+    static_get: "il2cpp_field_static_get_value" => unsafe extern "C-unwind" fn(Field, Ptr),
+    field_get: "il2cpp_field_get_value" => unsafe extern "C-unwind" fn(*mut raw::Object, Field, Ptr),
+    field_get_object: "il2cpp_field_get_value_object" => unsafe extern "C-unwind" fn(Field, *mut raw::Object) -> *mut raw::Object,
     type_name: "il2cpp_type_get_name" => unsafe extern "C-unwind" fn(Type) -> *mut c_char,
     runtime_free: "il2cpp_free" => unsafe extern "C-unwind" fn(Ptr),
     type_class: "il2cpp_class_from_il2cpp_type" => unsafe extern "C-unwind" fn(Type) -> Class,
@@ -136,7 +136,7 @@ exports! {
     method_inflated: "il2cpp_method_is_inflated" => unsafe extern "C-unwind" fn(Method) -> bool,
     method_flags: "il2cpp_method_get_flags" => unsafe extern "C-unwind" fn(Method, *mut u32) -> u32,
     method_class: "il2cpp_method_get_class" => unsafe extern "C-unwind" fn(Method) -> Class,
-    corlib: "il2cpp_get_corlib" => unsafe extern "C-unwind" fn() -> *const c_void,
+    corlib: "il2cpp_get_corlib" => unsafe extern "C-unwind" fn() -> Image,
     object_new: "il2cpp_object_new" => unsafe extern "C-unwind" fn(Class) -> *mut raw::Object,
     array_new: "il2cpp_array_new" => unsafe extern "C-unwind" fn(Class, usize) -> *mut raw::Object,
     array_length: "il2cpp_array_length" => unsafe extern "C-unwind" fn(*mut raw::Object) -> u32,

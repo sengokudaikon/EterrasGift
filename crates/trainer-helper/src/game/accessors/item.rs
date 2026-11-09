@@ -1,7 +1,7 @@
 //! The held item: the forge's crafting slot, reached from the player's item manager, copied into owned values.
 //! No game method is called.
 
-use crate::game::{GameError, Images, Ptr, Root, RuntimeAccess, array_data, copy_values, read_value, target, unsupported};
+use crate::game::{Field, GameError, Images, Ptr, Root, RuntimeAccess, array_data, copy_values, read_value, target, unsupported};
 use eg_trainer_wire::forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity};
 use il2cpp_runtime::{AttachedThread, raw};
 use std::{ffi::CStr, ptr::NonNull};
@@ -10,10 +10,10 @@ pub(crate) struct ForgeGraph<'a, 'r> {
     pub(crate) images: Images,
     pub(crate) manager: Root<'a, 'r>,
     pub(crate) item: Root<'a, 'r>,
-    pub(crate) online_field: Ptr,
-    pub(crate) manager_field: Ptr,
-    pub(crate) cached_ptr_field: Ptr,
-    pub(crate) links: Vec<(Ptr, Ptr, Ptr)>,
+    pub(crate) online_field: Field,
+    pub(crate) manager_field: Field,
+    pub(crate) cached_ptr_field: Field,
+    pub(crate) links: Vec<(Ptr, Field, Ptr)>,
     pub(crate) _parents: Vec<Root<'a, 'r>>,
 }
 

@@ -1,6 +1,6 @@
 //! Calling the game's own methods: the body a receiver runs for one, and one call that binds a signature-checked method,
 //! invokes it and reads what it returns.
-use crate::game::{GameError, Method, Ptr, Root, RuntimeAccess, unsupported};
+use crate::game::{GameError, Image, Method, Root, RuntimeAccess, unsupported};
 use il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use std::ptr::NonNull;
 
@@ -70,7 +70,7 @@ impl RuntimeAccess {
     ///
     /// # Safety
     /// An attached thread of this runtime, `receiver` live, and `method` a method of one of its classes.
-    pub(crate) unsafe fn game_body(&self, game: Ptr, receiver: NonNull<raw::Object>, method: Method) -> Option<Method> {
+    pub(crate) unsafe fn game_body(&self, game: Image, receiver: NonNull<raw::Object>, method: Method) -> Option<Method> {
         // SAFETY: as this function's; the override's descriptor is retained metadata.
         unsafe {
             let body = self.dispatched(receiver, method)?;

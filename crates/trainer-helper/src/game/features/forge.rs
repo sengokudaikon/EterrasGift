@@ -566,7 +566,10 @@ impl RuntimeAccess {
 mod tests {
     use super::*;
     use crate::game::test_fakes::{self, corlib, roots, token};
-    use il2cpp_runtime::ThreadContext;
+    use il2cpp_runtime::{
+        ThreadContext,
+        metadata::{Field, Image},
+    };
     use std::{
         cell::Cell,
         ffi::{CStr, c_char},
@@ -589,7 +592,7 @@ mod tests {
         static CURRENT_ITEM: Cell<usize> = const { Cell::new(ITEM) };
         static LIVE: Cell<usize> = const { Cell::new(1) };
     }
-    unsafe extern "C-unwind" fn class_from_name(_: *const std::ffi::c_void, ns: *const c_char, name: *const c_char) -> Class {
+    unsafe extern "C-unwind" fn class_from_name(_: Image, ns: *const c_char, name: *const c_char) -> Class {
         // SAFETY: adapter supplies static C metadata names.
         unsafe {
             assert_eq!(CStr::from_ptr(ns), c"System");
@@ -602,7 +605,7 @@ mod tests {
         assert_eq!(roots(), 2);
         token(OWNER)
     }
-    unsafe extern "C-unwind" fn class_field(owner: Class, name: *const c_char) -> Ptr {
+    unsafe extern "C-unwind" fn class_field(owner: Class, name: *const c_char) -> Field {
         assert_eq!(owner as usize, OWNER);
         // SAFETY: adapter supplies a static field name.
         unsafe {
@@ -610,7 +613,7 @@ mod tests {
         }
         token(FIELD)
     }
-    unsafe extern "C-unwind" fn field_type(_: Ptr) -> crate::game::Type {
+    unsafe extern "C-unwind" fn field_type(_: Field) -> crate::game::Type {
         token(7)
     }
     unsafe extern "C-unwind" fn byref(_: crate::game::Type) -> bool {
@@ -622,16 +625,16 @@ mod tests {
     unsafe extern "C-unwind" fn type_class(_: crate::game::Type) -> Class {
         token(INT32)
     }
-    unsafe extern "C-unwind" fn parent(_: Ptr) -> Class {
+    unsafe extern "C-unwind" fn parent(_: Field) -> Class {
         token(OWNER)
     }
-    unsafe extern "C-unwind" fn flags(_: Ptr) -> i32 {
+    unsafe extern "C-unwind" fn flags(_: Field) -> i32 {
         FLAGS.get()
     }
-    unsafe extern "C-unwind" fn offset(_: Ptr) -> usize {
+    unsafe extern "C-unwind" fn offset(_: Field) -> usize {
         144
     }
-    unsafe extern "C-unwind" fn static_get(field: Ptr, dest: Ptr) {
+    unsafe extern "C-unwind" fn static_get(field: Field, dest: Ptr) {
         // SAFETY: these exact validated fake fields have the destination widths supplied here.
         unsafe {
             match field as usize {
@@ -641,7 +644,7 @@ mod tests {
             }
         }
     }
-    unsafe extern "C-unwind" fn field_get(object: *mut raw::Object, field: Ptr, dest: Ptr) {
+    unsafe extern "C-unwind" fn field_get(object: *mut raw::Object, field: Field, dest: Ptr) {
         assert_eq!(roots(), 2);
         assert_eq!(object as usize, MANAGER);
         // SAFETY: fake validated native pointer/reference fields have these exact widths.

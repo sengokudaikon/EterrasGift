@@ -1,11 +1,14 @@
 //! The fake thread unit tests of code on this crate share: an attachment the engine already owns, and Box-backed GC handles that
 //! record which objects they hold. Object tokens are identities only; nothing behind them is read.
 
-use crate::{Exports, ThreadContext, metadata::Ptr, raw};
+use crate::{
+    Exports, ThreadContext,
+    metadata::{Image, Ptr},
+    raw,
+};
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
-    ffi::c_void,
 };
 
 thread_local! {
@@ -24,8 +27,8 @@ pub fn token<T>(address: usize) -> *mut T {
 ///
 /// # Safety
 /// None: unsafe only to have the export's type.
-pub unsafe extern "C-unwind" fn corlib() -> *const c_void {
-    token::<c_void>(0x7000).cast_const()
+pub unsafe extern "C-unwind" fn corlib() -> Image {
+    token::<raw::Image>(0x7000).cast_const()
 }
 
 /// Live handles.

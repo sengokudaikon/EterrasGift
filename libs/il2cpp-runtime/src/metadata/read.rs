@@ -1,7 +1,7 @@
 //! Typed copies of fields of rooted objects, each after its type, owner and storage are checked. Nothing here calls a
 //! managed method or writes.
 
-use super::{ARRAY_HEADER, Class, Exports, MetadataError, Primitive, Ptr, copy_values, metadata_text, target, unsupported};
+use super::{ARRAY_HEADER, Class, Exports, Field, MetadataError, Primitive, copy_values, metadata_text, target, unsupported};
 use crate::{AttachedThread, StrongRoot, raw};
 use std::{ffi::CStr, ptr::NonNull};
 
@@ -188,7 +188,7 @@ impl Exports {
         unsafe {
             if class.is_null()
                 || (self.class_value)(class)
-                || (self.class_image)(class).cast_const() != (self.corlib)()
+                || (self.class_image)(class) != (self.corlib)()
                 || (self.type_code)((self.class_type)(class)) != raw::type_code::GENERICINST
             {
                 return Err(unsupported("closed List class"));
@@ -262,7 +262,7 @@ impl Exports {
     ///
     /// # Safety
     /// `owner` and `expected` are class metadata of this live runtime.
-    pub unsafe fn declared_field(&self, owner: Class, name: &CStr, expected: Class, is_static: bool) -> Result<Ptr, MetadataError> {
+    pub unsafe fn declared_field(&self, owner: Class, name: &CStr, expected: Class, is_static: bool) -> Result<Field, MetadataError> {
         // SAFETY: Owner metadata is live; storage flags and the exact class determine the output width.
         unsafe {
             let field = self.field(owner, name)?;
@@ -284,7 +284,7 @@ impl Exports {
     ///
     /// # Safety
     /// `field` is a validated static reference field of this initialized runtime.
-    pub unsafe fn static_reference(&self, field: Ptr) -> *mut raw::Object {
+    pub unsafe fn static_reference(&self, field: Field) -> *mut raw::Object {
         // SAFETY: The validated static reference field writes one pointer-sized local slot before rooting.
         unsafe {
             let mut value = std::ptr::null_mut::<raw::Object>();
@@ -297,7 +297,7 @@ impl Exports {
     ///
     /// # Safety
     /// `field` is a validated reference field of `object`'s class.
-    pub unsafe fn reference_at(&self, object: &StrongRoot<'_, '_>, field: Ptr) -> Result<*mut raw::Object, MetadataError> {
+    pub unsafe fn reference_at(&self, object: &StrongRoot<'_, '_>, field: Field) -> Result<*mut raw::Object, MetadataError> {
         // SAFETY: The rooted receiver and validated reference field remain live through the pointer copy.
         unsafe {
             let mut value = std::ptr::null_mut::<raw::Object>();
@@ -310,7 +310,7 @@ impl Exports {
     ///
     /// # Safety
     /// `field` is a validated instance `System.Single` field of `object`'s class.
-    pub unsafe fn single_bits(&self, object: &StrongRoot<'_, '_>, field: Ptr) -> Result<u32, MetadataError> {
+    pub unsafe fn single_bits(&self, object: &StrongRoot<'_, '_>, field: Field) -> Result<u32, MetadataError> {
         // SAFETY: The rooted receiver's validated Single field writes exactly one f32 local.
         unsafe {
             let mut value = 0_f32;
@@ -324,7 +324,7 @@ impl Exports {
     ///
     /// # Safety
     /// `object` is rooted; `object_class` is `UnityEngine.Object` and `cached` its validated `m_CachedPtr` field.
-    pub unsafe fn identity_words(&self, object: &StrongRoot<'_, '_>, object_class: Class, cached: Ptr) -> Result<Option<(usize, usize)>, MetadataError> {
+    pub unsafe fn identity_words(&self, object: &StrongRoot<'_, '_>, object_class: Class, cached: Field) -> Result<Option<(usize, usize)>, MetadataError> {
         // SAFETY: The rooted Unity wrapper has a metadata-validated IntPtr field; its native address is copied, never dereferenced.
         unsafe {
             let object = target(object)?;
@@ -344,7 +344,7 @@ mod tests {
     use super::*;
     use crate::{
         ThreadContext,
-        metadata::Type,
+        metadata::{Image, Ptr, Type},
         test_fakes::{self, corlib, frees, roots, token},
     };
     use std::cell::Cell;
@@ -377,7 +377,7 @@ mod tests {
         static VALUE_CLASS: Cell<bool> = const { Cell::new(false) };
         static STORES: Cell<usize> = const { Cell::new(0) };
     }
-    unsafe extern "C-unwind" fn class_from_name(_: *const std::ffi::c_void, namespace: *const std::ffi::c_char, name: *const std::ffi::c_char) -> Class {
+    unsafe extern "C-unwind" fn class_from_name(_: Image, namespace: *const std::ffi::c_char, name: *const std::ffi::c_char) -> Class {
         // SAFETY: production calls supply static null-terminated metadata names.
         unsafe {
             match (CStr::from_ptr(namespace), CStr::from_ptr(name)) {
@@ -405,23 +405,23 @@ mod tests {
     unsafe extern "C-unwind" fn class_value(_: *const raw::Class) -> bool {
         VALUE_CLASS.get()
     }
-    unsafe extern "C-unwind" fn class_field(class: Class, _: *const std::ffi::c_char) -> Ptr {
+    unsafe extern "C-unwind" fn class_field(class: Class, _: *const std::ffi::c_char) -> Field {
         assert_eq!(class as usize, PARENT_CLASS);
         token(0x8000)
     }
-    unsafe extern "C-unwind" fn field_type(_: Ptr) -> Type {
+    unsafe extern "C-unwind" fn field_type(_: Field) -> Type {
         token(0x9000)
     }
     unsafe extern "C-unwind" fn type_byref(_: Type) -> bool {
         BYREF.get()
     }
-    unsafe extern "C-unwind" fn field_flags(_: Ptr) -> i32 {
+    unsafe extern "C-unwind" fn field_flags(_: Field) -> i32 {
         FLAGS.get()
     }
     unsafe extern "C-unwind" fn type_class(ty: Type) -> Class {
         token(if ty as usize == ENUM_BASE_TYPE { ENUM_BASE_CLASS.get() } else { FIELD_CLASS.get() })
     }
-    unsafe extern "C-unwind" fn field_get(object: *mut raw::Object, _: Ptr, destination: Ptr) {
+    unsafe extern "C-unwind" fn field_get(object: *mut raw::Object, _: Field, destination: Ptr) {
         assert_eq!(object as usize, PARENT);
         FIELD_READS.set(FIELD_READS.get() + 1);
         match FIELD_CLASS.get() {
@@ -445,7 +445,7 @@ mod tests {
         assert!(matches!(expected as usize, CHILD_CLASS | PARENT_CLASS));
         ASSIGNABLE.get()
     }
-    unsafe extern "C-unwind" fn field_parent(_: Ptr) -> Class {
+    unsafe extern "C-unwind" fn field_parent(_: Field) -> Class {
         token(PARENT_CLASS)
     }
     unsafe extern "C-unwind" fn store_reference(object: *mut raw::Object, field: *mut raw::FieldInfo, value: Ptr) {
@@ -712,7 +712,7 @@ mod boxing_tests {
     use super::*;
     use crate::{
         ThreadContext,
-        metadata::Type,
+        metadata::{Ptr, Type},
         test_fakes::{self, frees, roots, token},
     };
     use std::cell::Cell;
@@ -746,17 +746,17 @@ mod boxing_tests {
         assert_eq!(expected as usize, OWNER);
         actual == expected
     }
-    unsafe extern "C-unwind" fn field(owner: Class, _: *const std::ffi::c_char) -> Ptr {
+    unsafe extern "C-unwind" fn field(owner: Class, _: *const std::ffi::c_char) -> Field {
         assert_eq!(owner as usize, OWNER);
         token(0x6000)
     }
-    unsafe extern "C-unwind" fn field_type(_: Ptr) -> Type {
+    unsafe extern "C-unwind" fn field_type(_: Field) -> Type {
         token(0x7000)
     }
     unsafe extern "C-unwind" fn byref(_: Type) -> bool {
         BYREF.get()
     }
-    unsafe extern "C-unwind" fn flags(_: Ptr) -> i32 {
+    unsafe extern "C-unwind" fn flags(_: Field) -> i32 {
         FLAGS.get()
     }
     unsafe extern "C-unwind" fn type_class(_: Type) -> Class {
@@ -771,7 +771,7 @@ mod boxing_tests {
     unsafe extern "C-unwind" fn method_name(_: *const raw::MethodInfo) -> *const std::ffi::c_char {
         c".cctor".as_ptr()
     }
-    unsafe extern "C-unwind" fn box_field(_: Ptr, object: *mut raw::Object) -> *mut raw::Object {
+    unsafe extern "C-unwind" fn box_field(_: Field, object: *mut raw::Object) -> *mut raw::Object {
         assert_eq!(object as usize, PARENT);
         assert_eq!(roots(), 1);
         BOXES.set(BOXES.get() + 1);

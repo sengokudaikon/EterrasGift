@@ -1,7 +1,7 @@
 //! The local player: the offline gate, the item manager `PlayerFinder` holds, the player's actor and the actor's stats,
 //! each rooted for one call and identified by its managed wrapper and native object. No getter, refresh or setter runs.
 use crate::game::apply::WriteError;
-use crate::game::{Class, GameError, Images, Ptr, Root, RuntimeAccess, read_value, target, unsupported};
+use crate::game::{Class, Field, GameError, Images, Ptr, Root, RuntimeAccess, read_value, target, unsupported};
 use eg_trainer_wire::{
     fields::{ObservedObjectIdentity, PlayerUnavailable as Unavailable},
     protocol::RuntimeStatus,
@@ -60,15 +60,15 @@ pub(crate) struct PlayerFields {
     pub(crate) base_stats: Class,
     manager_class: Class,
     actor_class: Class,
-    online: Ptr,
-    manager: Ptr,
-    actor: Ptr,
-    cached: Ptr,
+    online: Field,
+    manager: Field,
+    actor: Field,
+    cached: Field,
     object_class: Class,
-    manager_actor: Ptr,
-    actor_manager: Ptr,
-    actor_stats: Ptr,
-    stats_actor: Ptr,
+    manager_actor: Field,
+    actor_manager: Field,
+    actor_stats: Field,
+    stats_actor: Field,
 }
 
 /// The player for one call: its item manager, its actor and the actor's stats, rooted, with their identities.
@@ -87,7 +87,7 @@ impl RuntimeAccess {
     ///
     /// # Safety
     /// As [`RuntimeAccess::alive`].
-    unsafe fn live_manager(&self, manager: &Root<'_, '_>, object_class: Class, cached: Ptr) -> Result<ObservedObjectIdentity, PlayerError> {
+    unsafe fn live_manager(&self, manager: &Root<'_, '_>, object_class: Class, cached: Field) -> Result<ObservedObjectIdentity, PlayerError> {
         // SAFETY: same already-rooted graph contract as `alive`.
         match unsafe { self.alive(manager, object_class, cached) } {
             Ok(Some(identity)) => Ok(identity),
@@ -100,7 +100,7 @@ impl RuntimeAccess {
     ///
     /// # Safety
     /// As [`RuntimeAccess::alive`].
-    unsafe fn live(&self, object: &Root<'_, '_>, object_class: Class, cached: Ptr) -> Result<ObservedObjectIdentity, PlayerError> {
+    unsafe fn live(&self, object: &Root<'_, '_>, object_class: Class, cached: Field) -> Result<ObservedObjectIdentity, PlayerError> {
         // SAFETY: same already-rooted graph contract as `alive`.
         unsafe { self.alive(object, object_class, cached) }?.ok_or_else(|| unavailable(Unavailable::NativeObjectDestroyed))
     }
@@ -109,7 +109,7 @@ impl RuntimeAccess {
     ///
     /// # Safety
     /// `online` is the validated static Boolean `GameplayEnvironment._isOnlinePlay` of this initialized runtime.
-    unsafe fn offline(&self, online: Ptr) -> Result<(), PlayerError> {
+    unsafe fn offline(&self, online: Field) -> Result<(), PlayerError> {
         // SAFETY: The initialized runtime's validated static Boolean is copied into a byte, then checked for canonical representation.
         unsafe {
             let mut value = 1_u8;
@@ -270,12 +270,12 @@ impl RuntimeAccess {
         unsafe {
             let bindings = self.cached(|caches| &caches.status, || self.status_bindings())?;
             let mut online = 1_u8;
-            (self.static_get)(bindings.online as Ptr, (&mut online as *mut u8).cast());
+            (self.static_get)(bindings.online as Field, (&mut online as *mut u8).cast());
             if online > 1 {
                 return Err(unsupported("online Boolean representation"));
             }
             let mut manager = std::ptr::null_mut::<raw::Object>();
-            (self.static_get)(bindings.manager as Ptr, (&mut manager as *mut *mut raw::Object).cast());
+            (self.static_get)(bindings.manager as Field, (&mut manager as *mut *mut raw::Object).cast());
             let manager_root = NonNull::new(manager).map(|pointer| attached.root(pointer)).transpose()?;
             let mut manager_address = 0;
             if let Some(root) = &manager_root {
@@ -292,7 +292,7 @@ impl RuntimeAccess {
                 }
             }
             let mut master = std::ptr::null_mut::<raw::Object>();
-            (self.static_get)(bindings.master as Ptr, (&mut master as *mut *mut raw::Object).cast());
+            (self.static_get)(bindings.master as Field, (&mut master as *mut *mut raw::Object).cast());
             let master_root = NonNull::new(master).map(|pointer| attached.root(pointer)).transpose()?;
             if let Some(root) = master_root {
                 self.check_object(bindings.master_class as Class, root.target().ok_or_else(|| unsupported("master root target"))?)?;

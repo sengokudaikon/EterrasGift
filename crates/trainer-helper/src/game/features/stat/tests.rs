@@ -5,7 +5,11 @@ use crate::game::{
     test_fakes::{self, corlib, rooted, rooted_objects, roots, token},
 };
 use eg_trainer_wire::fields::PlayerUnavailable;
-use il2cpp_runtime::{ThreadContext, raw};
+use il2cpp_runtime::{
+    ThreadContext,
+    metadata::{Assembly, Field, Image},
+    raw,
+};
 use std::ffi::CStr;
 use std::{
     cell::{Cell, RefCell},
@@ -115,7 +119,7 @@ thread_local! {
     static RATE_READS: Cell<u32> = const { Cell::new(0) };
     static POINTER_READS: Cell<u32> = const { Cell::new(0) };
     static DRIFT: Cell<Drift> = const { Cell::new(Drift::None) };
-    static ASSEMBLIES: [Ptr; 1] = const { [std::ptr::without_provenance_mut(9)] };
+    static ASSEMBLIES: [Assembly; 1] = const { [std::ptr::without_provenance(9)] };
 }
 
 fn fault(field: usize) -> Option<Fault> {
@@ -138,17 +142,17 @@ fn field_schema(field: usize) -> (usize, usize, bool) {
     }
 }
 
-unsafe extern "C-unwind" fn assemblies(_: *const raw::Domain, count: *mut usize) -> *const Ptr {
+unsafe extern "C-unwind" fn assemblies(_: *const raw::Domain, count: *mut usize) -> *const Assembly {
     // SAFETY: images() supplies one initialized writable usize count slot.
     unsafe {
         count.write(1);
     }
     ASSEMBLIES.with(|values| values.as_ptr())
 }
-unsafe extern "C-unwind" fn assembly_image(_: Ptr) -> Ptr {
+unsafe extern "C-unwind" fn assembly_image(_: Assembly) -> Image {
     token(10)
 }
-unsafe extern "C-unwind" fn class_from_name(_: *const std::ffi::c_void, namespace: *const c_char, name: *const c_char) -> Class {
+unsafe extern "C-unwind" fn class_from_name(_: Image, namespace: *const c_char, name: *const c_char) -> Class {
     // SAFETY: adapter supplies static, nul-terminated metadata names.
     let (namespace, name) = unsafe { (CStr::from_ptr(namespace), CStr::from_ptr(name)) };
     token(match (namespace, name) {
@@ -171,7 +175,7 @@ unsafe extern "C-unwind" fn class_value(class: *const raw::Class) -> bool {
 unsafe extern "C-unwind" fn class_parent(_: Class) -> Class {
     std::ptr::null_mut()
 }
-unsafe extern "C-unwind" fn class_field(owner: Class, name: *const c_char) -> Ptr {
+unsafe extern "C-unwind" fn class_field(owner: Class, name: *const c_char) -> Field {
     // SAFETY: known metadata names supplied by the reader.
     let name = unsafe { CStr::from_ptr(name) };
     let field = match (owner as usize, name) {
@@ -215,7 +219,7 @@ unsafe extern "C-unwind" fn type_code(ty: crate::game::Type) -> i32 {
         _ => panic!("unexpected primitive type"),
     }
 }
-unsafe extern "C-unwind" fn field_type(field: Ptr) -> crate::game::Type {
+unsafe extern "C-unwind" fn field_type(field: Field) -> crate::game::Type {
     token(TYPE_BASE + field as usize)
 }
 unsafe extern "C-unwind" fn type_class(ty: crate::game::Type) -> Class {
@@ -232,13 +236,13 @@ unsafe extern "C-unwind" fn byref(ty: crate::game::Type) -> bool {
         matches!(fault(ty as usize - TYPE_BASE), Some(Fault::ByRef))
     }
 }
-unsafe extern "C-unwind" fn parent(field: Ptr) -> Class {
+unsafe extern "C-unwind" fn parent(field: Field) -> Class {
     token(match fault(field as usize) {
         Some(Fault::Parent(class)) => class,
         _ => field_schema(field as usize).0,
     })
 }
-unsafe extern "C-unwind" fn flags(field: Ptr) -> i32 {
+unsafe extern "C-unwind" fn flags(field: Field) -> i32 {
     match fault(field as usize) {
         Some(Fault::Flags(flags)) => flags,
         _ => {
@@ -250,7 +254,7 @@ unsafe extern "C-unwind" fn flags(field: Ptr) -> i32 {
         }
     }
 }
-unsafe extern "C-unwind" fn offset(field: Ptr) -> usize {
+unsafe extern "C-unwind" fn offset(field: Field) -> usize {
     if matches!(fault(field as usize), Some(Fault::ThreadStatic)) { usize::MAX } else { 128 }
 }
 unsafe extern "C-unwind" fn object_class(object: *mut raw::Object) -> Class {
@@ -268,7 +272,7 @@ unsafe extern "C-unwind" fn assignable(expected: Class, actual: Class) -> bool {
         || (expected == OBJECT && [MANAGER_CLASS, ACTOR_CLASS, BASE, CHARACTER, UNSUPPORTED_BASE, SHADOW_CHARACTER].contains(&actual))
         || (expected == BASE && [CHARACTER, UNSUPPORTED_BASE, SHADOW_CHARACTER].contains(&actual))
 }
-unsafe extern "C-unwind" fn static_get(field: Ptr, destination: Ptr) {
+unsafe extern "C-unwind" fn static_get(field: Field, destination: Ptr) {
     assert!(fault(field as usize).is_none(), "static destination not validated");
     GRAPH.with_borrow(|graph| match field as usize {
         ONLINE => {
@@ -289,7 +293,7 @@ unsafe extern "C-unwind" fn static_get(field: Ptr, destination: Ptr) {
         _ => panic!("unexpected static field"),
     });
 }
-unsafe extern "C-unwind" fn field_get(object: *mut raw::Object, field: Ptr, destination: Ptr) {
+unsafe extern "C-unwind" fn field_get(object: *mut raw::Object, field: Field, destination: Ptr) {
     rooted(object as usize);
     assert!(fault(field as usize).is_none(), "instance destination not validated");
     GRAPH.with_borrow(|graph| match field as usize {

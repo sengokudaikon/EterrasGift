@@ -11,7 +11,7 @@ pub(super) unsafe fn quantity_offset(access: &RuntimeAccess, owner: Class, name:
         let field = access
             .mutable_field(owner, name, c"Int32", raw::type_code::I4)
             .map_err(|error| unsupported(error.to_string()))?;
-        let offset = (access.field_offset)(field.as_ptr().cast());
+        let offset = (access.field_offset)(field.as_ptr());
         if (access.class_value)(owner) || !offset.is_multiple_of(4) {
             return Err(unsupported("material quantity layout"));
         }

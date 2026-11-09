@@ -96,7 +96,7 @@ unsafe extern "C-unwind" fn object_class(object: *mut raw::Object) -> Class {
 unsafe extern "C-unwind" fn assignable(a: Class, b: Class) -> bool {
     a == b
 }
-unsafe extern "C-unwind" fn class_from_name(_: *const c_void, _: *const c_char, name: *const c_char) -> Class {
+unsafe extern "C-unwind" fn class_from_name(_: Image, _: *const c_char, name: *const c_char) -> Class {
     // SAFETY: Exports passes its static System.Boolean lookup name.
     assert_eq!(unsafe { CStr::from_ptr(name) }, c"Boolean");
     token(BOOLEAN)

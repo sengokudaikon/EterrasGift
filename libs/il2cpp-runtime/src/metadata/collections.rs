@@ -229,7 +229,7 @@ mod tests {
     use super::*;
     use crate::{
         ThreadContext,
-        metadata::{Ptr, Type},
+        metadata::{Field, Image, Ptr, Type},
         test_fakes::{self, corlib, frees, roots, token},
     };
     use std::cell::Cell;
@@ -287,16 +287,16 @@ mod tests {
     unsafe extern "C-unwind" fn assignable(expected: Class, actual: Class) -> bool {
         expected == actual
     }
-    unsafe extern "C-unwind" fn field(_: Class, _: *const std::ffi::c_char) -> Ptr {
+    unsafe extern "C-unwind" fn field(_: Class, _: *const std::ffi::c_char) -> Field {
         token(0x9000)
     }
-    unsafe extern "C-unwind" fn field_type(_: Ptr) -> Type {
+    unsafe extern "C-unwind" fn field_type(_: Field) -> Type {
         token(0xa000)
     }
-    unsafe extern "C-unwind" fn flags(_: Ptr) -> i32 {
+    unsafe extern "C-unwind" fn flags(_: Field) -> i32 {
         FLAGS.get()
     }
-    unsafe extern "C-unwind" fn offset(_: Ptr) -> usize {
+    unsafe extern "C-unwind" fn offset(_: Field) -> usize {
         0
     }
     unsafe extern "C-unwind" fn byref(_: Type) -> bool {
@@ -305,14 +305,14 @@ mod tests {
     unsafe extern "C-unwind" fn type_class(ty: Type) -> Class {
         token(if ty as usize == BASE_TYPE { BASE_CLASS.get() } else { FIELD_CLASS.get() })
     }
-    unsafe extern "C-unwind" fn static_get(_: Ptr, destination: Ptr) {
+    unsafe extern "C-unwind" fn static_get(_: Field, destination: Ptr) {
         READS.set(READS.get() + 1);
         // SAFETY: checked reference metadata supplies one writable pointer slot.
         unsafe {
             destination.cast::<*mut raw::Object>().write(token(CHILD));
         }
     }
-    unsafe extern "C-unwind" fn field_get(_: *mut raw::Object, _: Ptr, destination: Ptr) {
+    unsafe extern "C-unwind" fn field_get(_: *mut raw::Object, _: Field, destination: Ptr) {
         READS.set(READS.get() + 1);
         // SAFETY: the Byte enum reader verified the exact byte storage before this call.
         unsafe {
@@ -329,7 +329,7 @@ mod tests {
         ENUM_BASE_CALLS.set(ENUM_BASE_CALLS.get() + 1);
         token(BASE_TYPE)
     }
-    unsafe extern "C-unwind" fn class_from_name(_: *const std::ffi::c_void, _: *const std::ffi::c_char, name: *const std::ffi::c_char) -> Class {
+    unsafe extern "C-unwind" fn class_from_name(_: Image, _: *const std::ffi::c_char, name: *const std::ffi::c_char) -> Class {
         // SAFETY: production supplies a static, nul-terminated primitive name.
         assert_eq!(unsafe { CStr::from_ptr(name) }, c"Byte");
         token(BYTE_CLASS)

@@ -97,7 +97,12 @@ impl RuntimeAccess {
 mod tests {
     use super::*;
     use crate::game::{Ptr, Type};
-    use il2cpp_runtime::{Exports, ThreadContext, raw, test_fakes::corlib};
+    use il2cpp_runtime::{
+        Exports, ThreadContext,
+        metadata::{Assembly, Field, Image},
+        raw,
+        test_fakes::corlib,
+    };
     use std::{
         cell::Cell,
         ffi::{CString, c_char},
@@ -129,7 +134,7 @@ mod tests {
         static READS: Cell<usize> = const { Cell::new(0) };
         static CONSTANT_LOOKUPS: Cell<usize> = const { Cell::new(0) };
         static ONLINE: Cell<u8> = const { Cell::new(0) };
-        static ASSEMBLIES: [Ptr; 1] = [token(0x5100)];
+        static ASSEMBLIES: [Assembly; 1] = [token::<raw::Assembly>(0x5100).cast_const()];
     }
     fn token<T>(address: usize) -> *mut T {
         std::ptr::without_provenance_mut(address)
@@ -140,17 +145,17 @@ mod tests {
     unsafe extern "C-unwind" fn current() -> *mut raw::Thread {
         token(0x5300)
     }
-    unsafe extern "C-unwind" fn assemblies(_: *const raw::Domain, count: *mut usize) -> *const Ptr {
+    unsafe extern "C-unwind" fn assemblies(_: *const raw::Domain, count: *mut usize) -> *const Assembly {
         // SAFETY: the production query supplies one writable count; immutable TLS storage outlives it.
         unsafe {
             count.write(1);
         }
         ASSEMBLIES.with(|values| values.as_ptr())
     }
-    unsafe extern "C-unwind" fn assembly_image(_: Ptr) -> Ptr {
+    unsafe extern "C-unwind" fn assembly_image(_: Assembly) -> Image {
         token(IMAGE)
     }
-    unsafe extern "C-unwind" fn class_from_name(_: *const std::ffi::c_void, namespace: *const c_char, name: *const c_char) -> Class {
+    unsafe extern "C-unwind" fn class_from_name(_: Image, namespace: *const c_char, name: *const c_char) -> Class {
         // SAFETY: the production adapter supplies valid null-terminated class names.
         let (namespace, name) = unsafe { (CStr::from_ptr(namespace), CStr::from_ptr(name)) };
         match (namespace, name) {
@@ -167,7 +172,7 @@ mod tests {
             _ => panic!("unexpected literal-fixture class lookup"),
         }
     }
-    unsafe extern "C-unwind" fn field(class: Class, _: *const c_char) -> Ptr {
+    unsafe extern "C-unwind" fn field(class: Class, _: *const c_char) -> Field {
         match class as usize {
             OWNER if MISSING.get() => std::ptr::null_mut(),
             OWNER => token(FIELD),
@@ -180,19 +185,19 @@ mod tests {
     unsafe extern "C-unwind" fn parent(class: Class) -> Class {
         if class as usize == OWNER { token(PARENT.get()) } else { std::ptr::null_mut() }
     }
-    unsafe extern "C-unwind" fn field_parent(_: Ptr) -> Class {
+    unsafe extern "C-unwind" fn field_parent(_: Field) -> Class {
         token(DECLARING.get())
     }
-    unsafe extern "C-unwind" fn field_type(field: Ptr) -> Type {
+    unsafe extern "C-unwind" fn field_type(field: Field) -> Type {
         token(if field as usize == FIELD { TY } else { field as usize + 8 })
     }
     unsafe extern "C-unwind" fn byref(_: Type) -> bool {
         BYREF.get()
     }
-    unsafe extern "C-unwind" fn flags(field: Ptr) -> i32 {
+    unsafe extern "C-unwind" fn flags(field: Field) -> i32 {
         if field as usize == FIELD { FLAGS.get() } else { 0x10 }
     }
-    unsafe extern "C-unwind" fn offset(_: Ptr) -> usize {
+    unsafe extern "C-unwind" fn offset(_: Field) -> usize {
         0
     }
     unsafe extern "C-unwind" fn type_class(_: Type) -> Class {
@@ -213,7 +218,7 @@ mod tests {
             drop(CString::from_raw(allocation.cast()));
         }
     }
-    unsafe extern "C-unwind" fn get(field: Ptr, destination: Ptr) {
+    unsafe extern "C-unwind" fn get(field: Field, destination: Ptr) {
         match field as usize {
             FIELD => {
                 READS.set(READS.get() + 1);
