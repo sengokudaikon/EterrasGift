@@ -12,7 +12,7 @@ use eg_companion::settings::{
 use eg_core::settings_service::SettingsService;
 use slint::{ComponentHandle, Timer};
 use spiderland::{CheckedSlice, Intents, Store, Version, Wiring, callbacks};
-use spiderland_slint::{Rows, WindowHost, Windowed, on_wake};
+use spiderland_slint::{Rows, WindowHost, Windowed, ask_before_closing, on_wake};
 use std::any::Any;
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -121,13 +121,7 @@ pub(crate) fn build(window: &MainWindow, settings: Settings, close_first: usize,
 pub(crate) fn bind(window: &MainWindow, store: Store<SettingsPage>) -> Store<SettingsPage> {
     let view = window.global::<SettingsState>();
     // A close always waits here and goes ahead from `Effect::Close`, so it can wait for saves in flight.
-    window.window().on_close_requested({
-        let store = store.clone();
-        move || {
-            store.send(Intent::CloseRequested);
-            slint::CloseRequestResponse::KeepWindowShown
-        }
-    });
+    ask_before_closing(window, &store.intents(), || Some(Intent::CloseRequested));
     callbacks!(view, store, {
         on_save_locations: || Intent::SaveLocations,
         on_retry: || Intent::Retry,
